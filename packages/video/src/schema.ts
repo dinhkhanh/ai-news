@@ -84,6 +84,12 @@ export const sceneSchema = z.object({
   visual: visualSchema,
   /** Provenance for the on-screen attribution line. */
   credit: z.string().nullable().default(null),
+  /**
+   * This scene's own voice-over file (R2 key, resolved to a URL for playback).
+   * Only played when `audio.mixSrc` is null (editor preview before a re-mix);
+   * Lambda renders always use the mixed track.
+   */
+  voiceSrc: z.string().nullable().default(null),
 });
 export type TimelineScene = z.infer<typeof sceneSchema>;
 
@@ -116,5 +122,7 @@ export const timelineSchema = z.object({
   }),
   /** Credits rendered in the outro, e.g. "Video: Pexels · Music: Mubert". */
   attribution: z.array(z.string()).default([]),
+  /** Cover frame chosen in the editor (seconds); null = automatic (~1.2 s in). */
+  coverAtSec: z.number().nonnegative().nullable().default(null),
 });
 export type Timeline = z.infer<typeof timelineSchema>;

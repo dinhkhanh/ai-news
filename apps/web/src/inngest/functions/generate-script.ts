@@ -21,7 +21,8 @@ export const generateScriptFn = inngest.createFunction(
     id: "generate-script",
     triggers: [projectScriptRequested],
     retries: 2,
-    concurrency: [{ limit: 1, key: "event.data.projectId" }, { limit: 8 }],
+    /** Global cap 5 = Inngest free-tier concurrency limit; per-project lock stays at 1. */
+    concurrency: [{ limit: 1, key: "event.data.projectId" }, { limit: 5 }],
     onFailure: async ({ event }) => {
       const { projectId, organizationId, requestedBy } = event.data.event.data;
       const message = event.data.error?.message ?? "script generation failed";

@@ -182,6 +182,29 @@ const SceneFade: React.FC<{ durationFrames: number; children: React.ReactNode }>
   return <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
 };
 
+/**
+ * Editor preview without a mixed track: each scene plays its own voice-over
+ * (delayed by the lead-in the mix would apply) and the music loops underneath
+ * at the ducked gain. Lambda renders always have `audio.mixSrc`.
+ */
+const PreviewAudio: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
+  const { fps } = useVideoConfig();
+  const music = timeline.audio.musicSrc;
+  const gain = Math.pow(10, timeline.audio.musicGainDb / 20);
+  return (
+    <>
+      {timeline.scenes.map((scene, i) =>
+        scene.voiceSrc ? (
+          <Sequence key={`vo-${scene.id}`} from={scene.from + (i === 0 ? Math.round(0.25 * fps) : 0)} durationInFrames={scene.durationFrames} name={`vo ${scene.id}`}>
+            <Audio src={scene.voiceSrc} />
+          </Sequence>
+        ) : null,
+      )}
+      {music ? <Audio src={music} loop volume={Math.min(1, gain)} /> : null}
+    </>
+  );
+};
+
 export const News: React.FC<Timeline> = (timeline) => {
   const { brand, scenes, captions, audio } = timeline;
   const last = useMemo(() => scenes[scenes.length - 1], [scenes]);
@@ -201,7 +224,7 @@ export const News: React.FC<Timeline> = (timeline) => {
       <SourceLine name={timeline.source.name} brand={brand} />
       <Logo brand={brand} />
       <Progress brand={brand} />
-      {audio.mixSrc ? <Audio src={audio.mixSrc} /> : null}
+      {audio.mixSrc ? <Audio src={audio.mixSrc} /> : <PreviewAudio timeline={timeline} />}
     </AbsoluteFill>
   );
 };

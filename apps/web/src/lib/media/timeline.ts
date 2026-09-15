@@ -6,7 +6,7 @@
  */
 import { timelineSchema, type Brand, type Timeline, type Visual } from "@ai-news/video/schema";
 import type { TimedWord } from "./align";
-import { chunkCaptions } from "./captions";
+import { chunkCaptions, type CaptionChunk } from "./captions";
 
 export type SceneVoiceInput = { key: string; durationMs: number; words: TimedWord[] };
 export type SceneVisualInput =
@@ -19,9 +19,22 @@ export type BuildInput = {
   language: "vi" | "en";
   source: { name: string | null; url: string };
   brand: Brand;
-  scenes: Array<{ id: string; kind: "hook" | "body" | "cta"; onScreenText: string; durationSec: number; voice: SceneVoiceInput | null; visual: SceneVisualInput }>;
+  scenes: Array<{
+    id: string;
+    kind: "hook" | "body" | "cta";
+    onScreenText: string;
+    durationSec: number;
+    voice: SceneVoiceInput | null;
+    visual: SceneVisualInput;
+    /** Extra hold after the voice-over ends (editor), 0–5000 ms. */
+    holdMs?: number;
+    /** Caption chunks relative to this scene's voice start; default = automatic chunking of `voice.words`. */
+    captions?: CaptionChunk[];
+  }>;
   music: { key: string; gainDb?: number; attribution: string } | null;
   audio: { mixKey: string | null; voiceKey: string | null };
+  /** Cover frame chosen in the editor; null = automatic. */
+  coverAtSec?: number | null;
   /** Silence between scenes and after the last one. */
   gapMs?: number;
   tailMs?: number;
@@ -41,7 +54,8 @@ export function sceneTimings(input: Pick<BuildInput, "scenes" | "gapMs" | "tailM
   const timings: SceneTiming[] = input.scenes.map((s, i) => {
     const last = i === input.scenes.length - 1;
     const voiceMs = s.voice?.durationMs ?? Math.round(s.durationSec * 1000);
-    const durationMs = (i === 0 ? lead : 0) + voiceMs + (last ? tail : gap);
+    const hold = Math.min(5000, Math.max(0, Math.round(s.holdMs ?? 0)));
+    const durationMs = (i === 0 ? lead : 0) + voiceMs + hold + (last ? tail : gap);
     const fromFrame = Math.round((cursorMs / 1000) * FPS);
     const endFrame = Math.round(((cursorMs + durationMs) / 1000) * FPS);
     const t = { id: s.id, atSec: (cursorMs + (i === 0 ? lead : 0)) / 1000, fromFrame, durationFrames: Math.max(1, endFrame - fromFrame), durationMs };
@@ -61,14 +75,14 @@ export function buildTimeline(input: BuildInput): { timeline: Timeline; duration
     else if (s.visual?.kind === "image") visual = { kind: "image", src: s.visual.key, kenBurns: true };
     else visual = { kind: "solid" };
     if (s.visual?.credit) credits.add(s.visual.credit);
-    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual, credit: s.visual?.credit ?? null };
+    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual, credit: s.visual?.credit ?? null, voiceSrc: s.voice?.key ?? null };
   });
-  const words: TimedWord[] = input.scenes.flatMap((s, i) => {
+  const captions = input.scenes.flatMap((s, i) => {
     if (!s.voice) return [];
     const off = Math.round(timings[i].atSec * 1000);
-    return s.voice.words.map((w) => ({ w: w.w, s: w.s + off, e: w.e + off }));
+    const chunks = s.captions ?? chunkCaptions(s.voice.words);
+    return chunks.map((c) => ({ text: c.text, startMs: c.startMs + off, endMs: c.endMs + off, words: c.words.map((w) => ({ w: w.w, s: w.s + off, e: w.e + off })) }));
   });
-  const captions = chunkCaptions(words).map((c) => ({ text: c.text, startMs: c.startMs, endMs: c.endMs, words: c.words }));
   if (input.music) credits.add(input.music.attribution);
   const timeline = timelineSchema.parse({
     version: 1,
@@ -84,6 +98,7 @@ export function buildTimeline(input: BuildInput): { timeline: Timeline; duration
     captions,
     audio: { mixSrc: input.audio.mixKey, voiceSrc: input.audio.voiceKey, musicSrc: input.music?.key ?? null, musicGainDb: input.music?.gainDb ?? -12 },
     attribution: [...credits],
+    coverAtSec: input.coverAtSec ?? null,
   });
   return { timeline, durationSec, timings };
 }

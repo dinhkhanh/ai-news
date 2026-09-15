@@ -27,7 +27,8 @@ export const renderProjectFn = inngest.createFunction(
     id: "render-project",
     triggers: [projectRenderRequested],
     retries: 1,
-    concurrency: [{ limit: 1, key: "event.data.projectId" }, { limit: 6 }],
+    /** Global cap 5 = Inngest free-tier concurrency limit; per-project lock stays at 1. */
+    concurrency: [{ limit: 1, key: "event.data.projectId" }, { limit: 5 }],
     onFailure: async ({ event }) => {
       const { projectId, organizationId, requestedBy } = event.data.event.data;
       const message = event.data.error?.message ?? "render failed";
@@ -56,7 +57,16 @@ export const renderProjectFn = inngest.createFunction(
           .insert(schema.renders)
           .values({ organizationId, projectId, timelineId: timeline.id, timelineVersion: timeline.version, status: "queued", requestedBy })
           .returning({ id: schema.renders.id });
-        return { renderId: render.id, timelineId: timeline.id, timelineVersion: timeline.version, timeline: timeline.json as unknown as Timeline, title: project.title ?? "ai-news", durationSec: Number(timeline.durationSec ?? 0) };
+        return {
+          renderId: render.id,
+          timelineId: timeline.id,
+          timelineVersion: timeline.version,
+          timeline: timeline.json as unknown as Timeline,
+          title: project.title ?? "ai-news",
+          durationSec: Number(timeline.durationSec ?? 0),
+          /** Only a render of the approved version advances the project (docs/PLAN.md §4.8); others are previews. */
+          approved: project.approvedTimelineId === timeline.id,
+        };
       });
     });
     const rawKey = r2Key.tmp(organizationId, projectId, `render-${input.renderId}-raw.mp4`);
@@ -94,7 +104,8 @@ export const renderProjectFn = inngest.createFunction(
       const t0 = Date.now();
       const norm = await invokeMediaLambda({ action: "loudnorm", input: { key: rawKey }, output: { key: outKey }, targetLufs: -14, truePeak: -1 });
       if (!norm.ok) throw new Error(`loudnorm failed: ${norm.error}`);
-      const cover = await invokeMediaLambda({ action: "cover", input: { key: outKey }, output: { key: coverKey }, atSec: Math.min(1.2, durationSec / 3) });
+      const coverAt = input.timeline.coverAtSec != null ? Math.min(Math.max(0, input.timeline.coverAtSec), Math.max(0, durationSec - 0.2)) : Math.min(1.2, durationSec / 3);
+      const cover = await invokeMediaLambda({ action: "cover", input: { key: outKey }, output: { key: coverKey }, atSec: coverAt });
       const qa: MediaResult = await invokeMediaLambda({
         action: "probe",
         input: { key: outKey },
@@ -123,15 +134,17 @@ export const renderProjectFn = inngest.createFunction(
             error: passed ? null : (post.qa.error ?? "QA probe failed: " + Object.entries(post.qa.checks ?? {}).filter(([, c]) => !c.ok).map(([k, c]) => `${k} expected ${String(c.expected)} got ${String(c.actual)}`).join("; ")),
           })
           .where(eq(schema.renders.id, input.renderId));
-        await tx.update(schema.projects).set({ state: passed ? "rendered" : "composed", busyStep: null, lastError: passed ? null : "Render QA failed; see the render row" }).where(eq(schema.projects.id, projectId));
+        const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
+        const state = passed && input.approved ? "rendered" : project?.state;
+        await tx.update(schema.projects).set({ state, busyStep: null, lastError: passed ? null : "Render QA failed; see the render row" }).where(eq(schema.projects.id, projectId));
       });
       await recordUsageCost({ provider: "remotion_lambda", resource: "News", units: durationSec, unitType: "render_seconds", costUsd: remotionCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId, meta: { renderSeconds, functionName: env().REMOTION_FUNCTION_NAME } });
       await recordUsageCost({ provider: "media_lambda", resource: "loudnorm+cover+probe", units: post.lambdaMs / 1000, unitType: "seconds", costUsd: mediaCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId });
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: passed ? "render.completed" : "render.qa_failed",
-        payload: { renderId: input.renderId, timelineVersion: input.timelineVersion, durationSec: post.qa.probe?.durationSec ?? null, lufs: post.qa.probe?.integratedLufs ?? null, costUsd, renderSeconds, checks: post.qa.checks ?? null },
+        payload: { renderId: input.renderId, timelineVersion: input.timelineVersion, approved: input.approved, durationSec: post.qa.probe?.durationSec ?? null, lufs: post.qa.probe?.integratedLufs ?? null, costUsd, renderSeconds, checks: post.qa.checks ?? null },
       });
-      await notifySlack(`${passed ? ":clapper: Render done" : ":warning: Render QA failed"} — ${input.title} (${durationSec.toFixed(0)}s, $${costUsd.toFixed(3)}) ${env().APP_URL}/app/projects/${projectId}`);
+      await notifySlack(`${passed ? (input.approved ? ":clapper: Render done" : ":clapper: Preview render done") : ":warning: Render QA failed"} — ${input.title} (${durationSec.toFixed(0)}s, $${costUsd.toFixed(3)}) ${env().APP_URL}/app/projects/${projectId}`);
     });
 
     return { renderId: input.renderId, outKey, passed: post.qa.ok && post.qa.passed };

@@ -80,10 +80,12 @@ async function main() {
   await sql`update projects set busy_step = 'render', last_error = null where id = ${projectId}`;
   const evt = await inngest.send(projectRenderRequested.create(ctx));
   console.log(`sent ${evt.ids[0]} (render)`);
-  await waitFor(projectId, evt.ids[0], (x) => !x.busy_step && (x.state === "rendered" || Boolean(x.last_error)), "render");
-  const [r] = await sql<{ id: string; status: string; output_path: string | null; cover_path: string | null; duration_sec: string | null; cost_usd: string | null; render_seconds: string | null; qa_json: { probe?: unknown; checks?: unknown; error?: string } | null; error: string | null }[]>`
-    select id, status, output_path, cover_path, duration_sec, cost_usd, render_seconds, qa_json, error from renders where project_id = ${projectId} order by created_at desc limit 1`;
-  console.log(`\n=== render ${r.id} status=${r.status} ${r.duration_sec}s $${r.cost_usd} in ${r.render_seconds}s`);
+  // Phase 4: only a render of the approved timeline moves the project to `rendered`; other renders are previews.
+  await waitFor(projectId, evt.ids[0], (x) => !x.busy_step, "render");
+  const [r] = await sql<{ id: string; status: string; timeline_id: string | null; timeline_version: number | null; output_path: string | null; cover_path: string | null; duration_sec: string | null; cost_usd: string | null; render_seconds: string | null; qa_json: { probe?: unknown; checks?: unknown; error?: string } | null; error: string | null }[]>`
+    select id, status, timeline_id, timeline_version, output_path, cover_path, duration_sec, cost_usd, render_seconds, qa_json, error from renders where project_id = ${projectId} order by created_at desc limit 1`;
+  const [pp] = await sql<{ state: string; approved_timeline_id: string | null }[]>`select state, approved_timeline_id from projects where id = ${projectId}`;
+  console.log(`\n=== render ${r.id} status=${r.status} timeline v${r.timeline_version} (${r.timeline_id === pp.approved_timeline_id ? "approved" : "preview"}) ${r.duration_sec}s $${r.cost_usd} in ${r.render_seconds}s → project state=${pp.state}`);
   console.log("output:", r.output_path, "cover:", r.cover_path);
   console.log("probe:", JSON.stringify(r.qa_json?.probe));
   console.log("checks:", JSON.stringify(r.qa_json?.checks));

@@ -36,6 +36,13 @@
       "when": 1789508621020,
       "tag": "0004_phase3_media_render",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789511152116,
+      "tag": "0005_phase4_editor",
+      "breakpoints": true
     }
   ]
 }

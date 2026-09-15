@@ -22,7 +22,8 @@ export const fetchArticleFn = inngest.createFunction(
     id: "fetch-article",
     triggers: [projectFetchRequested],
     retries: 1,
-    concurrency: [{ limit: 1, key: "event.data.projectId" }, { limit: 10 }],
+    /** Global cap 5 = Inngest free-tier concurrency limit; per-project lock stays at 1. */
+    concurrency: [{ limit: 1, key: "event.data.projectId" }, { limit: 5 }],
     onFailure: async ({ event }) => {
       const { projectId, organizationId, requestedBy } = event.data.event.data;
       const message = event.data.error?.message ?? "fetch failed";

@@ -88,6 +88,24 @@ export const projectRenderRequested = eventType("project/render.requested", {
   }),
 });
 
+/** Phase 4 editor: redo one scene's B-roll or voice-over, or pick new music, then store a new timeline version. */
+export const projectSceneRegenerateRequested = eventType("project/scene.regenerate.requested", {
+  schema: z.object({
+    projectId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    /** Version to build on; must still be the latest when the result is saved. */
+    timelineId: z.string(),
+    what: z.enum(["broll", "voice", "music"]),
+    /** Scene for broll/voice. */
+    sceneId: z.string().optional(),
+    /** Edited spoken text for a voice regeneration; default = the scene's current text. */
+    voiceover: z.string().max(2000).optional(),
+    /** Replacement English search terms for a B-roll regeneration. */
+    brollTerms: z.array(z.string().max(80)).max(6).optional(),
+  }),
+});
+
 /** Admin: run a prompt template version against the eval set. */
 export const promptEvalRequested = eventType("prompt/eval.requested", {
   schema: z.object({

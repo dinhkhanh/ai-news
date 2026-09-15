@@ -41,7 +41,7 @@ describe("migrations", () => {
       "projects", "articles", "scripts", "assets", "timelines", "renders", "channels", "channel_grants",
       "publications", "brand_kits", "voice_presets", "pronunciations", "prompt_templates", "music_library",
       "integrations", "quotas", "activity_events", "usage_costs", "allowed_domains", "feature_flags",
-      "eval_articles", "prompt_evals",
+      "eval_articles", "prompt_evals", "comments", "project_reviews",
     ]) {
       expect(names, `missing table ${t}`).toContain(t);
     }
@@ -52,7 +52,7 @@ describe("migrations", () => {
       "select relname, relrowsecurity from pg_class where relkind='r' and relnamespace='public'::regnamespace",
     );
     const rls = Object.fromEntries(rows.map((r) => [r.relname, r.relrowsecurity]));
-    for (const t of ["projects", "articles", "scripts", "assets", "timelines", "renders", "channels", "channel_grants", "publications", "brand_kits", "activity_events", "usage_costs"]) {
+    for (const t of ["projects", "articles", "scripts", "assets", "timelines", "renders", "channels", "channel_grants", "publications", "brand_kits", "activity_events", "usage_costs", "comments", "project_reviews"]) {
       expect(rls[t], `RLS off on ${t}`).toBe(true);
     }
     const { rows: pol } = await pg.query<{ n: number }>("select count(*)::int as n from pg_policies");
@@ -88,6 +88,13 @@ describe("migrations", () => {
       "select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='projects' and column_name in ('busy_step','duration_sec','tone')) or (table_name='articles' and column_name in ('confirmed_at','confirmed_by','word_count','updated_at')))",
     );
     expect(rows.length).toBe(7);
+  });
+
+  it("add the phase 4 approval and timeline lineage columns", async () => {
+    const { rows } = await pg.query<{ table_name: string; column_name: string }>(
+      "select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='projects' and column_name in ('approved_timeline_id','approved_by','approved_at')) or (table_name='timelines' and column_name in ('parent_id','kind','changes')))",
+    );
+    expect(rows.length).toBe(6);
   });
 
   it("bump lock_version on project updates", async () => {

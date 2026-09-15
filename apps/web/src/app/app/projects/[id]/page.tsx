@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ScriptReview } from "@/components/script-review";
+import { ReviewPanel } from "@/components/review-panel";
 import { TimelineSummary, type BuildJson } from "@/components/timeline-summary";
 import type { Timeline } from "@ai-news/video/schema";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,7 @@ import type { StoredFaithfulness, StoredScript } from "@/lib/llm/schemas";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { busyIsStale, busyStep } from "@/lib/project-state";
 import { presignGet } from "@/lib/r2";
+import { canApprove, needsFaithfulnessOverride } from "@/lib/review";
 import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { dailyLimit, usedToday } from "@/lib/quota";
@@ -30,9 +32,12 @@ const STATE_LABEL: Record<string, string> = {
   fetched: "Đã lấy bài",
   scripted: "Đã có kịch bản",
   composed: "Đã dựng timeline",
+  in_review: "Chờ duyệt",
+  approved: "Đã duyệt",
   rendered: "Đã kết xuất",
   failed: "Lỗi",
 };
+const KIND_LABEL: Record<string, string> = { built: "dựng", edited: "sửa", regenerated: "tạo lại" };
 const RENDER_LABEL: Record<string, string> = { queued: "chờ", rendering: "đang kết xuất", post_processing: "hậu kỳ + QA", qa_failed: "QA không đạt", done: "xong", failed: "lỗi" };
 
 function PresetFields({ durationSec, tone }: { durationSec: number; tone: string }) {
@@ -75,10 +80,18 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     const scripts = await tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) });
     const timelines = await tx.query.timelines.findMany({ where: eq(schema.timelines.projectId, id), orderBy: desc(schema.timelines.version) });
     const renders = await tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) });
-    return { project, article, scripts, timelines, renders };
+    const reviews = await tx
+      .select({ id: schema.projectReviews.id, action: schema.projectReviews.action, note: schema.projectReviews.note, timelineVersion: schema.projectReviews.timelineVersion, faithfulnessOverride: schema.projectReviews.faithfulnessOverride, createdAt: schema.projectReviews.createdAt, actorName: schema.user.name })
+      .from(schema.projectReviews)
+      .leftJoin(schema.user, eq(schema.user.id, schema.projectReviews.actorId))
+      .where(eq(schema.projectReviews.projectId, id))
+      .orderBy(desc(schema.projectReviews.createdAt))
+      .limit(10);
+    const [{ openComments }] = await tx.select({ openComments: count() }).from(schema.comments).where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt)));
+    return { project, article, scripts, timelines, renders, reviews, openComments };
   });
   if (!data) notFound();
-  const { project, article, scripts, timelines, renders } = data;
+  const { project, article, scripts, timelines, renders, reviews, openComments } = data;
   const selectedTimeline = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   const timelineJson = selectedTimeline ? (selectedTimeline.json as unknown as Timeline) : null;
   const sign = async (key: string | null | undefined, ttl = 900) => {
@@ -321,24 +334,36 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             {timelines.length > 1 ? (
               <div className="flex flex-wrap gap-1 text-xs">
                 {timelines.map((t) => (
-                  <Link key={t.id} href={`/app/projects/${project.id}?v=${sp.v ?? ""}&t=${t.version}`} className={`rounded-full border px-2 py-0.5 ${selectedTimeline?.id === t.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
-                    timeline v{t.version}
+                  <Link key={t.id} href={`/app/projects/${project.id}?v=${sp.v ?? ""}&t=${t.version}`} title={t.changes.join(" · ")} className={`rounded-full border px-2 py-0.5 ${selectedTimeline?.id === t.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+                    v{t.version} · {KIND_LABEL[t.kind] ?? t.kind}
+                    {t.id === project.approvedTimelineId ? " ✓" : ""}
                   </Link>
                 ))}
               </div>
             ) : null}
             {timelineJson && selectedTimeline ? (
               <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" render={<Link href={`/app/projects/${project.id}/edit?t=${selectedTimeline.version}`} />}>
+                    {writer ? "Mở trình chỉnh sửa" : "Xem trước trong trình chỉnh sửa"}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Xem trước, đổi thứ tự / clip / phụ đề, đọc lại lời, chọn ảnh bìa, bình luận, gửi duyệt.
+                    {openComments ? ` ${openComments} bình luận mở.` : ""}
+                    {selectedTimeline.changes.length ? ` Thay đổi v${selectedTimeline.version}: ${selectedTimeline.changes.slice(0, 3).join(" · ")}.` : ""}
+                  </span>
+                </div>
                 <TimelineSummary timeline={timelineJson} build={selectedTimeline.buildJson as BuildJson} imageUrls={imageUrls} mixUrl={mixUrl} />
                 {writer ? (
                   <ActionForm action={requestRender} className="flex flex-wrap items-center gap-3 border-t pt-3">
                     <input type="hidden" name="projectId" value={project.id} />
                     <input type="hidden" name="timelineId" value={selectedTimeline.id} />
-                    <Button type="submit" disabled={busy}>
-                      Kết xuất timeline v{selectedTimeline.version}
+                    <Button type="submit" disabled={busy} variant={selectedTimeline.id === project.approvedTimelineId ? "default" : "outline"}>
+                      {selectedTimeline.id === project.approvedTimelineId ? `Kết xuất bản duyệt v${selectedTimeline.version}` : `Kết xuất thử v${selectedTimeline.version}`}
                     </Button>
                     <span className="text-xs text-muted-foreground">
                       Remotion Lambda → chuẩn hoá −14 LUFS → QA. Hôm nay đã dùng {renderUsed}/{renderLimit} phút kết xuất.
+                      {selectedTimeline.id !== project.approvedTimelineId ? " Bản chưa duyệt chỉ là kết xuất thử." : ""}
                     </span>
                   </ActionForm>
                 ) : null}
@@ -346,6 +371,34 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             ) : !busy ? (
               <p className="text-sm text-muted-foreground">Chưa có timeline. Bấm “Dựng” để tạo lời đọc, B-roll và nhạc từ kịch bản đã chọn.</p>
             ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ---------------- Review / approval (phase 4) ---------------- */}
+      {timelines.length ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Duyệt</CardTitle>
+            <CardDescription>Người dựng gửi phiên bản mới nhất; publisher duyệt hoặc trả lại. Mọi bước được ghi log; cảnh không căn cứ cần publisher xác nhận bỏ qua.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ReviewPanel
+              projectId={project.id}
+              state={project.state}
+              latestTimeline={{ id: timelines[0].id, version: timelines[0].version }}
+              approvedTimelineId={project.approvedTimelineId}
+              canEdit={writer}
+              canApprove={canApprove(ws)}
+              busy={busy}
+              needsOverride={needsFaithfulnessOverride(scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0])}
+              faithfulnessCounts={(() => {
+                const f = (scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0])?.faithfulnessJson as StoredFaithfulness | null | undefined;
+                return f && "counts" in f ? f.counts : null;
+              })()}
+              sensitiveTopic={project.sensitiveTopic}
+              reviews={reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
+            />
           </CardContent>
         </Card>
       ) : null}
@@ -380,6 +433,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                         {r.renderSeconds ? ` · ${Number(r.renderSeconds).toFixed(0)} s render` : ""}
                       </span>
                       {r.pinned ? <Badge variant="outline">đã ghim</Badge> : null}
+                      {r.timelineId && r.timelineId === project.approvedTimelineId ? <Badge>bản duyệt</Badge> : <Badge variant="outline">kết xuất thử</Badge>}
                     </div>
                     <div className="flex flex-wrap gap-1 text-xs">
                       {Object.entries(checks).map(([k, c]) => (

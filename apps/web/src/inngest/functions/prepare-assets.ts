@@ -8,16 +8,14 @@ import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
 import type { StoredScript } from "@/lib/llm/schemas";
 import { loadBrand } from "@/lib/media/brand";
+import { fetchSceneBroll, type ChosenAsset, type SceneStock } from "@/lib/media/broll";
+import { audioSignature, buildFromDoc, editorDocSchema, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { pickMusic } from "@/lib/media/music";
-import { rankCandidates } from "@/lib/media/rank";
-import { downloadToR2, searchStock, stockProvidersAvailable, type StockCandidate } from "@/lib/media/stock";
-import { buildTimeline, sceneTimings, type SceneVisualInput } from "@/lib/media/timeline";
+import { mixDocAudio } from "@/lib/media/remix";
+import { downloadToR2, stockProvidersAvailable } from "@/lib/media/stock";
+import { sceneTimings } from "@/lib/media/timeline";
 import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice } from "@/lib/media/tts";
-import { invokeMediaLambda } from "@/lib/media-lambda";
 import { deleteObject, r2Key } from "@/lib/r2";
-
-type ChosenAsset = { assetId: string; key: string; kind: "video" | "image"; durationSec: number | null; credit: string | null; provider: string; thumbnailUrl: string | null };
-type SceneStock = { selected: ChosenAsset | null; alternates: ChosenAsset[]; searched: number; errors: string[]; rankCostUsd: number };
 
 const ext = (url: string, fallback: string) => {
   const m = /\.(jpe?g|png|webp|mp4|mov)(?:$|\?)/i.exec(url);
@@ -132,59 +130,7 @@ export const prepareAssetsFn = inngest.createFunction(
             step.run(`stock-${sc.id}`, async (): Promise<[string, SceneStock]> => {
               const voice = voices.find((v) => v.sceneId === sc.id);
               const wantSec = (voice?.durationMs ?? sc.durationSec * 1000) / 1000;
-              const { candidates, errors } = await searchStock(sc.brollTerms.slice(0, 3), { perTerm: 4, wantSec });
-              if (candidates.length === 0) return [sc.id, { selected: null, alternates: [], searched: 0, errors, rankCostUsd: 0 }];
-              let ranked: Array<StockCandidate & { score: number; reason: string }>;
-              let rankCostUsd = 0;
-              try {
-                const r = await rankCandidates({ voiceover: sc.voiceover, onScreenText: sc.onScreenText, brollTerms: sc.brollTerms }, candidates.slice(0, 8), pctx);
-                ranked = r.ranked;
-                rankCostUsd = r.costUsd;
-              } catch (e) {
-                errors.push(`rank: ${(e as Error).message}`);
-                ranked = candidates.slice(0, 8).map((c) => ({ ...c, score: 0, reason: "unranked" }));
-              }
-              const chosen: ChosenAsset[] = [];
-              for (const c of ranked) {
-                if (chosen.length >= 2) break;
-                if (c.score < 15 && chosen.length > 0) break;
-                try {
-                  // Dedupe org-wide by provider id first (no download), then by content hash.
-                  const existing = await withOrgContext(ctx, (tx) =>
-                    tx.query.assets.findFirst({ where: and(eq(schema.assets.organizationId, organizationId), eq(schema.assets.provider, c.provider), eq(schema.assets.providerId, c.providerId)) }),
-                  );
-                  let key = existing?.r2Path ?? media(`broll/${input.buildId}-${sc.id}-${c.provider}-${c.providerId}.${ext(c.downloadUrl, "mp4")}`);
-                  let hash = existing?.hash ?? null;
-                  let sizeBytes = existing?.sizeBytes ?? null;
-                  let mime = existing?.mime ?? "video/mp4";
-                  if (!existing) {
-                    const dl = await downloadToR2(c.downloadUrl, key);
-                    hash = dl.hash;
-                    sizeBytes = dl.sizeBytes;
-                    mime = dl.contentType;
-                    const dup = await withOrgContext(ctx, (tx) => tx.query.assets.findFirst({ where: and(eq(schema.assets.organizationId, organizationId), eq(schema.assets.hash, dl.hash)) }));
-                    if (dup) {
-                      await deleteObject(key).catch(() => {});
-                      key = dup.r2Path;
-                    }
-                  }
-                  const credit = `Video: ${c.author ? `${c.author} / ` : ""}${c.provider === "pexels" ? "Pexels" : "Pixabay"}`;
-                  const [row] = await withOrgContext(ctx, (tx) =>
-                    tx
-                      .insert(schema.assets)
-                      .values({
-                        organizationId, projectId, origin: "stock", provider: c.provider, providerId: c.providerId, licence: c.licence, licenceUrl: c.licenceUrl, sourceUrl: c.pageUrl, r2Path: key, hash, mime,
-                        width: c.width, height: c.height, durationSec: c.durationSec.toFixed(2), sizeBytes, searchTerm: c.searchTerm, rankScore: c.score.toFixed(2), rankReason: c.reason, sceneId: sc.id, selected: chosen.length === 0, thumbnailUrl: c.thumbnailUrl, attribution: credit,
-                        meta: { buildId: input.buildId, author: c.author },
-                      })
-                      .returning({ id: schema.assets.id }),
-                  );
-                  chosen.push({ assetId: row.id, key, kind: "video", durationSec: c.durationSec, credit, provider: c.provider, thumbnailUrl: c.thumbnailUrl });
-                } catch (e) {
-                  errors.push(`${c.provider}:${c.providerId}: ${(e as Error).message.slice(0, 200)}`);
-                }
-              }
-              return [sc.id, { selected: chosen[0] ?? null, alternates: chosen.slice(1), searched: candidates.length, errors, rankCostUsd }];
+              return [sc.id, await fetchSceneBroll(sc, { wantSec, buildId: input.buildId }, pctx)];
             }),
           ),
       );
@@ -195,75 +141,81 @@ export const prepareAssetsFn = inngest.createFunction(
     const preTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })) });
     const music = await step.run("music", () => pickMusic({ tone: input.tone, durationSec: preTiming.durationSec, r2Key: media(`music/${input.buildId}.mp3`) }, pctx));
 
-    /* ---- audio mix (media Lambda) ---- */
-    const mixKeys = { mixKey: media(`mix/${input.buildId}.wav`), voiceKey: media(`mix/${input.buildId}-vo.wav`) };
-    const mix = await step.run("mix", async () => {
-      const res = await invokeMediaLambda({
-        action: "mix",
-        input: {
-          voice: voices.map((v) => ({ key: v.key, atSec: preTiming.timings.find((t) => t.id === v.sceneId)!.atSec })),
-          music: music.pick ? { key: music.pick.key, gainDb: -12, fadeOutSec: 1.5 } : null,
-        },
-        output: { key: mixKeys.mixKey, voiceKey: mixKeys.voiceKey },
-        durationSec: preTiming.durationSec,
-        voiceLufs: -16,
-        duckDb: -12,
-      });
-      if (!res.ok) throw new Error(`audio mix failed: ${res.error ?? "unknown"}`);
-      return { integratedLufs: res.integratedLufs ?? null, billedMs: res.billedMs ?? null };
-    });
-
-    /* ---- timeline version ---- */
-    const stored = await step.run("store-timeline", async () => {
+    /* ---- editor document (docs/PLAN.md §4.7): the source every later version is rebuilt from ---- */
+    const doc: EditorDoc = await step.run("compose-doc", async () => {
       let imageIdx = 0;
-      const nextImage = (): SceneVisualInput => {
-        if (!aroll.length) return null;
+      const nextImage = (): EditorScene["visual"] => {
+        if (!aroll.length) return { kind: "solid" };
         const im = aroll[imageIdx % aroll.length];
         imageIdx += 1;
-        return { kind: "image", key: im.key, credit: im.credit };
+        return { kind: "image", key: im.key, kenBurns: true, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl };
       };
-      const scenes = input.scenes.map((sc) => {
+      const scenes: EditorScene[] = input.scenes.map((sc) => {
         const v = voices.find((x) => x.sceneId === sc.id) ?? null;
         const st = stock[sc.id]?.selected ?? null;
-        const visual: SceneVisualInput = st ? { kind: "video", key: st.key, clipDurationSec: st.durationSec ?? 5, credit: st.credit } : nextImage();
-        return { id: sc.id, kind: sc.kind, onScreenText: sc.onScreenText, durationSec: sc.durationSec, voice: v ? { key: v.key, durationMs: v.durationMs, words: v.words } : null, visual };
+        const visual: EditorScene["visual"] = st
+          ? { kind: "video", key: st.key, clipDurationSec: st.durationSec ?? 5, trimStartSec: 0, credit: st.credit, assetId: st.assetId, thumbnailUrl: st.thumbnailUrl }
+          : nextImage();
+        return {
+          id: sc.id,
+          kind: sc.kind,
+          onScreenText: sc.onScreenText,
+          voiceover: v?.spokenText ?? sc.voiceover,
+          brollTerms: sc.brollTerms,
+          durationSec: sc.durationSec,
+          voice: v ? { key: v.key, durationMs: v.durationMs, words: v.words } : null,
+          visual,
+          holdMs: 0,
+          captions: null,
+        };
       });
-      const { timeline, durationSec } = buildTimeline({
+      return editorDocSchema.parse({
+        v: 1,
         title: input.title,
         language: input.language,
         source: input.source,
         brand: brand.brand,
         scenes,
-        music: music.pick ? { key: music.pick.key, gainDb: -12, attribution: music.pick.attribution } : null,
-        audio: mixKeys,
+        music: music.pick ? { key: music.pick.key, gainDb: -12, attribution: music.pick.attribution, title: music.pick.title, source: music.pick.source, licence: music.pick.licence } : null,
+        coverAtSec: null,
       });
+    });
+
+    /* ---- audio mix (media Lambda) ---- */
+    const mix = await step.run("mix", () => mixDocAudio(doc, pctx, input.buildId));
+
+    /* ---- timeline version ---- */
+    const stored = await step.run("store-timeline", async () => {
+      const { timeline, durationSec } = buildFromDoc(doc, { mixKey: mix.mixKey, voiceKey: mix.voiceKey });
       const buildJson = {
         buildId: input.buildId,
         scriptVersion: input.scriptVersion,
-        voice: { preset: voiceSetup.preset.voice, scenes: voices.map((v) => ({ sceneId: v.sceneId, durationMs: v.durationMs, timing: v.timing, matched: v.matched, words: v.words.length, chars: v.chars, pronunciations: v.pronunciationsApplied, costUsd: v.costUsd })) },
+        voice: { preset: voiceSetup.preset.voice, scenes: voices.map((v) => ({ sceneId: v.sceneId, key: v.key, durationMs: v.durationMs, timing: v.timing, matched: v.matched, words: v.words.length, chars: v.chars, spokenText: v.spokenText, pronunciations: v.pronunciationsApplied, costUsd: v.costUsd })) },
         stock: Object.fromEntries(Object.entries(stock).map(([id, s]) => [id, { selected: s.selected, alternates: s.alternates, searched: s.searched, errors: s.errors, rankCostUsd: s.rankCostUsd }])),
         stockEnabled,
         aroll: aroll.map((a) => ({ assetId: a.assetId, key: a.key })),
         music: music.pick ? { source: music.pick.source, title: music.pick.title, licence: music.pick.licence, key: music.pick.key } : null,
         musicError: music.error,
-        mix: { ...mix, ...mixKeys },
+        mix: { mixKey: mix.mixKey, voiceKey: mix.voiceKey, integratedLufs: mix.integratedLufs, signature: audioSignature(doc), reused: false },
         brandKitId: brand.id,
+        doc,
       };
       const row = await withOrgContext(ctx, async (tx) => {
         const latest = await tx.query.timelines.findFirst({ where: eq(schema.timelines.projectId, projectId), orderBy: desc(schema.timelines.version) });
         const [t] = await tx
           .insert(schema.timelines)
-          .values({ organizationId, projectId, version: (latest?.version ?? 0) + 1, json: timeline as unknown as Record<string, unknown>, scriptId: input.scriptId, durationSec: durationSec.toFixed(2), buildJson, createdBy: requestedBy })
+          .values({ organizationId, projectId, version: (latest?.version ?? 0) + 1, json: timeline as unknown as Record<string, unknown>, scriptId: input.scriptId, durationSec: durationSec.toFixed(2), buildJson, kind: "built", changes: latest ? [`Dựng lại từ kịch bản v${input.scriptVersion}`] : [], createdBy: requestedBy })
           .returning({ id: schema.timelines.id, version: schema.timelines.version });
         const selectedIds = Object.values(stock).flatMap((s) => (s.selected ? [s.selected.assetId] : []));
         if (selectedIds.length) await tx.update(schema.assets).set({ selected: true }).where(inArray(schema.assets.id, selectedIds));
-        await tx.update(schema.projects).set({ state: "composed", busyStep: null, lastError: null }).where(eq(schema.projects.id, projectId));
+        // A rebuild supersedes any approval of the previous version.
+        await tx.update(schema.projects).set({ state: "composed", busyStep: null, lastError: null, approvedTimelineId: null, approvedBy: null, approvedAt: null }).where(eq(schema.projects.id, projectId));
         return t;
       });
-      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0);
+      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + mix.costUsd;
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: "timeline.built",
-        payload: { timelineId: row.id, version: row.version, durationSec, scenes: scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: scenes.filter((s) => s.visual?.kind === "image").length, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
+        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
       });
       return { ...row, durationSec };
     });

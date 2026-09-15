@@ -71,6 +71,7 @@ Nothing new to provision if phase 1 passed; phase 2 reuses the Cloudflare token 
 5. Redeploy both Lambdas after pulling this phase: `pnpm --filter @ai-news/video lambda:deploy` (site `ai-news-v0-2-0` with the `News` composition → update `REMOTION_SERVE_URL`) and `IMAGE_REPO=… bash packages/media-lambda/deploy.sh` (adds the `mix` action).
 6. R2 lifecycle: `infra/r2/lifecycle.json` gained `media/` (12 months); re-run `infra/r2/apply-lifecycle.sh` once the Cloudflare token can manage R2.
 7. `/app/brand`: optional workspace brand kit (colours, fonts, logo, caption style, outro line). Defaults are used otherwise.
+8. Phase 4 (editor): apply migration 0005 (`pnpm db:migrate`; adds `comments`, `project_reviews`, `projects.approved_*`, `timelines.parent_id/kind/changes` + RLS) and redeploy the Remotion site (`pnpm --filter @ai-news/video lambda:deploy` → site `ai-news-v0-3-0`, adds per-scene preview audio and `coverAtSec`; update `REMOTION_SERVE_URL`). Old versions keep rendering; the editor reconstructs their document on the fly. Inngest global concurrency is capped at 5 per function (free tier).
 8. Acceptance test (local): with the dev servers running and a project in state `scripted`,
    `INNGEST_DEV=1 pnpm --filter web exec tsx --env-file=.env.local scripts/send-test-media.ts <projectId>`
    waits for `composed`, prints the timeline (per-scene visual, timing method, music, mix loudness), then renders and prints the QA checks, cost and activity. `--assets-only` / `--render-only` / `--skip-stock` split the run.

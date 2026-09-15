@@ -229,6 +229,10 @@ export const projects = pgTable(
     tone: text("tone").notNull().default("news"),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
+    /** Approval flow (docs/PLAN.md §4.8): the timeline version a publisher approved; cleared by any later edit. */
+    approvedTimelineId: uuid("approved_timeline_id"),
+    approvedBy: text("approved_by").references(() => user.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -345,13 +349,65 @@ export const timelines = pgTable(
     json: jsonb("json").$type<Record<string, unknown>>().notNull(),
     scriptId: uuid("script_id").references(() => scripts.id, { onDelete: "set null" }),
     durationSec: numeric("duration_sec", { precision: 8, scale: 2 }),
-    /** Per-scene provenance (voice timing method, chosen asset, music) for the review UI. */
+    /** Per-scene provenance (voice timing method, chosen asset, music) plus the editor document (`doc`) for the review UI. */
     buildJson: jsonb("build_json").$type<Record<string, unknown>>().notNull().default({}),
     note: text("note"),
+    /** Version this one was edited from (phase 4); null for pipeline builds. */
+    parentId: uuid("parent_id"),
+    /** built (pipeline) | edited (editor save) | regenerated (one scene's B-roll/voice/music re-done). */
+    kind: text("kind").notNull().default("built"),
+    /** Human-readable change list versus the parent version. */
+    changes: jsonb("changes").$type<string[]>().notNull().default([]),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("timelines_project_version_uidx").on(t.projectId, t.version)],
+);
+
+/** Review comments on a project, optionally anchored to a scene and a timestamp (docs/PLAN.md §4.7). */
+export const comments = pgTable(
+  "comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    timelineId: uuid("timeline_id").references(() => timelines.id, { onDelete: "set null" }),
+    sceneId: text("scene_id"),
+    atMs: integer("at_ms"),
+    body: text("body").notNull(),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("comments_project_idx").on(t.projectId, t.createdAt)],
+);
+
+export const reviewActionEnum = pgEnum("review_action", ["submitted", "approved", "changes_requested", "withdrawn"]);
+
+/** Approval history (docs/PLAN.md §4.8 "Editor drafts, publisher approves. Logged."). */
+export const projectReviews = pgTable(
+  "project_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    timelineId: uuid("timeline_id").references(() => timelines.id, { onDelete: "set null" }),
+    timelineVersion: integer("timeline_version"),
+    action: reviewActionEnum("action").notNull(),
+    note: text("note"),
+    /** Publisher approved despite unsupported scenes in the faithfulness check (docs/PLAN.md §8). */
+    faithfulnessOverride: boolean("faithfulness_override").notNull().default(false),
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("project_reviews_project_idx").on(t.projectId, t.createdAt)],
 );
 
 export const renders = pgTable(
