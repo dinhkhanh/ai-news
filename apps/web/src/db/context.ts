@@ -1,10 +1,10 @@
 import "server-only";
-import { sql } from "drizzle-orm";
+import { sql, type ExtractTablesWithRelations } from "drizzle-orm";
 import type { PgTransaction } from "drizzle-orm/pg-core";
 import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
 import { db, schema } from "./index";
 
-export type Tx = PgTransaction<PostgresJsQueryResultHKT, typeof schema, Record<string, never>>;
+export type Tx = PgTransaction<PostgresJsQueryResultHKT, typeof schema, ExtractTablesWithRelations<typeof schema>>;
 
 /**
  * Run `fn` inside a transaction with the RLS context set:

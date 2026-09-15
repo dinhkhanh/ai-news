@@ -132,6 +132,50 @@ export const promptTemplates = pgTable(
   ],
 );
 
+/** Admin-curated eval set (docs/PLAN.md §9 "20-article eval set"). Platform-level, not org-scoped. */
+export const evalArticles = pgTable(
+  "eval_articles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    language: languageEnum("language").notNull(),
+    title: text("title").notNull(),
+    sourceUrl: text("source_url"),
+    text: text("text").notNull(),
+    notes: text("notes"),
+    /** Optional expectations checked by the eval run, e.g. facts that must appear. */
+    expectations: jsonb("expectations").$type<{ mustMention?: string[]; mustNotMention?: string[] }>().notNull().default({}),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("eval_articles_lang_idx").on(t.language, t.enabled)],
+);
+
+export const evalStatusEnum = pgEnum("eval_status", ["queued", "running", "done", "failed"]);
+
+/** One eval run of a prompt template version against the eval set. */
+export const promptEvals = pgTable(
+  "prompt_evals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => promptTemplates.id, { onDelete: "cascade" }),
+    status: evalStatusEnum("status").notNull().default("queued"),
+    durationSec: integer("duration_sec").notNull().default(60),
+    tone: text("tone").notNull().default("news"),
+    articleCount: integer("article_count").notNull().default(0),
+    summary: jsonb("summary").$type<Record<string, unknown>>(),
+    results: jsonb("results").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 4 }).notNull().default("0"),
+    error: text("error"),
+    requestedBy: text("requested_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("prompt_evals_template_idx").on(t.templateId, t.createdAt)],
+);
+
 export const quotas = pgTable(
   "quotas",
   {
@@ -178,6 +222,11 @@ export const projects = pgTable(
     aiDisclosure: boolean("ai_disclosure").notNull().default(false),
     sensitiveTopic: boolean("sensitive_topic").notNull().default(false),
     inngestRunId: text("inngest_run_id"),
+    /** Pipeline step currently running for this project (fetch | script | ...), null when idle. */
+    busyStep: text("busy_step"),
+    /** Script presets (docs/PLAN.md §4.2): target length and tone. */
+    durationSec: integer("duration_sec").notNull().default(60),
+    tone: text("tone").notNull().default("news"),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
     createdAt: createdAt(),
@@ -210,8 +259,13 @@ export const articles = pgTable(
     snapshotPath: text("snapshot_path"),
     screenshotPath: text("screenshot_path"),
     fetchMethod: text("fetch_method"), // browser_rendering | firecrawl | manual
-    flags: jsonb("flags").$type<{ paywall?: boolean; liveBlog?: boolean; videoOnly?: boolean }>().notNull().default({}),
+    flags: jsonb("flags").$type<{ paywall?: boolean; liveBlog?: boolean; videoOnly?: boolean; short?: boolean }>().notNull().default({}),
+    wordCount: integer("word_count").notNull().default(0),
+    /** Set when the user confirms (or edits) the extracted text; scripts are generated from confirmed text only. */
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    confirmedBy: text("confirmed_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [index("articles_project_idx").on(t.projectId)],
 );

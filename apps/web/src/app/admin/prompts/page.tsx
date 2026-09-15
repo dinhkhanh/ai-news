@@ -1,32 +1,63 @@
+import Link from "next/link";
 import { desc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { EvalSummary } from "@/lib/eval-summary";
 import { PROMPT_PURPOSES } from "@/lib/integrations";
+import { KNOWN_PLACEHOLDERS } from "@/lib/llm/render";
+import { defaultTemplate, DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
+import { runPromptEval } from "../evals/actions";
 import { createPromptVersion, promotePromptVersion } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+const EVALUABLE = new Set(["script", "faithfulness"]);
+
+function EvalBadge({ evalJson }: { evalJson: Record<string, unknown> | null }) {
+  const s = evalJson as (EvalSummary & { evalId?: string; at?: string }) | null;
+  if (!s || typeof s.score !== "number") return <Badge variant="outline">no eval</Badge>;
+  return (
+    <Link href={`/admin/evals?run=${s.evalId ?? ""}`} className="inline-flex items-center gap-1">
+      <Badge variant={s.score >= 80 ? "default" : s.score >= 60 ? "secondary" : "destructive"}>eval {s.score}/100</Badge>
+      <span className="text-xs text-muted-foreground">
+        unsup. {(s.unsupportedRate * 100).toFixed(0)}% · ±{s.avgDurationDeviationPct}% · ${s.totalCostUsd}
+      </span>
+    </Link>
+  );
+}
 
 export default async function PromptsPage({ searchParams }: { searchParams: Promise<{ purpose?: string; language?: string }> }) {
   const sp = await searchParams;
   const purpose = PROMPT_PURPOSES.includes(sp.purpose as never) ? (sp.purpose as (typeof PROMPT_PURPOSES)[number]) : "script";
   const language = sp.language === "en" ? "en" : "vi";
-  const all = await db.select().from(schema.promptTemplates).orderBy(desc(schema.promptTemplates.createdAt));
+  const [all, running] = await Promise.all([
+    db.select().from(schema.promptTemplates).orderBy(desc(schema.promptTemplates.createdAt)),
+    db.query.promptEvals.findFirst({ where: (e, { inArray }) => inArray(e.status, ["queued", "running"]) }),
+  ]);
   const versions = all.filter((t) => t.purpose === purpose && t.language === language).sort((a, b) => b.version - a.version);
   const promoted = versions.find((v) => v.promoted);
+  const builtIn = defaultTemplate(purpose, language);
+  const evaluable = EVALUABLE.has(purpose);
 
   return (
     <div className="space-y-6">
+      <AutoRefresh active={Boolean(running)} everyMs={6000} />
       <div>
         <h1 className="text-xl font-semibold">Prompt templates</h1>
         <p className="text-sm text-muted-foreground">
-          One promoted version per purpose and language is used by the pipeline. Every save creates a new version; promote to switch,
-          promote an older version to roll back. Eval runs arrive in phase 2.
+          One promoted version per purpose and language is used by the pipeline. Every save creates a new version; run an eval on it, then promote.
+          Promoting an older version rolls back. Without any promoted version the built-in default is used.{" "}
+          <Link href="/admin/evals" className="underline">
+            Manage the eval set
+          </Link>
+          .
         </p>
       </div>
 
@@ -52,7 +83,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              New version · {purpose} / {language} {promoted ? `(current v${promoted.version})` : "(none promoted)"}
+              New version · {purpose} / {language} {promoted ? `(current v${promoted.version})` : builtIn ? "(built-in default in use)" : "(none promoted)"}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -60,16 +91,17 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
               <input type="hidden" name="purpose" value={purpose} />
               <input type="hidden" name="language" value={language} />
               <div className="space-y-1">
-                <Label htmlFor="body">Template body</Label>
-                <Textarea id="body" name="body" rows={18} className="font-mono text-xs" defaultValue={promoted?.body ?? ""} required />
+                <Label htmlFor="body">Template body (system instruction)</Label>
+                <Textarea id="body" name="body" rows={18} className="font-mono text-xs" defaultValue={promoted?.body ?? builtIn?.body ?? ""} required />
                 <p className="text-xs text-muted-foreground">
-                  Placeholders: {"{{article_text}}"}, {"{{article_title}}"}, {"{{duration_sec}}"}, {"{{tone}}"}, {"{{language}}"}.
+                  Placeholders: {KNOWN_PLACEHOLDERS.map((p) => `{{${p}}}`).join(", ")}. The article is appended automatically as a cached block unless{" "}
+                  {"{{article_text}}"} is used. Output structure is fixed by the schema; the template explains meaning and rules.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label htmlFor="model">Model override</Label>
-                  <Input id="model" name="model" placeholder="claude-opus-5" defaultValue={promoted?.model ?? ""} />
+                  <Input id="model" name="model" placeholder="claude-opus-5" defaultValue={promoted?.model ?? builtIn?.model ?? ""} />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="notes">Change note</Label>
@@ -78,7 +110,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
               </div>
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="promote" className="size-4" /> Promote immediately
+                  <input type="checkbox" name="promote" className="size-4" /> Promote immediately (skips eval)
                 </label>
                 <Button type="submit" size="sm">
                   Save version
@@ -93,28 +125,59 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
             <CardTitle className="text-base">Versions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {versions.length === 0 ? <p className="text-sm text-muted-foreground">No versions yet.</p> : null}
-            {versions.map((v) => (
-              <details key={v.id} className="rounded-md border p-3">
-                <summary className="flex cursor-pointer items-center justify-between text-sm">
-                  <span>
-                    v{v.version} {v.promoted ? <Badge className="ml-2">promoted</Badge> : null}
-                    <span className="ml-2 text-xs text-muted-foreground">{v.createdAt.toISOString().slice(0, 16).replace("T", " ")}</span>
-                  </span>
-                  {!v.promoted ? (
-                    <ActionForm action={promotePromptVersion}>
-                      <input type="hidden" name="id" value={v.id} />
-                      <Button type="submit" size="sm" variant="outline">
-                        Promote
-                      </Button>
-                    </ActionForm>
-                  ) : null}
-                </summary>
-                {v.notes ? <p className="mt-2 text-xs text-muted-foreground">{v.notes}</p> : null}
-                {v.model ? <p className="mt-1 text-xs">model: {v.model}</p> : null}
-                <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">{v.body}</pre>
-              </details>
-            ))}
+            {versions.length === 0 ? <p className="text-sm text-muted-foreground">No saved versions; the built-in default is active.</p> : null}
+            {versions.map((v) => {
+              const promotedEval = promoted?.evalJson as EvalSummary | null | undefined;
+              const thisEval = v.evalJson as EvalSummary | null;
+              const worse = Boolean(!v.promoted && promotedEval && typeof promotedEval.score === "number" && thisEval && thisEval.score < promotedEval.score);
+              return (
+                <details key={v.id} className="rounded-md border p-3" open={v.promoted}>
+                  <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm">
+                    <span className="font-medium">v{v.version}</span>
+                    {v.promoted ? <Badge>promoted</Badge> : null}
+                    <EvalBadge evalJson={v.evalJson} />
+                    <span className="text-xs text-muted-foreground">{v.createdAt.toISOString().slice(0, 16).replace("T", " ")}</span>
+                  </summary>
+                  {v.notes ? <p className="mt-2 text-xs text-muted-foreground">{v.notes}</p> : null}
+                  {v.model ? <p className="mt-1 text-xs">model: {v.model}</p> : null}
+                  <div className="mt-2 flex flex-wrap items-end gap-2">
+                    {evaluable ? (
+                      <ActionForm action={runPromptEval} className="flex flex-wrap items-end gap-2">
+                        <input type="hidden" name="templateId" value={v.id} />
+                        <select name="durationSec" defaultValue="60" className="h-8 rounded-md border bg-background px-2 text-xs">
+                          {DURATION_PRESETS.map((d) => (
+                            <option key={d} value={d}>
+                              {d}s
+                            </option>
+                          ))}
+                        </select>
+                        <select name="tone" defaultValue="news" className="h-8 rounded-md border bg-background px-2 text-xs">
+                          {SCRIPT_TONES.map((t) => (
+                            <option key={t.key} value={t.key}>
+                              {t.en}
+                            </option>
+                          ))}
+                        </select>
+                        <Button type="submit" size="sm" variant="outline" disabled={Boolean(running)}>
+                          {running ? "eval running…" : "Run eval"}
+                        </Button>
+                      </ActionForm>
+                    ) : null}
+                    {!v.promoted ? (
+                      <ActionForm action={promotePromptVersion} className="ml-auto flex items-center gap-2">
+                        <input type="hidden" name="id" value={v.id} />
+                        {worse ? <span className="text-xs text-destructive">scores below the promoted version</span> : null}
+                        {evaluable && !thisEval ? <span className="text-xs text-muted-foreground">not evaluated</span> : null}
+                        <Button type="submit" size="sm" variant={worse ? "ghost" : "default"}>
+                          {v.version < (promoted?.version ?? 0) ? "Roll back to this" : "Promote"}
+                        </Button>
+                      </ActionForm>
+                    ) : null}
+                  </div>
+                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">{v.body}</pre>
+                </details>
+              );
+            })}
           </CardContent>
         </Card>
       </div>

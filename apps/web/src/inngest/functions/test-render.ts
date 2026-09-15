@@ -1,9 +1,10 @@
 import { NonRetriableError } from "inngest";
 import { inngest } from "../client";
 import { testRenderRequested } from "../events";
-import { db, schema } from "@/db";
+import { schema } from "@/db";
+import { withOrgContext } from "@/db/context";
 import { logActivity, recordUsageCost } from "@/lib/activity";
-import { invokeMediaLambda } from "@/lib/media-lambda";
+import { invokeMediaLambda, type MediaResult } from "@/lib/media-lambda";
 import { r2Key } from "@/lib/r2";
 import { getRenderStatus, startRender } from "@/lib/remotion";
 import { eq } from "drizzle-orm";
@@ -19,12 +20,16 @@ export const testRender = inngest.createFunction(
     const { requestedBy, organizationId } = event.data;
     const title = event.data.title ?? "ai-news test render";
     const durationSec = event.data.durationSec ?? 6;
+    // Every DB write goes through the RLS context of the requesting user/workspace.
+    const ctx = { userId: requestedBy, organizationId };
 
     const renderRow = await step.run("create-render-row", async () => {
-      const [row] = await db
-        .insert(schema.renders)
-        .values({ organizationId, status: "queued", requestedBy })
-        .returning({ id: schema.renders.id });
+      const [row] = await withOrgContext(ctx, (tx) =>
+        tx
+          .insert(schema.renders)
+          .values({ organizationId, status: "queued", requestedBy })
+          .returning({ id: schema.renders.id }),
+      );
       return row;
     });
 
@@ -37,10 +42,12 @@ export const testRender = inngest.createFunction(
         outKey,
         durationInFrames: durationSec * 30,
       });
-      await db
-        .update(schema.renders)
-        .set({ status: "rendering", remotionRenderId: res.renderId, remotionBucket: res.bucketName })
-        .where(eq(schema.renders.id, renderRow.id));
+      await withOrgContext(ctx, (tx) =>
+        tx
+          .update(schema.renders)
+          .set({ status: "rendering", remotionRenderId: res.renderId, remotionBucket: res.bucketName })
+          .where(eq(schema.renders.id, renderRow.id)),
+      );
       return res;
     });
 
@@ -52,10 +59,18 @@ export const testRender = inngest.createFunction(
       const status = await step.run(`poll-${attempt}`, () => getRenderStatus(started));
       if (status.fatalErrorEncountered) {
         await step.run("mark-failed", () =>
-          db
-            .update(schema.renders)
-            .set({ status: "failed", error: status.errors.map((e) => e.message).join("\n").slice(0, 4000) })
-            .where(eq(schema.renders.id, renderRow.id)),
+          withOrgContext(ctx, (tx) =>
+            tx
+              .update(schema.renders)
+              .set({
+                status: "failed",
+                error: status.errors
+                  .map((e: { message: string }) => e.message)
+                  .join("\n")
+                  .slice(0, 4000),
+              })
+              .where(eq(schema.renders.id, renderRow.id)),
+          ),
         );
         throw new NonRetriableError(`Remotion render failed: ${status.errors[0]?.message ?? "unknown"}`);
       }
@@ -67,23 +82,39 @@ export const testRender = inngest.createFunction(
       await step.sleep(`wait-${attempt}`, "5s");
     }
 
-    const qa = await step.run("qa-probe", () =>
-      invokeMediaLambda({ action: "probe", input: { key: outKey }, expect: { width: 1080, height: 1920, fps: 30 } }),
-    );
+    // QA probe. If the media Lambda is not deployed yet the render still counts,
+    // but the row is marked qa_failed with a clear reason so nobody ships without QA.
+    const qa = await step.run("qa-probe", async (): Promise<MediaResult> => {
+      try {
+        return await invokeMediaLambda({
+          action: "probe",
+          input: { key: outKey },
+          expect: { width: 1080, height: 1920, fps: 30 },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/ResourceNotFoundException|Function not found/i.test(message)) {
+          return { ok: false, action: "probe", passed: false, error: `media Lambda not deployed: ${message}` };
+        }
+        throw err;
+      }
+    });
 
     await step.run("finalise", async () => {
       const passed = qa.ok && qa.passed;
-      await db
-        .update(schema.renders)
-        .set({
-          status: passed ? "done" : "qa_failed",
-          outputPath: outKey,
-          durationSec: qa.probe?.durationSec?.toFixed(2),
-          costUsd: costUsd.toFixed(4),
-          qaJson: qa as unknown as Record<string, unknown>,
-          error: passed ? null : qa.error ?? "QA probe failed",
-        })
-        .where(eq(schema.renders.id, renderRow.id));
+      await withOrgContext(ctx, (tx) =>
+        tx
+          .update(schema.renders)
+          .set({
+            status: passed ? "done" : "qa_failed",
+            outputPath: outKey,
+            durationSec: qa.probe?.durationSec?.toFixed(2),
+            costUsd: costUsd.toFixed(4),
+            qaJson: qa as unknown as Record<string, unknown>,
+            error: passed ? null : (qa.error ?? "QA probe failed"),
+          })
+          .where(eq(schema.renders.id, renderRow.id)),
+      );
       await recordUsageCost({
         provider: "remotion_lambda",
         resource: "TestCard",

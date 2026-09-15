@@ -17,6 +17,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/app" className="font-semibold">
             ai-news
           </Link>
+          <Link href="/app" className="text-muted-foreground hover:text-foreground">
+            Dự án
+          </Link>
           {session.user.role === "admin" ? (
             <Link href="/admin" className="text-muted-foreground hover:text-foreground">
               Admin

@@ -41,6 +41,7 @@ describe("migrations", () => {
       "projects", "articles", "scripts", "assets", "timelines", "renders", "channels", "channel_grants",
       "publications", "brand_kits", "voice_presets", "pronunciations", "prompt_templates", "music_library",
       "integrations", "quotas", "activity_events", "usage_costs", "allowed_domains", "feature_flags",
+      "eval_articles", "prompt_evals",
     ]) {
       expect(names, `missing table ${t}`).toContain(t);
     }
@@ -65,6 +66,28 @@ describe("migrations", () => {
     expect(Object.fromEntries(quotas.rows.map((r) => [r.resource, r.daily_limit]))).toEqual({ scripts: 20, ai_media: 5, render_minutes: 30, publishes: 10 });
     const voice = await pg.query<{ voice: string }>("select voice from voice_presets where language='vi' and is_default");
     expect(voice.rows[0]?.voice).toBe("vi-VN-Chirp3-HD-Charon");
+  });
+
+  it("seed one promoted built-in prompt template per purpose/language (phase 2)", async () => {
+    const { rows } = await pg.query<{ purpose: string; language: string; version: number; promoted: boolean; len: number }>(
+      "select purpose, language, version, promoted, length(body)::int as len from prompt_templates order by purpose, language",
+    );
+    expect(rows.map((r) => `${r.purpose}/${r.language}`).sort()).toEqual(["faithfulness/en", "faithfulness/vi", "script/en", "script/vi"]);
+    for (const r of rows) {
+      expect(r.version).toBe(1);
+      expect(r.promoted).toBe(true);
+      expect(r.len).toBeGreaterThan(400);
+    }
+    // Re-applying the seed statement is a no-op (guarded by "where not exists").
+    const { rows: after } = await pg.query<{ n: number }>("select count(*)::int as n from prompt_templates");
+    expect(after[0].n).toBe(4);
+  });
+
+  it("add the phase 2 columns", async () => {
+    const { rows } = await pg.query<{ table_name: string; column_name: string }>(
+      "select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='projects' and column_name in ('busy_step','duration_sec','tone')) or (table_name='articles' and column_name in ('confirmed_at','confirmed_by','word_count','updated_at')))",
+    );
+    expect(rows.length).toBe(7);
   });
 
   it("bump lock_version on project updates", async () => {

@@ -153,7 +153,7 @@ Source attribution in video and caption. Licence stored per asset/track. AI-disc
 - Vietnamese voice listening test (all Chirp 3 HD vi-VN + Neural2-D) → confirm default.
 - File: YouTube quota increase, Meta App Review + Business Verification, TikTok audit.
 
-**Phase 2: fetch + script.** Extraction chain, script generation per language, faithfulness check + review view, eval set + promotion flow.
+**Phase 2: fetch + script.** Extraction chain, script generation per language, faithfulness check + review view, eval set + promotion flow. *Built 2026-09-16:* `project/fetch.requested` → Browser Rendering → HTTP → Firecrawl → manual paste, Readability + JSON-LD metadata, paywall/live-blog/video-only flags, Haiku language + sensitive-topic classification, R2 snapshot + screenshot, user confirms text; `project/script.requested` → Opus 5 structured script (hook/body/CTA scenes, English B-roll terms, per-platform metadata) → Opus 5 faithfulness verdict per scene → review view with evidence highlighting; `/admin/evals` eval set + `prompt/eval.requested` runs with a 0–100 score shown at promotion.
 
 **Phase 3: media + render.** Stock search/fan-out/ranking/dedupe, article A-roll, TTS + word timings + pronunciations + captions, Mubert + library, audio normalisation, brand kits, one Remotion template, full render path with QA + notifications.
 

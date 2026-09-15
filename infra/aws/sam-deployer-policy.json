@@ -1,0 +1,55 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SamCloudFormation",
+      "Effect": "Allow",
+      "Action": ["cloudformation:*"],
+      "Resource": [
+        "arn:aws:cloudformation:ap-southeast-1:*:stack/ai-news-media*/*",
+        "arn:aws:cloudformation:ap-southeast-1:*:stack/aws-sam-cli-managed-default/*",
+        "arn:aws:cloudformation:ap-southeast-1:aws:transform/Serverless-2016-10-31"
+      ]
+    },
+    {
+      "Sid": "SamManagedBucket",
+      "Effect": "Allow",
+      "Action": ["s3:*"],
+      "Resource": ["arn:aws:s3:::aws-sam-cli-managed-default-*", "arn:aws:s3:::aws-sam-cli-managed-default-*/*"]
+    },
+    {
+      "Sid": "SamEcr",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:CreateRepository", "ecr:DescribeRepositories", "ecr:DeleteRepository", "ecr:SetRepositoryPolicy",
+        "ecr:GetRepositoryPolicy", "ecr:PutImageTagMutability", "ecr:PutImageScanningConfiguration",
+        "ecr:TagResource", "ecr:GetAuthorizationToken", "ecr:BatchCheckLayerAvailability",
+        "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:PutImage",
+        "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:ListImages", "ecr:BatchDeleteImage"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "MediaLambda",
+      "Effect": "Allow",
+      "Action": ["lambda:*"],
+      "Resource": ["arn:aws:lambda:ap-southeast-1:*:function:ai-news-media", "arn:aws:lambda:ap-southeast-1:*:function:ai-news-media:*"]
+    },
+    {
+      "Sid": "MediaLambdaRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:PassRole", "iam:TagRole", "iam:UntagRole",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::*:role/ai-news-media-*"
+    },
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:PutRetentionPolicy", "logs:DescribeLogGroups", "logs:TagResource", "logs:ListTagsForResource"],
+      "Resource": "*"
+    }
+  ]
+}

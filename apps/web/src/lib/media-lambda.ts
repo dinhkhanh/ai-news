@@ -7,7 +7,7 @@ import { env } from "@/lib/env";
  * keys in R2_BUCKET; the Lambda reads/writes R2 with its own credentials.
  */
 export type MediaAction =
-  | { action: "probe"; input: { key: string }; expect?: { width: number; height: number; fps: number; minDurationSec?: number; maxDurationSec?: number } }
+  | { action: "probe"; input: { key: string }; expect?: { width: number; height: number; fps: number; minDurationSec?: number; maxDurationSec?: number; lufs?: number; truePeakDb?: number } }
   | { action: "loudnorm"; input: { key: string }; output: { key: string }; targetLufs?: number; truePeak?: number }
   | { action: "duck"; input: { voiceKey: string; musicKey: string }; output: { key: string }; duckDb?: number }
   | { action: "cover"; input: { key: string }; output: { key: string }; atSec?: number }

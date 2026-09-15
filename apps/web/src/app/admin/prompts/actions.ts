@@ -62,7 +62,8 @@ export async function promotePromptVersion(_: ActionState, fd: FormData): Promis
         .where(and(eq(schema.promptTemplates.purpose, row.purpose), eq(schema.promptTemplates.language, row.language)));
       await tx.update(schema.promptTemplates).set({ promoted: true }).where(eq(schema.promptTemplates.id, id));
     });
-    await log("admin.prompt.promoted", { purpose: row.purpose, language: row.language, version: row.version });
+    const ev = row.evalJson as { score?: number } | null;
+    await log("admin.prompt.promoted", { purpose: row.purpose, language: row.language, version: row.version, evalScore: ev?.score ?? null, evaluated: Boolean(ev) });
     revalidatePath("/admin/prompts");
     return `Promoted ${row.purpose}/${row.language} v${row.version}`;
   });

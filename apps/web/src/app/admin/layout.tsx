@@ -9,6 +9,7 @@ const nav = [
   ["/admin/workspaces", "Workspaces"],
   ["/admin/integrations", "Integrations"],
   ["/admin/prompts", "Prompt templates"],
+  ["/admin/evals", "Eval set & runs"],
   ["/admin/quotas", "Quotas"],
   ["/admin/activity", "Activity log"],
   ["/admin/health", "Health & test render"],

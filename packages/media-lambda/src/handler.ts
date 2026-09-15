@@ -65,8 +65,8 @@ function evaluate(p: ProbeResult, expect: NonNullable<Extract<MediaAction, { act
   };
   if (expect.minDurationSec !== undefined) checks.minDuration = { ok: p.durationSec >= expect.minDurationSec, expected: `>=${expect.minDurationSec}`, actual: p.durationSec };
   if (expect.maxDurationSec !== undefined) checks.maxDuration = { ok: p.durationSec <= expect.maxDurationSec, expected: `<=${expect.maxDurationSec}`, actual: p.durationSec };
-  if (p.integratedLufs !== null) checks.loudness = { ok: Math.abs(p.integratedLufs - DEFAULT_TARGET_LUFS) <= 1.5, expected: `${DEFAULT_TARGET_LUFS}±1.5 LUFS`, actual: p.integratedLufs };
-  if (p.truePeakDb !== null) checks.truePeak = { ok: p.truePeakDb <= DEFAULT_TRUE_PEAK + 0.3, expected: `<=${DEFAULT_TRUE_PEAK} dBTP`, actual: p.truePeakDb };
+  if (expect.lufs !== undefined) checks.loudness = { ok: p.integratedLufs !== null && Math.abs(p.integratedLufs - expect.lufs) <= 1.5, expected: `${expect.lufs}±1.5 LUFS`, actual: p.integratedLufs };
+  if (expect.truePeakDb !== undefined) checks.truePeak = { ok: p.truePeakDb !== null && p.truePeakDb <= expect.truePeakDb + 0.3, expected: `<=${expect.truePeakDb} dBTP`, actual: p.truePeakDb };
   return checks;
 }
 

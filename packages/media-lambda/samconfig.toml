@@ -7,4 +7,3 @@ cached = true
 [default.deploy.parameters]
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
-resolve_image_repos = true

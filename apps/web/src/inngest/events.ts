@@ -38,12 +38,36 @@ export const testRenderRequested = eventType("render/test.requested", {
   }),
 });
 
-/** Placeholder for phase 2: kicks off the pipeline for a project. */
-export const projectPipelineRequested = eventType("project/pipeline.requested", {
+/** Phase 2 step 1: extract the article (or store a manual paste) for a project. */
+export const projectFetchRequested = eventType("project/fetch.requested", {
   schema: z.object({
     projectId: z.string(),
     organizationId: z.string(),
     requestedBy: z.string(),
-    fromStep: z.enum(["fetch", "script", "assets", "tts", "captions", "music", "compose", "render", "publish"]).optional(),
+    /** Force one provider; default runs the chain browser_rendering → http → firecrawl. */
+    method: z.enum(["browser_rendering", "http", "firecrawl"]).optional(),
+    /** Manual paste replaces network fetching entirely. */
+    manual: z.object({ title: z.string(), text: z.string() }).optional(),
+  }),
+});
+
+/** Phase 2 step 2: generate a script version (+ faithfulness pass) from the confirmed article. */
+export const projectScriptRequested = eventType("project/script.requested", {
+  schema: z.object({
+    projectId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    durationSec: z.number().int().min(15).max(180),
+    tone: z.string(),
+    /** Pin a template version (admin testing); default = promoted. */
+    templateId: z.string().optional(),
+  }),
+});
+
+/** Admin: run a prompt template version against the eval set. */
+export const promptEvalRequested = eventType("prompt/eval.requested", {
+  schema: z.object({
+    evalId: z.string(),
+    requestedBy: z.string(),
   }),
 });

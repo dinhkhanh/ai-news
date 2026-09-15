@@ -1,5 +1,14 @@
 /** Mirror of apps/web/src/lib/media-lambda.ts. Keep in sync. */
-export type Expect = { width: number; height: number; fps: number; minDurationSec?: number; maxDurationSec?: number };
+export type Expect = {
+  width: number;
+  height: number;
+  fps: number;
+  minDurationSec?: number;
+  maxDurationSec?: number;
+  /** Set after loudnorm; omitted for raw renders. */
+  lufs?: number;
+  truePeakDb?: number;
+};
 
 export type MediaAction =
   | { action: "probe"; input: { key: string }; expect?: Expect }
