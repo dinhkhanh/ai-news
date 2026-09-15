@@ -1,0 +1,139 @@
+import { NonRetriableError } from "inngest";
+import { and, desc, eq } from "drizzle-orm";
+import type { Timeline } from "@ai-news/video/schema";
+import { inngest } from "../client";
+import { projectRenderRequested } from "../events";
+import { schema } from "@/db";
+import { withOrgContext } from "@/db/context";
+import { logActivity, recordUsageCost } from "@/lib/activity";
+import { env } from "@/lib/env";
+import { resolveTimelineSrcs } from "@/lib/media/timeline-resolve";
+import { invokeMediaLambda, type MediaResult } from "@/lib/media-lambda";
+import { notifySlack } from "@/lib/notify";
+import { r2Key } from "@/lib/r2";
+import { getRenderStatus, startRender } from "@/lib/remotion";
+
+/** Media Lambda: 3008 MB, ~$0.0000000488/ms → ≈ $0.000049/s; rounded up for R2 traffic. */
+const MEDIA_LAMBDA_USD_PER_SEC = 0.00006;
+
+/**
+ * Pipeline step 9 (docs/PLAN.md §4.9): Remotion Lambda renders the timeline
+ * (raw output to R2 tmp/), the media Lambda normalises to -14 LUFS into
+ * renders/, extracts the cover and runs the QA probe. Fails with a reason when
+ * QA fails; notifies Slack when configured.
+ */
+export const renderProjectFn = inngest.createFunction(
+  {
+    id: "render-project",
+    triggers: [projectRenderRequested],
+    retries: 1,
+    concurrency: [{ limit: 1, key: "event.data.projectId" }, { limit: 6 }],
+    onFailure: async ({ event }) => {
+      const { projectId, organizationId, requestedBy } = event.data.event.data;
+      const message = event.data.error?.message ?? "render failed";
+      await withOrgContext({ userId: requestedBy, organizationId }, async (tx) => {
+        await tx.update(schema.projects).set({ busyStep: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId));
+        await tx.update(schema.renders).set({ status: "failed", error: message.slice(0, 4000) }).where(and(eq(schema.renders.projectId, projectId), eq(schema.renders.status, "rendering")));
+      });
+      await logActivity({ actorId: requestedBy, organizationId, projectId, type: "render.failed", payload: { error: message.slice(0, 500) } });
+      await notifySlack(`:x: Render failed for project ${projectId}: ${message.slice(0, 300)}`);
+    },
+  },
+  async ({ event, step }) => {
+    const { projectId, organizationId, requestedBy, timelineId } = event.data;
+    const ctx = { userId: requestedBy, organizationId };
+
+    const input = await step.run("load", async () => {
+      return withOrgContext(ctx, async (tx) => {
+        const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
+        if (!project) throw new NonRetriableError("Project not found in this workspace");
+        const timeline = timelineId
+          ? await tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.id, timelineId)) })
+          : await tx.query.timelines.findFirst({ where: eq(schema.timelines.projectId, projectId), orderBy: desc(schema.timelines.version) });
+        if (!timeline) throw new NonRetriableError("Build the timeline first");
+        await tx.update(schema.projects).set({ busyStep: "render", lastError: null }).where(eq(schema.projects.id, projectId));
+        const [render] = await tx
+          .insert(schema.renders)
+          .values({ organizationId, projectId, timelineId: timeline.id, timelineVersion: timeline.version, status: "queued", requestedBy })
+          .returning({ id: schema.renders.id });
+        return { renderId: render.id, timelineId: timeline.id, timelineVersion: timeline.version, timeline: timeline.json as unknown as Timeline, title: project.title ?? "ai-news", durationSec: Number(timeline.durationSec ?? 0) };
+      });
+    });
+    const rawKey = r2Key.tmp(organizationId, projectId, `render-${input.renderId}-raw.mp4`);
+    const outKey = r2Key.render(organizationId, projectId, `${input.renderId}.mp4`);
+    const coverKey = r2Key.render(organizationId, projectId, `${input.renderId}-cover.jpg`);
+    const durationSec = input.durationSec || input.timeline.durationFrames / 30;
+
+    const started = await step.run("start-remotion-render", async () => {
+      const props = await resolveTimelineSrcs(input.timeline);
+      const res = await startRender({ composition: "News", inputProps: props, outKey: rawKey, durationInFrames: input.timeline.durationFrames });
+      await withOrgContext(ctx, (tx) =>
+        tx.update(schema.renders).set({ status: "rendering", remotionRenderId: res.renderId, remotionBucket: res.bucketName, rawPath: rawKey }).where(eq(schema.renders.id, input.renderId)),
+      );
+      return { ...res, t0: Date.now() };
+    });
+
+    let remotionCost = 0;
+    for (let attempt = 1; ; attempt++) {
+      const status = await step.run(`poll-${attempt}`, () => getRenderStatus(started));
+      if (status.fatalErrorEncountered) {
+        const msg = status.errors.map((e: { message: string }) => e.message).join("\n");
+        await step.run("mark-failed", () => withOrgContext(ctx, (tx) => tx.update(schema.renders).set({ status: "failed", error: msg.slice(0, 4000) }).where(eq(schema.renders.id, input.renderId))));
+        throw new NonRetriableError(`Remotion render failed: ${status.errors[0]?.message ?? "unknown"}`);
+      }
+      if (status.done) {
+        remotionCost = status.costs.accruedSoFar;
+        break;
+      }
+      if (attempt > 90) throw new NonRetriableError("Render did not finish within the polling budget (7.5 min)");
+      await step.sleep(`wait-${attempt}`, "5s");
+    }
+
+    const post = await step.run("post-process", async () => {
+      await withOrgContext(ctx, (tx) => tx.update(schema.renders).set({ status: "post_processing" }).where(eq(schema.renders.id, input.renderId)));
+      const t0 = Date.now();
+      const norm = await invokeMediaLambda({ action: "loudnorm", input: { key: rawKey }, output: { key: outKey }, targetLufs: -14, truePeak: -1 });
+      if (!norm.ok) throw new Error(`loudnorm failed: ${norm.error}`);
+      const cover = await invokeMediaLambda({ action: "cover", input: { key: outKey }, output: { key: coverKey }, atSec: Math.min(1.2, durationSec / 3) });
+      const qa: MediaResult = await invokeMediaLambda({
+        action: "probe",
+        input: { key: outKey },
+        expect: { width: 1080, height: 1920, fps: 30, minDurationSec: durationSec - 0.7, maxDurationSec: durationSec + 0.7, lufs: -14, truePeakDb: -1 },
+      });
+      const lambdaMs = (norm.billedMs ?? 0) + (cover.billedMs ?? 0) + (qa.billedMs ?? 0) + (Date.now() - t0) * 0.1;
+      return { qa, coverOk: cover.ok, lambdaMs };
+    });
+
+    await step.run("finalise", async () => {
+      const passed = post.qa.ok && post.qa.passed;
+      const mediaCost = (post.lambdaMs / 1000) * MEDIA_LAMBDA_USD_PER_SEC;
+      const costUsd = remotionCost + mediaCost;
+      const renderSeconds = (Date.now() - started.t0) / 1000;
+      await withOrgContext(ctx, async (tx) => {
+        await tx
+          .update(schema.renders)
+          .set({
+            status: passed ? "done" : "qa_failed",
+            outputPath: outKey,
+            coverPath: post.coverOk ? coverKey : null,
+            durationSec: post.qa.probe?.durationSec?.toFixed(2),
+            costUsd: costUsd.toFixed(4),
+            renderSeconds: renderSeconds.toFixed(2),
+            qaJson: post.qa as unknown as Record<string, unknown>,
+            error: passed ? null : (post.qa.error ?? "QA probe failed: " + Object.entries(post.qa.checks ?? {}).filter(([, c]) => !c.ok).map(([k, c]) => `${k} expected ${String(c.expected)} got ${String(c.actual)}`).join("; ")),
+          })
+          .where(eq(schema.renders.id, input.renderId));
+        await tx.update(schema.projects).set({ state: passed ? "rendered" : "composed", busyStep: null, lastError: passed ? null : "Render QA failed; see the render row" }).where(eq(schema.projects.id, projectId));
+      });
+      await recordUsageCost({ provider: "remotion_lambda", resource: "News", units: durationSec, unitType: "render_seconds", costUsd: remotionCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId, meta: { renderSeconds, functionName: env().REMOTION_FUNCTION_NAME } });
+      await recordUsageCost({ provider: "media_lambda", resource: "loudnorm+cover+probe", units: post.lambdaMs / 1000, unitType: "seconds", costUsd: mediaCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId });
+      await logActivity({
+        actorId: requestedBy, organizationId, projectId, type: passed ? "render.completed" : "render.qa_failed",
+        payload: { renderId: input.renderId, timelineVersion: input.timelineVersion, durationSec: post.qa.probe?.durationSec ?? null, lufs: post.qa.probe?.integratedLufs ?? null, costUsd, renderSeconds, checks: post.qa.checks ?? null },
+      });
+      await notifySlack(`${passed ? ":clapper: Render done" : ":warning: Render QA failed"} — ${input.title} (${durationSec.toFixed(0)}s, $${costUsd.toFixed(3)}) ${env().APP_URL}/app/projects/${projectId}`);
+    });
+
+    return { renderId: input.renderId, outKey, passed: post.qa.ok && post.qa.passed };
+  },
+);

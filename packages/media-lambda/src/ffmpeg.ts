@@ -19,8 +19,11 @@ export const ytdlp = (args: string[]) => run(YTDLP, args);
 export function parseLoudnormJson(stderr: string): Record<string, string> | null {
   const idx = stderr.lastIndexOf("{");
   if (idx < 0) return null;
+  const end = stderr.indexOf("}", idx);
+  if (end < 0) return null;
   try {
-    return JSON.parse(stderr.slice(idx)) as Record<string, string>;
+    // ffmpeg prints -inf for silent input, which is not valid JSON; keep it as a string.
+    return JSON.parse(stderr.slice(idx, end + 1).replace(/:\s*-?inf\b/g, ': "-inf"')) as Record<string, string>;
   } catch {
     return null;
   }

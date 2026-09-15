@@ -1,6 +1,6 @@
 {
   "name": "@ai-news/video",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src scripts",
     "lambda:policies": "remotion lambda policies user && remotion lambda policies role",
-    "lambda:deploy": "tsx scripts/deploy.ts",
+    "lambda:deploy": "NODE_PATH=./node_modules tsx --env-file-if-exists=../../apps/web/.env.local scripts/deploy.ts",
     "lambda:quotas": "remotion lambda quotas"
   },
   "dependencies": {

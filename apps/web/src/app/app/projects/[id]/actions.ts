@@ -1,16 +1,17 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
-import { projectFetchRequested, projectScriptRequested } from "@/inngest/events";
+import { projectAssetsRequested, projectFetchRequested, projectRenderRequested, projectScriptRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
 import { countWords } from "@/lib/fetch/readability";
 import { parsePreset } from "@/lib/presets";
 import { busyStep } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
+import { copyObject } from "@/lib/r2";
 import { assertWorkspaceWriter, type Workspace } from "@/lib/workspace";
 
 async function loadProject(ws: Workspace, projectId: string) {
@@ -113,4 +114,67 @@ export async function deleteProject(_: ActionState, fd: FormData): Promise<Actio
   });
   if (state.ok) redirect("/app");
   return state;
+}
+
+/** Phase 3: build assets + voice-over + music + timeline from the latest script (or a pinned version). */
+export async function requestAssets(_: ActionState, fd: FormData): Promise<ActionState> {
+  return run(async () => {
+    const { ws, log } = await assertWorkspaceWriter();
+    const projectId = str(fd, "projectId");
+    await loadProject(ws, projectId);
+    const scriptId = str(fd, "scriptId") || undefined;
+    const skipStock = fd.get("skipStock") === "on";
+    const script = await withOrgContext(ws, (tx) => tx.query.scripts.findFirst({ where: eq(schema.scripts.projectId, projectId), orderBy: desc(schema.scripts.version) }));
+    if (!script) throw new Error("Generate a script first");
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", lastError: null }).where(eq(schema.projects.id, projectId)));
+    await inngest.send(projectAssetsRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, scriptId, skipStock }));
+    await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock }, projectId);
+    revalidatePath(`/app/projects/${projectId}`);
+    return "Building voice-over, B-roll and timeline… this takes 2–4 minutes";
+  });
+}
+
+/** Phase 3: render a timeline version on Remotion Lambda. Enforces the daily render-minutes quota. */
+export async function requestRender(_: ActionState, fd: FormData): Promise<ActionState> {
+  return run(async () => {
+    const { ws, log } = await assertWorkspaceWriter();
+    const projectId = str(fd, "projectId");
+    await loadProject(ws, projectId);
+    const timelineId = str(fd, "timelineId") || undefined;
+    const timeline = timelineId
+      ? await withOrgContext(ws, (tx) => tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.id, timelineId)) }))
+      : await withOrgContext(ws, (tx) => tx.query.timelines.findFirst({ where: eq(schema.timelines.projectId, projectId), orderBy: desc(schema.timelines.version) }));
+    if (!timeline) throw new Error("Build the timeline first");
+    const minutes = Number(timeline.durationSec ?? 60) / 60;
+    const quota = await assertQuota(ws.userId, "render_minutes");
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "render", lastError: null }).where(eq(schema.projects.id, projectId)));
+    await inngest.send(projectRenderRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: timeline.id }));
+    await log("quota.render_minutes", { minutes: Math.round(minutes * 100) / 100, timelineId: timeline.id }, projectId);
+    await log("render.requested", { timelineId: timeline.id, version: timeline.version, quotaUsed: quota.used, quotaLimit: quota.limit }, projectId);
+    revalidatePath(`/app/projects/${projectId}`);
+    return `Rendering v${timeline.version} (${Math.ceil(quota.used + minutes)}/${quota.limit} render minutes today)…`;
+  });
+}
+
+/** Keep a final render forever (docs/PLAN.md §9 lifecycle: pinned renders never expire). */
+export async function pinRender(_: ActionState, fd: FormData): Promise<ActionState> {
+  return run(async () => {
+    const { ws, log } = await assertWorkspaceWriter();
+    if (!["publisher", "admin", "owner"].includes(ws.role) && !ws.isAdmin) throw new Error("Only a publisher can pin renders");
+    const renderId = str(fd, "renderId");
+    const render = await withOrgContext(ws, (tx) => tx.query.renders.findFirst({ where: eq(schema.renders.id, renderId) }));
+    if (!render?.outputPath || render.status !== "done") throw new Error("Only finished renders can be pinned");
+    const pinned = !render.pinned;
+    const target = pinned ? render.outputPath.replace(/^renders\//, "pinned/") : render.outputPath.replace(/^pinned\//, "renders/");
+    if (target !== render.outputPath) {
+      await copyObject(render.outputPath, target);
+      if (render.coverPath) await copyObject(render.coverPath, render.coverPath.replace(/^(renders|pinned)\//, pinned ? "pinned/" : "renders/")).catch(() => {});
+    }
+    await withOrgContext(ws, (tx) =>
+      tx.update(schema.renders).set({ pinned, outputPath: target, coverPath: render.coverPath?.replace(/^(renders|pinned)\//, pinned ? "pinned/" : "renders/") ?? null }).where(eq(schema.renders.id, renderId)),
+    );
+    await log(pinned ? "render.pinned" : "render.unpinned", { renderId }, render.projectId ?? undefined);
+    if (render.projectId) revalidatePath(`/app/projects/${render.projectId}`);
+    return pinned ? "Render pinned (never expires)" : "Render unpinned";
+  });
 }

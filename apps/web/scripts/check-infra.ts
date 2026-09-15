@@ -6,6 +6,8 @@
 import { HeadBucketCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { GetFunctionCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { getFunctions } from "@remotion/lambda-client";
+import { SpeechClient } from "@google-cloud/speech";
+import textToSpeech from "@google-cloud/text-to-speech";
 import postgres from "postgres";
 
 type Check = { name: string; run: () => Promise<string> };
@@ -110,6 +112,39 @@ const checks: Check[] = [
       const sa = JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS_JSON ?? "{}") as { client_email?: string; project_id?: string };
       if (!sa.client_email) throw new Error("missing or unparsable");
       return `${sa.client_email} project=${sa.project_id}`;
+    },
+  },
+  {
+    name: "Google Cloud Text-to-Speech (phase 3 voice-over)",
+    run: async () => {
+      const credentials = JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS_JSON ?? "{}");
+      const client = new textToSpeech.TextToSpeechClient({ credentials });
+      const [{ voices }] = await client.listVoices({ languageCode: "vi-VN" });
+      const names = (voices ?? []).map((v) => v.name ?? "");
+      if (!names.includes("vi-VN-Chirp3-HD-Charon")) throw new Error(`default voice missing; have ${names.slice(0, 5).join(", ")}`);
+      return `${names.length} vi-VN voices incl. Chirp3-HD-Charon`;
+    },
+  },
+  {
+    name: "Google Cloud Speech-to-Text (phase 3 word timings)",
+    run: async () => {
+      const credentials = JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS_JSON ?? "{}");
+      const client = new SpeechClient({ credentials });
+      // 0.5 s of silence: proves the API is enabled and the SA may call it, at zero cost.
+      const silence = Buffer.alloc(24000);
+      await client.recognize({ config: { encoding: "LINEAR16", sampleRateHertz: 24000, languageCode: "vi-VN", enableWordTimeOffsets: true }, audio: { content: silence.toString("base64") } });
+      return "recognize() accepted vi-VN LINEAR16";
+    },
+  },
+  {
+    name: "Stock providers (Pexels / Pixabay keys in Vault)",
+    run: async () => {
+      const sql = postgres(env.DATABASE_URL!, { prepare: false, max: 1 });
+      const rows = await sql<{ provider: string; enabled: boolean }[]>`select provider, enabled from integrations where provider in ('pexels','pixabay','mubert','slack_webhook')`;
+      await sql.end();
+      const on = rows.filter((r) => r.enabled).map((r) => r.provider);
+      if (!on.includes("pexels") && !on.includes("pixabay")) throw new Error("no stock provider enabled; add Pexels/Pixabay keys in /admin/integrations (B-roll falls back to article images)");
+      return `enabled: ${on.join(", ")}`;
     },
   },
   {

@@ -10,6 +10,7 @@ const nav = [
   ["/admin/integrations", "Integrations"],
   ["/admin/prompts", "Prompt templates"],
   ["/admin/evals", "Eval set & runs"],
+  ["/admin/music", "Music library"],
   ["/admin/quotas", "Quotas"],
   ["/admin/activity", "Activity log"],
   ["/admin/health", "Health & test render"],

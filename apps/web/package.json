@@ -17,11 +17,13 @@
     "inngest:dev": "inngest-cli dev -u http://localhost:3000/api/inngest"
   },
   "dependencies": {
+    "@ai-news/video": "workspace:*",
     "@anthropic-ai/sdk": "^0.125.0",
     "@aws-sdk/client-lambda": "^3.1131.0",
     "@aws-sdk/client-s3": "^3.1131.0",
     "@aws-sdk/s3-request-presigner": "^3.1131.0",
     "@base-ui/react": "^1.8.0",
+    "@google-cloud/speech": "^8.1.0",
     "@google-cloud/text-to-speech": "^7.1.0",
     "@mozilla/readability": "^0.6.0",
     "@remotion/lambda": "^4.0.525",

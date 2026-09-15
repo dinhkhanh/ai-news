@@ -35,7 +35,7 @@ Order matters: database → auth → app deploy → storage → AWS → Inngest 
    - Role `remotion-lambda-role` (trust: lambda.amazonaws.com) with inline policy `infra/aws/remotion-role-policy.json`. It must include `s3:ListAllMyBuckets`; a trimmed copy fails at render time with *not authorized to perform: s3:ListAllMyBuckets*.
    - User `ai-news-vercel` with `infra/aws/remotion-user-policy.json` **plus** `infra/aws/media-lambda-invoke-policy.json` **plus** `infra/aws/sam-deployer-policy.json` (only needed on the machine that runs the media Lambda deploy; can be a separate user). Access key → `REMOTION_AWS_ACCESS_KEY_ID`, `REMOTION_AWS_SECRET_ACCESS_KEY`.
    - Regenerate the Remotion documents after a Remotion upgrade: `pnpm --filter @ai-news/video lambda:policies`.
-2. Remotion: with those keys exported, `pnpm --filter @ai-news/video lambda:deploy`. It deploys a 2 GB / 4 GB-disk function and the site bundle, and prints `REMOTION_FUNCTION_NAME` + `REMOTION_SERVE_URL`. Re-run after every change to `packages/video` (bump the package version to get a new site name).
+2. Remotion: `pnpm --filter @ai-news/video lambda:deploy` (reads `apps/web/.env.local` when present, otherwise the exported `REMOTION_AWS_*` keys; it sets `NODE_PATH=./node_modules` because `@remotion/serverless-client` resolves its `remotion` peer from the caller under pnpm). It deploys a 2 GB / 4 GB-disk function and the site bundle, and prints `REMOTION_FUNCTION_NAME` + `REMOTION_SERVE_URL`. Re-run after every change to `packages/video` (bump the package version to get a new site name).
 3. Check concurrency: `pnpm --filter @ai-news/video lambda:quotas` (request 1000+ concurrent Lambdas in the account if it is still at the default 10).
 4. Media Lambda (needs Docker running + AWS SAM CLI, `brew install aws-sam-cli`): `IMAGE_REPO=<account>.dkr.ecr.ap-southeast-1.amazonaws.com/ai-news-media bash packages/media-lambda/deploy.sh`. Create that ECR repository once (console or `aws ecr create-repository --repository-name ai-news-media`); passing it avoids SAM's companion stack and the extra CloudFormation permissions it needs. `bash packages/media-lambda/deploy.sh` without `IMAGE_REPO` lets SAM create the repo instead. It reads the R2 and AWS values from `apps/web/.env.local`, builds the container image and deploys stack `ai-news-media`. Function name `ai-news-media` → `MEDIA_LAMBDA_FUNCTION_NAME`.
    Keep `@remotion/lambda` / `@remotion/lambda-client` in `apps/web` pinned to the exact version of the deployed Remotion function; a mismatch fails every render with *Version mismatch*.
@@ -63,5 +63,18 @@ Nothing new to provision if phase 1 passed; phase 2 reuses the Cloudflare token 
    creates a project for the first admin, waits for `fetched`, confirms the text, waits for `scripted` and prints scenes, verdicts, metadata, `usage_costs` and activity. `--fetch-only` stops after extraction.
    In the browser: `/app` → paste a URL → the project page shows extraction (method, words, flags, images), lets you edit and **confirm** the text, then **Tạo kịch bản** (30/60/90 s, tone). The review view lists scenes with per-scene verdicts; clicking a scene highlights its evidence in the article.
 
-## 9. Observability (create accounts now, wire in phase 3)
+## 9. Phase 3: media + render
+1. `pnpm db:migrate` applies `0004_phase3_media_render` (asset scene/selection columns, timeline script link + build log, render raw path).
+2. Google Cloud: enable **Speech-to-Text** for the same service account (word timings for Chirp 3 HD voices). `check-infra.ts` now lists vi-VN voices and makes a zero-cost `recognize()` call.
+3. `/admin/integrations`: add **Pexels** and **Pixabay** API keys (both free) and enable them; without them every scene falls back to article images / brand background. Optional: **Mubert** (`CUSTOMER_ID:ACCESS_TOKEN`, API v3) and **Slack webhook** (render notifications).
+4. `/admin/music`: upload at least one licensed track per mood family (news/neutral, calm, tense, upbeat) so builds have music when Mubert is off.
+5. Redeploy both Lambdas after pulling this phase: `pnpm --filter @ai-news/video lambda:deploy` (site `ai-news-v0-2-0` with the `News` composition → update `REMOTION_SERVE_URL`) and `IMAGE_REPO=… bash packages/media-lambda/deploy.sh` (adds the `mix` action).
+6. R2 lifecycle: `infra/r2/lifecycle.json` gained `media/` (12 months); re-run `infra/r2/apply-lifecycle.sh` once the Cloudflare token can manage R2.
+7. `/app/brand`: optional workspace brand kit (colours, fonts, logo, caption style, outro line). Defaults are used otherwise.
+8. Acceptance test (local): with the dev servers running and a project in state `scripted`,
+   `INNGEST_DEV=1 pnpm --filter web exec tsx --env-file=.env.local scripts/send-test-media.ts <projectId>`
+   waits for `composed`, prints the timeline (per-scene visual, timing method, music, mix loudness), then renders and prints the QA checks, cost and activity. `--assets-only` / `--render-only` / `--skip-stock` split the run.
+   In the browser: project page → **Dựng video** → timeline summary with audio preview → **Kết xuất** → render row with cover, QA badges and MP4 link; **Ghim** keeps a render forever.
+
+## 10. Observability (create accounts now, wire later)
 Sentry project (Next.js), Vercel log drain, PostHog project, Langfuse project, Resend domain, Slack incoming webhook. Keys go to `/admin/integrations` where listed, otherwise to Vercel env.

@@ -19,3 +19,12 @@ describe("ffmpeg output parsers", () => {
     expect(parseFps(undefined)).toBe(0);
   });
 });
+
+describe("parseLoudnormJson with ffmpeg 7+/8 trailing summary", () => {
+  it("stops at the closing brace and tolerates -inf on silent input", () => {
+    const stderr = `[Parsed_loudnorm_0 @ 0x1]\n{\n\t"input_i" : "-16.79",\n\t"input_tp" : "-2.89",\n\t"target_offset" : "0.05"\n}\n[out#0/null @ 0x2] video:0KiB audio:7500KiB\nsize=N/A time=00:00:10.00 bitrate=N/A speed=34.5x elapsed=0:00:00.28\n`;
+    expect(parseLoudnormJson(stderr)?.input_i).toBe("-16.79");
+    const silent = `{\n\t"input_i" : -inf,\n\t"input_tp" : -inf,\n\t"target_offset" : "inf"\n}\n[out#0/null @ 0x2] video:0KiB\n`;
+    expect(parseLoudnormJson(silent)?.input_i).toBe("-inf");
+  });
+});

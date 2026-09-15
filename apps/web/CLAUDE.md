@@ -8,9 +8,10 @@ Plan of record: `docs/PLAN.md`. Setup runbook: `docs/SETUP.md`. External filings
   - `src/lib/fetch` – extraction chain (Browser Rendering → HTTP → Firecrawl → manual), Readability on linkedom, flags.
   - `src/lib/llm` – Anthropic client (Vault key, spend cap, cost rows), structured-output schemas, template rendering, script / faithfulness / classify calls.
   - `src/lib/prompts/defaults.ts` – built-in templates (also seeded by migration 0003); admin versions in `prompt_templates` override them.
-  - `src/inngest/functions` – `fetch-article`, `generate-script`, `run-prompt-eval` (+ phase 1 `test-render`).
-- `packages/video` – Remotion compositions + Lambda deploy script (`ap-southeast-1`, output to R2).
-- `packages/media-lambda` – FFmpeg/yt-dlp Lambda (container image, AWS SAM).
+  - `src/lib/media` – phase 3: `tts.ts` (Google TTS + STT word timings), `stock.ts` (Pexels/Pixabay), `rank.ts` (Haiku thumbnail ranking), `music.ts` (Mubert v3 + library), `brand.ts`, `timeline.ts` (pure builder, R2 keys in `src`) + `timeline-resolve.ts` (presigned URLs for Lambda); pure helpers `pronounce.ts`, `align.ts`, `captions.ts` have tests.
+  - `src/inngest/functions` – `fetch-article`, `generate-script`, `run-prompt-eval`, `prepare-assets`, `render-project` (+ phase 1 `test-render`).
+- `packages/video` – Remotion compositions (`News` renders timeline JSON v1 from `src/schema.ts`, shared with the web app via `@ai-news/video/schema`) + Lambda deploy script (`ap-southeast-1`, output to R2). Bump the package version before `lambda:deploy` so the site name changes.
+- `packages/media-lambda` – FFmpeg/yt-dlp Lambda (container image, AWS SAM): probe / loudnorm / duck / cover / mix / web-video. Keep `src/types.ts` in sync with `apps/web/src/lib/media-lambda.ts`.
 - `infra/` – R2 bucket/lifecycle scripts, IAM policy.
 
 ## Commands
@@ -26,5 +27,6 @@ Plan of record: `docs/PLAN.md`. Setup runbook: `docs/SETUP.md`. External filings
 - Secrets: deployment credentials in Vercel env; admin-editable keys and channel tokens in Supabase Vault (never in tables).
 - Inngest v4: triggers in options, `eventType()` for typed events, keep `checkpointing.maxRuntime` below the route `maxDuration`. Set `projects.busy_step` when a step starts and clear it in the function and in `onFailure`; the UI treats a flag older than 15 min as stale.
 - Claude calls: `claude-opus-5` for script/faithfulness (adaptive thinking, structured outputs via `client.beta.messages.parse`, cached system blocks, server-side refusal fallback), `claude-haiku-4-5` for classification. Map billing/auth/400 errors to `NonRetriableError` (`isPermanentLlmError`).
-- Pure helpers that need unit tests live outside `server-only` modules (`src/lib/url.ts`, `fetch/readability.ts`, `llm/render.ts`, `llm/schemas.ts`, `eval-summary.ts`, `text-match.ts`).
+- Pure helpers that need unit tests live outside `server-only` modules (`src/lib/url.ts`, `fetch/readability.ts`, `llm/render.ts`, `llm/schemas.ts`, `eval-summary.ts`, `text-match.ts`, `media/{pronounce,align,captions,timeline}.ts`).
+- Timeline JSON stores R2 keys, never URLs; presign only in `timeline-resolve.ts` right before a render. Project media lives under `media/<org>/<project>/` (12 mo), raw renders under `tmp/` (24 h), finals under `renders/` or `pinned/`.
 - Next 16: `proxy.ts` (not middleware), route handlers under `src/app/api`. Read `apps/web/node_modules/next/dist/docs` before using unfamiliar APIs.

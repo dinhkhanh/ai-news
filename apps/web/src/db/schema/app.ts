@@ -314,12 +314,22 @@ export const assets = pgTable(
     sizeBytes: bigint("size_bytes", { mode: "number" }),
     searchTerm: text("search_term"),
     rankScore: numeric("rank_score", { precision: 5, scale: 2 }),
+    /** Scene this candidate was fetched for (phase 3); null for project-wide assets (A-roll pool, music). */
+    sceneId: text("scene_id"),
+    /** Chosen for the timeline; other rows for the scene are alternates (phase 4 swap). */
+    selected: boolean("selected").notNull().default(false),
+    /** Remote preview image (not stored in R2) for the UI and the ranking model. */
+    thumbnailUrl: text("thumbnail_url"),
+    attribution: text("attribution"),
+    licenceUrl: text("licence_url"),
+    rankReason: text("rank_reason"),
     meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
   (t) => [
     index("assets_org_hash_idx").on(t.organizationId, t.hash),
     index("assets_project_idx").on(t.projectId),
+    index("assets_project_scene_idx").on(t.projectId, t.sceneId),
   ],
 );
 
@@ -333,6 +343,10 @@ export const timelines = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     json: jsonb("json").$type<Record<string, unknown>>().notNull(),
+    scriptId: uuid("script_id").references(() => scripts.id, { onDelete: "set null" }),
+    durationSec: numeric("duration_sec", { precision: 8, scale: 2 }),
+    /** Per-scene provenance (voice timing method, chosen asset, music) for the review UI. */
+    buildJson: jsonb("build_json").$type<Record<string, unknown>>().notNull().default({}),
     note: text("note"),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
@@ -355,6 +369,9 @@ export const renders = pgTable(
     durationSec: numeric("duration_sec", { precision: 8, scale: 2 }),
     costUsd: numeric("cost_usd", { precision: 10, scale: 4 }),
     qaJson: jsonb("qa_json").$type<Record<string, unknown>>(),
+    /** Raw Remotion output before final loudness normalisation (kept under tmp/, 24 h). */
+    rawPath: text("raw_path"),
+    renderSeconds: numeric("render_seconds", { precision: 8, scale: 2 }),
     status: renderStatusEnum("status").notNull().default("queued"),
     error: text("error"),
     pinned: boolean("pinned").notNull().default(false),

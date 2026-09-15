@@ -13,48 +13,108 @@ export const testCardSchema = z.object({
 });
 export type TestCardProps = z.infer<typeof testCardSchema>;
 
+/** Fonts bundled with the News composition (loaded via @remotion/google-fonts). */
+export const BRAND_FONTS = ["Be Vietnam Pro", "Inter"] as const;
+
 /**
- * Timeline JSON v1 (phase 3/4 fill this in). Kept here so the web app, the
- * editor and the renderer share one contract from the start.
+ * Brand kit as embedded in a timeline so a render is reproducible even if the
+ * workspace kit changes later. Colours are CSS colours.
  */
+export const brandSchema = z.object({
+  name: z.string().default("ai-news"),
+  colours: z.object({
+    primary: z.string().default("#0f172a"),
+    accent: z.string().default("#f59e0b"),
+    background: z.string().default("#0b1220"),
+    text: z.string().default("#ffffff"),
+    captionBg: z.string().default("rgba(0,0,0,0.72)"),
+    captionHighlight: z.string().default("#fbbf24"),
+  }),
+  fonts: z.object({
+    heading: z.enum(BRAND_FONTS).default("Be Vietnam Pro"),
+    body: z.enum(BRAND_FONTS).default("Be Vietnam Pro"),
+    caption: z.enum(BRAND_FONTS).default("Be Vietnam Pro"),
+  }),
+  caption: z.object({
+    position: z.enum(["bottom", "middle"]).default("bottom"),
+    fontSize: z.number().int().min(36).max(96).default(64),
+    uppercase: z.boolean().default(false),
+    highlightWords: z.boolean().default(true),
+  }),
+  /** Absolute URL at render time (resolved from an R2 key by the app). */
+  logoSrc: z.string().nullable().default(null),
+  showSource: z.boolean().default(true),
+  /** Short label shown in the CTA/outro, e.g. the channel name. */
+  outroText: z.string().nullable().default(null),
+});
+export type Brand = z.infer<typeof brandSchema>;
+
+/**
+ * Timeline JSON v1 (docs/PLAN.md §4.6). Stored per version in `timelines.json`
+ * with R2 *keys* in every `src`; the app resolves keys to presigned URLs right
+ * before rendering (see apps/web/src/lib/media/timeline.ts). The composition
+ * only ever sees URLs.
+ */
+export const visualSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("video"),
+    src: z.string(),
+    /** Seconds into the clip to start from. */
+    trimStartSec: z.number().nonnegative().default(0),
+    /** Clip length in seconds; the scene loops it when the scene is longer. */
+    clipDurationSec: z.number().positive(),
+    fit: z.enum(["cover", "contain"]).default("cover"),
+    muted: z.boolean().default(true),
+  }),
+  z.object({
+    kind: z.literal("image"),
+    src: z.string(),
+    kenBurns: z.boolean().default(true),
+  }),
+  z.object({ kind: z.literal("solid") }),
+]);
+export type Visual = z.infer<typeof visualSchema>;
+
+export const sceneSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["hook", "body", "cta"]),
+  from: z.number().int().nonnegative(),
+  durationFrames: z.number().int().positive(),
+  headline: z.string().default(""),
+  visual: visualSchema,
+  /** Provenance for the on-screen attribution line. */
+  credit: z.string().nullable().default(null),
+});
+export type TimelineScene = z.infer<typeof sceneSchema>;
+
+export const captionSchema = z.object({
+  text: z.string(),
+  startMs: z.number().nonnegative(),
+  endMs: z.number().positive(),
+  words: z.array(z.object({ w: z.string(), s: z.number(), e: z.number() })).default([]),
+});
+export type Caption = z.infer<typeof captionSchema>;
+
 export const timelineSchema = z.object({
   version: z.literal(1),
   fps: z.literal(30),
   width: z.literal(1080),
   height: z.literal(1920),
   durationFrames: z.number().int().positive(),
-  brandKitId: z.string().optional(),
-  tracks: z.object({
-    video: z.array(
-      z.object({
-        id: z.string(),
-        assetUrl: z.string().url(),
-        from: z.number().int().nonnegative(),
-        durationFrames: z.number().int().positive(),
-        trimStartSec: z.number().nonnegative().default(0),
-        fit: z.enum(["cover", "contain"]).default("cover"),
-        kenBurns: z.boolean().default(false),
-      }),
-    ),
-    overlays: z.array(
-      z.object({
-        id: z.string(),
-        kind: z.enum(["headline", "lower_third", "source", "logo", "intro", "outro"]),
-        text: z.string().optional(),
-        from: z.number().int().nonnegative(),
-        durationFrames: z.number().int().positive(),
-      }),
-    ),
-    captions: z.array(
-      z.object({
-        text: z.string(),
-        startMs: z.number().nonnegative(),
-        endMs: z.number().positive(),
-        words: z.array(z.object({ w: z.string(), s: z.number(), e: z.number() })).optional(),
-      }),
-    ),
-    voice: z.object({ url: z.string().url(), gainDb: z.number().default(0) }).optional(),
-    music: z.object({ url: z.string().url(), gainDb: z.number().default(-12), fadeOutSec: z.number().default(1.5) }).optional(),
+  language: z.enum(["vi", "en"]),
+  title: z.string(),
+  source: z.object({ name: z.string().nullable(), url: z.string() }),
+  brand: brandSchema,
+  scenes: z.array(sceneSchema),
+  captions: z.array(captionSchema),
+  audio: z.object({
+    /** Final mix (VO normalised to -16 LUFS + music ducked). Null = silent render. */
+    mixSrc: z.string().nullable(),
+    voiceSrc: z.string().nullable(),
+    musicSrc: z.string().nullable(),
+    musicGainDb: z.number().default(-12),
   }),
+  /** Credits rendered in the outro, e.g. "Video: Pexels · Music: Mubert". */
+  attribution: z.array(z.string()).default([]),
 });
 export type Timeline = z.infer<typeof timelineSchema>;

@@ -4,6 +4,7 @@
     { "id": "tmp-24h", "enabled": true, "conditions": { "prefix": "tmp/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 86400 } } },
     { "id": "timelines-90d", "enabled": true, "conditions": { "prefix": "timelines/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 7776000 } } },
     { "id": "renders-12mo", "enabled": true, "conditions": { "prefix": "renders/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 31536000 } } },
+    { "id": "media-12mo", "enabled": true, "conditions": { "prefix": "media/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 31536000 } } },
     { "id": "articles-12mo", "enabled": true, "conditions": { "prefix": "articles/" }, "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 31536000 } } },
     { "id": "abort-multipart-1d", "enabled": true, "conditions": { "prefix": "" }, "abortMultipartUploadsTransition": { "condition": { "type": "Age", "maxAge": 86400 } } }
   ]

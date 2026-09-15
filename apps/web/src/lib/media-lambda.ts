@@ -11,6 +11,15 @@ export type MediaAction =
   | { action: "loudnorm"; input: { key: string }; output: { key: string }; targetLufs?: number; truePeak?: number }
   | { action: "duck"; input: { voiceKey: string; musicKey: string }; output: { key: string }; duckDb?: number }
   | { action: "cover"; input: { key: string }; output: { key: string }; atSec?: number }
+  | {
+      /** Voice segments placed at offsets → VO normalised to `voiceLufs`, music looped/faded/ducked under it → one WAV mix. */
+      action: "mix";
+      input: { voice: Array<{ key: string; atSec: number }>; music?: { key: string; gainDb?: number; fadeOutSec?: number } | null };
+      output: { key: string; voiceKey?: string };
+      durationSec: number;
+      voiceLufs?: number;
+      duckDb?: number;
+    }
   | { action: "web-video"; input: { url: string }; output: { key: string }; trim?: { startSec: number; endSec: number } };
 
 export type ProbeResult = {
@@ -33,6 +42,8 @@ export type MediaResult = {
   passed: boolean;
   probe?: ProbeResult;
   outputKey?: string;
+  voiceKey?: string;
+  integratedLufs?: number | null;
   checks?: Record<string, { ok: boolean; expected?: unknown; actual?: unknown }>;
   error?: string;
   billedMs?: number;

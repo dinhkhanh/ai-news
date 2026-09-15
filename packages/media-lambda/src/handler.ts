@@ -4,6 +4,7 @@
  *   loudnorm   – EBU R128 two-pass normalisation (VO -16 LUFS, final mix -14 LUFS, -1 dBTP)
  *   duck       – mix music under voice with sidechain compression (-12 dB under VO)
  *   cover      – extract a cover frame as JPEG
+ *   mix        – VO segments + music → normalised, ducked WAV mix (see mix.ts)
  *   web-video  – yt-dlp download + optional trim (behind the web_video_downloader flag in the app)
  * Runs as a container image (see Dockerfile) so ffmpeg/ffprobe/yt-dlp are on PATH.
  */
@@ -12,6 +13,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ffmpeg, ffprobe, parseBlackDetect, parseFps, parseLoudnormJson, ytdlp } from "./ffmpeg.js";
+import { mix } from "./mix.js";
 import { download, upload } from "./r2.js";
 import type { Check, MediaAction, MediaResult, ProbeResult } from "./types.js";
 
@@ -91,14 +93,16 @@ export async function handle(event: MediaAction, work: string): Promise<MediaRes
       if (!m) throw new Error("loudnorm pass 1 produced no measurement");
       const filter = `loudnorm=I=${I}:TP=${TP}:LRA=11:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true:print_format=summary`;
       const isVideo = /\.(mp4|mov|mkv)$/i.test(input);
+      const isWav = /\.wav$/i.test(output);
       await ffmpeg([
         "-i", input,
         "-af", filter,
-        ...(isVideo ? ["-c:v", "copy"] : []),
-        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        ...(isVideo ? ["-c:v", "copy", "-movflags", "+faststart"] : []),
+        ...(isWav ? ["-c:a", "pcm_s16le"] : ["-c:a", "aac", "-b:a", "192k"]),
+        "-ar", "48000",
         output,
       ]);
-      await upload(output, event.output.key, isVideo ? "video/mp4" : "audio/mp4");
+      await upload(output, event.output.key, isVideo ? "video/mp4" : isWav ? "audio/wav" : "audio/mp4");
       const probe = await probeFile(output).catch(() => undefined);
       return { ok: true, action: "loudnorm", passed: true, outputKey: event.output.key, probe };
     }
@@ -121,6 +125,10 @@ export async function handle(event: MediaAction, work: string): Promise<MediaRes
       await ffmpeg(["-ss", String(event.atSec ?? 1), "-i", input, "-frames:v", "1", "-q:v", "2", output]);
       await upload(output, event.output.key, "image/jpeg");
       return { ok: true, action: "cover", passed: true, outputKey: event.output.key };
+    }
+    case "mix": {
+      const r = await mix(event, work);
+      return { ok: true, action: "mix", passed: true, ...r };
     }
     case "web-video": {
       const raw = path.join(work, "raw.mp4");

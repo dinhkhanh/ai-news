@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -40,6 +41,7 @@ export const r2Bucket = () => env().R2_BUCKET;
  *   renders/<org>/<project>/...      final renders, 12 mo unless pinned/
  *   pinned/<org>/<project>/...       never expires
  *   articles/<org>/<project>/...     snapshots, 12 mo
+ *   media/<org>/<project>/...        selected B-roll, VO, music, mixes, 12 mo
  *   library/...                      music + brand assets, never expires
  */
 export const r2Key = {
@@ -48,6 +50,7 @@ export const r2Key = {
   render: (org: string, project: string, name: string) => `renders/${org}/${project}/${name}`,
   pinned: (org: string, project: string, name: string) => `pinned/${org}/${project}/${name}`,
   article: (org: string, project: string, name: string) => `articles/${org}/${project}/${name}`,
+  media: (org: string, project: string, name: string) => `media/${org}/${project}/${name}`,
   library: (name: string) => `library/${name}`,
   test: (name: string) => `tmp/_test/${name}`,
 };
@@ -75,6 +78,22 @@ export async function headObject(key: string) {
     if ((err as { name?: string }).name === "NotFound") return { exists: false as const };
     throw err;
   }
+}
+
+export async function getObjectBuffer(key: string) {
+  const res = await r2().send(new GetObjectCommand({ Bucket: r2Bucket(), Key: key }));
+  if (!res.Body) throw new Error(`empty body for ${key}`);
+  return Buffer.from(await res.Body.transformToByteArray());
+}
+
+/** Absolute URLs pass through; R2 keys become presigned GET URLs (Remotion Lambda fetches them). */
+export async function resolveSrc(keyOrUrl: string, expiresIn = 3 * 3600) {
+  return /^https?:\/\//.test(keyOrUrl) ? keyOrUrl : presignGet(keyOrUrl, expiresIn);
+}
+
+export async function copyObject(from: string, to: string) {
+  await r2().send(new CopyObjectCommand({ Bucket: r2Bucket(), CopySource: `/${r2Bucket()}/${encodeURI(from)}`, Key: to }));
+  return to;
 }
 
 export async function deleteObject(key: string) {

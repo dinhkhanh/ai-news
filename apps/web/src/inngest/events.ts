@@ -64,6 +64,30 @@ export const projectScriptRequested = eventType("project/script.requested", {
   }),
 });
 
+/** Phase 3 step 3–6: A-roll/B-roll, TTS + timings, music, audio mix → timeline version (project → composed). */
+export const projectAssetsRequested = eventType("project/assets.requested", {
+  schema: z.object({
+    projectId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    /** Script version to build from; default = latest. */
+    scriptId: z.string().optional(),
+    /** Skip stock search (article images / solid backgrounds only). */
+    skipStock: z.boolean().optional(),
+  }),
+});
+
+/** Phase 3 step 9: Remotion Lambda render of a timeline version + media Lambda post-processing and QA. */
+export const projectRenderRequested = eventType("project/render.requested", {
+  schema: z.object({
+    projectId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    /** Timeline version to render; default = latest. */
+    timelineId: z.string().optional(),
+  }),
+});
+
 /** Admin: run a prompt template version against the eval set. */
 export const promptEvalRequested = eventType("prompt/eval.requested", {
   schema: z.object({

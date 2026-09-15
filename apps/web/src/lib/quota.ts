@@ -34,11 +34,13 @@ export async function usedToday(userId: string, resource: Resource) {
       return n;
     });
   }
-  const [{ n }] = await db
-    .select({ n: count() })
+  // Other resources are metered by `quota.<resource>` activity events; render minutes carry the amount in payload.minutes.
+  const rows = await db
+    .select({ payload: schema.activityEvents.payload })
     .from(schema.activityEvents)
     .where(and(eq(schema.activityEvents.actorId, userId), eq(schema.activityEvents.type, `quota.${resource}`), gte(schema.activityEvents.createdAt, since)));
-  return n;
+  if (resource === "render_minutes") return Math.ceil(rows.reduce((a, r) => a + Number((r.payload as { minutes?: number }).minutes ?? 0), 0));
+  return rows.length;
 }
 
 /** Throws a user-facing error when the daily quota is exhausted. */

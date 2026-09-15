@@ -6,6 +6,8 @@ import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ScriptReview } from "@/components/script-review";
+import { TimelineSummary, type BuildJson } from "@/components/timeline-summary";
+import type { Timeline } from "@ai-news/video/schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +20,8 @@ import { busyIsStale, busyStep } from "@/lib/project-state";
 import { presignGet } from "@/lib/r2";
 import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
-import { confirmArticle, deleteProject, pasteArticle, refetchArticle, requestScript } from "./actions";
+import { dailyLimit, usedToday } from "@/lib/quota";
+import { confirmArticle, deleteProject, pasteArticle, pinRender, refetchArticle, requestAssets, requestRender, requestScript } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,8 +29,11 @@ const STATE_LABEL: Record<string, string> = {
   created: "Đang tải bài",
   fetched: "Đã lấy bài",
   scripted: "Đã có kịch bản",
+  composed: "Đã dựng timeline",
+  rendered: "Đã kết xuất",
   failed: "Lỗi",
 };
+const RENDER_LABEL: Record<string, string> = { queued: "chờ", rendering: "đang kết xuất", post_processing: "hậu kỳ + QA", qa_failed: "QA không đạt", done: "xong", failed: "lỗi" };
 
 function PresetFields({ durationSec, tone }: { durationSec: number; tone: string }) {
   return (
@@ -56,7 +62,7 @@ function PresetFields({ durationSec, tone }: { durationSec: number; tone: string
   );
 }
 
-export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ v?: string; duplicate?: string }> }) {
+export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ v?: string; t?: string; duplicate?: string }> }) {
   const { id } = await params;
   const sp = await searchParams;
   const ws = await requireWorkspace();
@@ -67,10 +73,33 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     if (!project) return null;
     const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, id), orderBy: desc(schema.articles.createdAt) });
     const scripts = await tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) });
-    return { project, article, scripts };
+    const timelines = await tx.query.timelines.findMany({ where: eq(schema.timelines.projectId, id), orderBy: desc(schema.timelines.version) });
+    const renders = await tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) });
+    return { project, article, scripts, timelines, renders };
   });
   if (!data) notFound();
-  const { project, article, scripts } = data;
+  const { project, article, scripts, timelines, renders } = data;
+  const selectedTimeline = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
+  const timelineJson = selectedTimeline ? (selectedTimeline.json as unknown as Timeline) : null;
+  const sign = async (key: string | null | undefined, ttl = 900) => {
+    if (!key) return null;
+    try {
+      return await presignGet(key, ttl);
+    } catch {
+      return null;
+    }
+  };
+  const imageUrls: Record<string, string> = {};
+  for (const sc of timelineJson?.scenes ?? []) {
+    if (sc.visual.kind === "image" && !imageUrls[sc.visual.src]) {
+      const u = await sign(sc.visual.src);
+      if (u) imageUrls[sc.visual.src] = u;
+    }
+  }
+  const mixUrl = await sign(timelineJson?.audio.mixSrc);
+  const renderLinks = new Map<string, { video: string | null; cover: string | null }>();
+  for (const r of renders.slice(0, 10)) renderLinks.set(r.id, { video: r.status === "done" ? await sign(r.outputPath, 3600) : null, cover: await sign(r.coverPath) });
+  const [renderLimit, renderUsed] = writer ? await Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0];
   const busy = Boolean(busyStep(project));
   const stale = busyIsStale(project);
   const selected = scripts.find((s) => String(s.version) === sp.v) ?? scripts[0] ?? null;
@@ -260,6 +289,126 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                 </div>
               </ActionForm>
             </details>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ---------------- Assets + timeline (phase 3) ---------------- */}
+      {scripts.length ? (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-base">Dựng video</CardTitle>
+                <CardDescription>Lời đọc Google TTS + mốc từ, B-roll Pexels/Pixabay do Haiku xếp hạng (hoặc ảnh bài), nhạc nền, trộn âm −16 LUFS, rồi timeline. Mỗi lần dựng là một phiên bản mới.</CardDescription>
+              </div>
+              {writer ? (
+                <ActionForm action={requestAssets} className="flex flex-wrap items-center gap-3">
+                  <input type="hidden" name="projectId" value={project.id} />
+                  <input type="hidden" name="scriptId" value={selected?.id ?? ""} />
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input type="checkbox" name="skipStock" /> bỏ qua stock
+                  </label>
+                  <Button type="submit" disabled={busy}>
+                    {timelines.length ? `Dựng lại từ kịch bản v${selected?.version ?? scripts[0].version}` : `Dựng từ kịch bản v${selected?.version ?? scripts[0].version}`}
+                  </Button>
+                </ActionForm>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {project.busyStep === "assets" ? <p className="text-sm text-muted-foreground">Đang tổng hợp giọng đọc, tìm B-roll, trộn âm… thường mất 2–4 phút. Trang tự làm mới.</p> : null}
+            {timelines.length > 1 ? (
+              <div className="flex flex-wrap gap-1 text-xs">
+                {timelines.map((t) => (
+                  <Link key={t.id} href={`/app/projects/${project.id}?v=${sp.v ?? ""}&t=${t.version}`} className={`rounded-full border px-2 py-0.5 ${selectedTimeline?.id === t.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+                    timeline v{t.version}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
+            {timelineJson && selectedTimeline ? (
+              <>
+                <TimelineSummary timeline={timelineJson} build={selectedTimeline.buildJson as BuildJson} imageUrls={imageUrls} mixUrl={mixUrl} />
+                {writer ? (
+                  <ActionForm action={requestRender} className="flex flex-wrap items-center gap-3 border-t pt-3">
+                    <input type="hidden" name="projectId" value={project.id} />
+                    <input type="hidden" name="timelineId" value={selectedTimeline.id} />
+                    <Button type="submit" disabled={busy}>
+                      Kết xuất timeline v{selectedTimeline.version}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      Remotion Lambda → chuẩn hoá −14 LUFS → QA. Hôm nay đã dùng {renderUsed}/{renderLimit} phút kết xuất.
+                    </span>
+                  </ActionForm>
+                ) : null}
+              </>
+            ) : !busy ? (
+              <p className="text-sm text-muted-foreground">Chưa có timeline. Bấm “Dựng” để tạo lời đọc, B-roll và nhạc từ kịch bản đã chọn.</p>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ---------------- Renders ---------------- */}
+      {renders.length || project.busyStep === "render" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Kết xuất</CardTitle>
+            <CardDescription>1080×1920, 30 fps, H.264 CRF 18, −14 LUFS. Bản ghim không bao giờ hết hạn; bản khác giữ 12 tháng.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {project.busyStep === "render" ? <p className="text-sm text-muted-foreground">Đang kết xuất trên Remotion Lambda… 1–3 phút. Trang tự làm mới.</p> : null}
+            {renders.slice(0, 10).map((r) => {
+              const links = renderLinks.get(r.id);
+              const checks = (r.qaJson as { checks?: Record<string, { ok: boolean; expected?: unknown; actual?: unknown }> } | null)?.checks ?? {};
+              return (
+                <div key={r.id} className="flex gap-3 rounded-md border p-2 text-sm">
+                  <div className="h-28 w-16 shrink-0 overflow-hidden rounded bg-muted">
+                    {links?.cover ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={links.cover} alt="" className="h-full w-full object-cover" />
+                    ) : null}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Badge variant={r.status === "done" ? "default" : r.status === "failed" || r.status === "qa_failed" ? "destructive" : "secondary"}>{RENDER_LABEL[r.status] ?? r.status}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        timeline v{r.timelineVersion} · {r.createdAt.toISOString().slice(0, 16).replace("T", " ")}
+                        {r.durationSec ? ` · ${Number(r.durationSec).toFixed(1)} s` : ""}
+                        {r.costUsd ? ` · $${Number(r.costUsd).toFixed(3)}` : ""}
+                        {r.renderSeconds ? ` · ${Number(r.renderSeconds).toFixed(0)} s render` : ""}
+                      </span>
+                      {r.pinned ? <Badge variant="outline">đã ghim</Badge> : null}
+                    </div>
+                    <div className="flex flex-wrap gap-1 text-xs">
+                      {Object.entries(checks).map(([k, c]) => (
+                        <Badge key={k} variant={c.ok ? "outline" : "destructive"}>
+                          {k}
+                          {c.ok ? "" : `: ${String(c.actual)}`}
+                        </Badge>
+                      ))}
+                    </div>
+                    {r.error ? <div className="text-xs text-destructive">{r.error.slice(0, 300)}</div> : null}
+                    <div className="flex flex-wrap items-center gap-3 text-xs">
+                      {links?.video ? (
+                        <a href={links.video} target="_blank" rel="noreferrer" className="underline">
+                          tải / xem MP4
+                        </a>
+                      ) : null}
+                      {writer && r.status === "done" ? (
+                        <ActionForm action={pinRender}>
+                          <input type="hidden" name="renderId" value={r.id} />
+                          <Button type="submit" size="sm" variant="ghost">
+                            {r.pinned ? "Bỏ ghim" : "Ghim (giữ vĩnh viễn)"}
+                          </Button>
+                        </ActionForm>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       ) : null}
