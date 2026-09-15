@@ -1,0 +1,63 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm -r lint
+      - run: pnpm -r test
+      - name: Check Drizzle migrations are up to date
+        working-directory: apps/web
+        run: |
+          pnpm exec drizzle-kit generate --name ci_check
+          if ls src/db/migrations/*_ci_check.sql >/dev/null 2>&1; then
+            echo "::error::Schema changed without a migration. Run pnpm db:generate."; exit 1
+          fi
+      - name: Build web
+        working-directory: apps/web
+        env:
+          # Build only needs shapes, not real secrets.
+          DATABASE_URL: postgres://build:build@localhost:5432/build
+          BETTER_AUTH_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+          GOOGLE_CLIENT_ID: ci
+          GOOGLE_CLIENT_SECRET: ci
+          APP_URL: http://localhost:3000
+        run: pnpm build
+
+  migrate-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: ai_news }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Apply migrations to a clean Postgres
+        working-directory: apps/web
+        env:
+          DATABASE_DIRECT_URL: postgres://postgres:postgres@localhost:5432/ai_news
+        run: pnpm db:migrate

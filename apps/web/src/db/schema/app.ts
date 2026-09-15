@@ -1,0 +1,482 @@
+/**
+ * Application tables (docs/PLAN.md §5). All org-scoped tables carry
+ * organization_id and are protected by RLS (see migrations/*_rls.sql).
+ */
+import { sql } from "drizzle-orm";
+import {
+  bigint,
+  boolean,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+import { organization, user } from "./auth";
+
+// ---------- enums ----------
+
+export const projectStateEnum = pgEnum("project_state", [
+  "created",
+  "fetched",
+  "scripted",
+  "assets_ready",
+  "composed",
+  "in_review",
+  "approved",
+  "rendered",
+  "published",
+  "failed",
+]);
+
+export const languageEnum = pgEnum("language", ["vi", "en"]);
+
+export const platformEnum = pgEnum("platform", ["youtube", "facebook", "instagram", "tiktok"]);
+
+export const assetOriginEnum = pgEnum("asset_origin", [
+  "article",
+  "stock",
+  "ai",
+  "web_video",
+  "upload",
+  "library",
+]);
+
+export const renderStatusEnum = pgEnum("render_status", [
+  "queued",
+  "rendering",
+  "post_processing",
+  "qa_failed",
+  "done",
+  "failed",
+]);
+
+export const publicationStatusEnum = pgEnum("publication_status", [
+  "draft",
+  "scheduled",
+  "publishing",
+  "processing",
+  "published",
+  "failed",
+]);
+
+export const quotaScopeEnum = pgEnum("quota_scope", ["user", "org"]);
+
+// ---------- helpers ----------
+
+const orgId = () =>
+  text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" });
+
+const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
+const updatedAt = () =>
+  timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date());
+
+// ---------- platform-level (not org-scoped) ----------
+
+export const allowedDomains = pgTable("allowed_domains", {
+  domain: text("domain").primaryKey(),
+  note: text("note"),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+});
+
+export const featureFlags = pgTable("feature_flags", {
+  key: text("key").primaryKey(),
+  enabled: boolean("enabled").notNull().default(false),
+  description: text("description"),
+  config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedAt: updatedAt(),
+});
+
+/** Shared third-party API keys. Secret lives in Supabase Vault; we keep the vault secret id. */
+export const integrations = pgTable("integrations", {
+  provider: text("provider").primaryKey(), // anthropic | pexels | pixabay | mubert | firecrawl | cloudflare_browser | ...
+  vaultRef: uuid("vault_ref"),
+  enabled: boolean("enabled").notNull().default(false),
+  spendCapMonthlyUsd: numeric("spend_cap_monthly_usd", { precision: 10, scale: 2 }),
+  creditsRemaining: integer("credits_remaining"),
+  config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedAt: updatedAt(),
+});
+
+export const promptTemplates = pgTable(
+  "prompt_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    purpose: text("purpose").notNull(), // script | faithfulness | metadata | rank | language_detect | sensitive_topic
+    language: languageEnum("language").notNull(),
+    version: integer("version").notNull(),
+    body: text("body").notNull(),
+    model: text("model"),
+    promoted: boolean("promoted").notNull().default(false),
+    notes: text("notes"),
+    evalJson: jsonb("eval_json").$type<Record<string, unknown>>(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("prompt_templates_purpose_lang_version_uidx").on(t.purpose, t.language, t.version),
+    index("prompt_templates_promoted_idx").on(t.purpose, t.language, t.promoted),
+  ],
+);
+
+export const quotas = pgTable(
+  "quotas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scope: quotaScopeEnum("scope").notNull(),
+    /** user id / org id, or "*" for the default of that scope */
+    scopeId: text("scope_id").notNull().default("*"),
+    resource: text("resource").notNull(), // scripts | ai_media | render_minutes | publishes
+    dailyLimit: integer("daily_limit").notNull(),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("quotas_scope_uidx").on(t.scope, t.scopeId, t.resource)],
+);
+
+export const musicLibrary = pgTable("music_library", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  r2Path: text("r2_path").notNull(),
+  moodTags: text("mood_tags").array().notNull().default(sql`'{}'::text[]`),
+  durationSec: numeric("duration_sec", { precision: 8, scale: 2 }),
+  licence: text("licence").notNull(),
+  licenceUrl: text("licence_url"),
+  loudnessLufs: numeric("loudness_lufs", { precision: 5, scale: 2 }),
+  uploadedBy: text("uploaded_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+});
+
+// ---------- org-scoped ----------
+
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    url: text("url").notNull(),
+    canonicalUrl: text("canonical_url"),
+    title: text("title"),
+    language: languageEnum("language").notNull().default("vi"),
+    state: projectStateEnum("state").notNull().default("created"),
+    aiDisclosure: boolean("ai_disclosure").notNull().default(false),
+    sensitiveTopic: boolean("sensitive_topic").notNull().default(false),
+    inngestRunId: text("inngest_run_id"),
+    lockVersion: integer("lock_version").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("projects_org_idx").on(t.organizationId, t.createdAt),
+    index("projects_owner_idx").on(t.ownerId),
+    index("projects_canonical_idx").on(t.organizationId, t.canonicalUrl),
+  ],
+);
+
+export const articles = pgTable(
+  "articles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    canonicalUrl: text("canonical_url").notNull(),
+    title: text("title"),
+    author: text("author"),
+    siteName: text("site_name"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    language: languageEnum("language"),
+    text: text("text").notNull(),
+    excerpt: text("excerpt"),
+    images: jsonb("images").$type<Array<{ url: string; alt?: string; width?: number; height?: number }>>().notNull().default([]),
+    snapshotPath: text("snapshot_path"),
+    screenshotPath: text("screenshot_path"),
+    fetchMethod: text("fetch_method"), // browser_rendering | firecrawl | manual
+    flags: jsonb("flags").$type<{ paywall?: boolean; liveBlog?: boolean; videoOnly?: boolean }>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [index("articles_project_idx").on(t.projectId)],
+);
+
+export const scripts = pgTable(
+  "scripts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    scenesJson: jsonb("scenes_json").$type<Record<string, unknown>>().notNull(),
+    templateId: uuid("template_id").references(() => promptTemplates.id, { onDelete: "set null" }),
+    templateVersion: integer("template_version"),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 4 }).notNull().default("0"),
+    faithfulnessJson: jsonb("faithfulness_json").$type<Record<string, unknown>>(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("scripts_project_version_uidx").on(t.projectId, t.version)],
+);
+
+export const assets = pgTable(
+  "assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    origin: assetOriginEnum("origin").notNull(),
+    provider: text("provider"), // pexels | pixabay | veo | imagen | article | yt-dlp | upload
+    providerId: text("provider_id"),
+    licence: text("licence"),
+    sourceUrl: text("source_url"),
+    r2Path: text("r2_path").notNull(),
+    thumbnailPath: text("thumbnail_path"),
+    hash: text("hash"),
+    mime: text("mime"),
+    width: integer("width"),
+    height: integer("height"),
+    durationSec: numeric("duration_sec", { precision: 8, scale: 2 }),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    searchTerm: text("search_term"),
+    rankScore: numeric("rank_score", { precision: 5, scale: 2 }),
+    meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("assets_org_hash_idx").on(t.organizationId, t.hash),
+    index("assets_project_idx").on(t.projectId),
+  ],
+);
+
+export const timelines = pgTable(
+  "timelines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    json: jsonb("json").$type<Record<string, unknown>>().notNull(),
+    note: text("note"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("timelines_project_version_uidx").on(t.projectId, t.version)],
+);
+
+export const renders = pgTable(
+  "renders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    timelineId: uuid("timeline_id").references(() => timelines.id, { onDelete: "set null" }),
+    timelineVersion: integer("timeline_version"),
+    remotionRenderId: text("remotion_render_id"),
+    remotionBucket: text("remotion_bucket"),
+    outputPath: text("output_path"),
+    coverPath: text("cover_path"),
+    durationSec: numeric("duration_sec", { precision: 8, scale: 2 }),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 4 }),
+    qaJson: jsonb("qa_json").$type<Record<string, unknown>>(),
+    status: renderStatusEnum("status").notNull().default("queued"),
+    error: text("error"),
+    pinned: boolean("pinned").notNull().default(false),
+    requestedBy: text("requested_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("renders_project_idx").on(t.projectId), index("renders_status_idx").on(t.status)],
+);
+
+export const channels = pgTable(
+  "channels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    platform: platformEnum("platform").notNull(),
+    externalId: text("external_id").notNull(),
+    name: text("name").notNull(),
+    avatarUrl: text("avatar_url"),
+    vaultRef: uuid("vault_ref"),
+    scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastRefreshAt: timestamp("last_refresh_at", { withTimezone: true }),
+    healthy: boolean("healthy").notNull().default(true),
+    connectedBy: text("connected_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("channels_org_platform_ext_uidx").on(t.organizationId, t.platform, t.externalId)],
+);
+
+export const channelGrants = pgTable(
+  "channel_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    grantedBy: text("granted_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("channel_grants_uidx").on(t.channelId, t.userId)],
+);
+
+export const publications = pgTable(
+  "publications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "restrict" }),
+    renderId: uuid("render_id")
+      .notNull()
+      .references(() => renders.id, { onDelete: "restrict" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    platformPostId: text("platform_post_id"),
+    status: publicationStatusEnum("status").notNull().default("draft"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    analyticsJson: jsonb("analytics_json").$type<Record<string, unknown>>(),
+    analyticsAt: timestamp("analytics_at", { withTimezone: true }),
+    error: text("error"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("publications_idem_uidx").on(t.idempotencyKey),
+    index("publications_channel_idx").on(t.channelId),
+    index("publications_scheduled_idx").on(t.status, t.scheduledAt),
+  ],
+);
+
+export const brandKits = pgTable(
+  "brand_kits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    name: text("name").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    logoPath: text("logo_path"),
+    fonts: jsonb("fonts").$type<{ heading: string; body: string; caption: string }>().notNull(),
+    colours: jsonb("colours").$type<Record<string, string>>().notNull(),
+    captionStyle: jsonb("caption_style").$type<Record<string, unknown>>().notNull(),
+    introPath: text("intro_path"),
+    outroPath: text("outro_path"),
+    lowerThird: jsonb("lower_third").$type<Record<string, unknown>>(),
+    safeZones: jsonb("safe_zones").$type<{ top: number; bottom: number; left: number; right: number }>().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("brand_kits_org_idx").on(t.organizationId)],
+);
+
+export const voicePresets = pgTable(
+  "voice_presets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** null = platform default preset available to all orgs */
+    organizationId: text("organization_id").references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    language: languageEnum("language").notNull(),
+    voice: text("voice").notNull(),
+    rate: numeric("rate", { precision: 4, scale: 2 }).notNull().default("1.00"),
+    pitch: numeric("pitch", { precision: 5, scale: 2 }).notNull().default("0"),
+    ssmlSupported: boolean("ssml_supported").notNull().default(false),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [index("voice_presets_org_idx").on(t.organizationId, t.language)],
+);
+
+export const pronunciations = pgTable(
+  "pronunciations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id").references(() => organization.id, { onDelete: "cascade" }),
+    language: languageEnum("language").notNull(),
+    term: text("term").notNull(),
+    replacement: text("replacement").notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("pronunciations_uidx").on(t.organizationId, t.language, t.term)],
+);
+
+// ---------- append-only logs ----------
+
+export const activityEvents = pgTable(
+  "activity_events",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    impersonatorId: text("impersonator_id"),
+    organizationId: text("organization_id"),
+    projectId: uuid("project_id"),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("activity_events_org_created_idx").on(t.organizationId, t.createdAt),
+    index("activity_events_actor_idx").on(t.actorId, t.createdAt),
+    index("activity_events_project_idx").on(t.projectId),
+    index("activity_events_type_idx").on(t.type, t.createdAt),
+  ],
+);
+
+export const usageCosts = pgTable(
+  "usage_costs",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    provider: text("provider").notNull(), // anthropic | google_tts | google_stt | remotion_lambda | media_lambda | pexels | mubert | ...
+    resource: text("resource"), // model / voice / function name
+    units: numeric("units", { precision: 14, scale: 4 }).notNull(),
+    unitType: text("unit_type").notNull(), // tokens_in | tokens_out | characters | gb_seconds | render_seconds | requests
+    costUsd: numeric("cost_usd", { precision: 12, scale: 6 }).notNull(),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    organizationId: text("organization_id"),
+    projectId: uuid("project_id"),
+    renderId: uuid("render_id"),
+    meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("usage_costs_created_idx").on(t.createdAt),
+    index("usage_costs_org_idx").on(t.organizationId, t.createdAt),
+    index("usage_costs_provider_idx").on(t.provider, t.createdAt),
+  ],
+);

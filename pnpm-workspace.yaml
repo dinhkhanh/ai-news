@@ -1,0 +1,45 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  sharp: false
+  unrs-resolver: false
+  protobufjs: false
+  better-sqlite3: false
+  "@prisma/client": false
+  "@prisma/engines": false
+  prisma: false
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@remotion/bundler@4.0.525'
+  - '@remotion/canvas@4.0.525'
+  - '@remotion/captions@4.0.525'
+  - '@remotion/cli@4.0.525'
+  - '@remotion/compositor-darwin-arm64@4.0.525'
+  - '@remotion/compositor-darwin-x64@4.0.525'
+  - '@remotion/compositor-linux-arm64-gnu@4.0.525'
+  - '@remotion/compositor-linux-arm64-musl@4.0.525'
+  - '@remotion/compositor-linux-x64-gnu@4.0.525'
+  - '@remotion/compositor-linux-x64-musl@4.0.525'
+  - '@remotion/compositor-win32-x64-msvc@4.0.525'
+  - '@remotion/google-fonts@4.0.525'
+  - '@remotion/lambda-client@4.0.525'
+  - '@remotion/lambda@4.0.525'
+  - '@remotion/licensing@4.0.525'
+  - '@remotion/media-parser@4.0.525'
+  - '@remotion/media-utils@4.0.525'
+  - '@remotion/media@4.0.525'
+  - '@remotion/player@4.0.525'
+  - '@remotion/renderer@4.0.525'
+  - '@remotion/serverless-client@4.0.525'
+  - '@remotion/serverless@4.0.525'
+  - '@remotion/streaming@4.0.525'
+  - '@remotion/studio-codemods@4.0.525'
+  - '@remotion/studio-protocol@4.0.525'
+  - '@remotion/studio-server@4.0.525'
+  - '@remotion/studio-shared@4.0.525'
+  - '@remotion/studio@4.0.525'
+  - '@remotion/timeline-utils@4.0.525'
+  - '@remotion/web-renderer@4.0.525'
+  - '@remotion/zod-types@4.0.525'
+  - remotion@4.0.525

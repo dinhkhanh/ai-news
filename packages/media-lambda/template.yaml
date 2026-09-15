@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: ai-news media Lambda (FFmpeg + yt-dlp) - ap-southeast-1
+
+Parameters:
+  R2AccountId: { Type: String }
+  R2AccessKeyId: { Type: String, NoEcho: true }
+  R2SecretAccessKey: { Type: String, NoEcho: true }
+  R2Bucket: { Type: String, Default: ai-news }
+
+Resources:
+  MediaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ai-news-media
+      PackageType: Image
+      MemorySize: 3008
+      Timeout: 600
+      EphemeralStorage: { Size: 4096 }
+      Architectures: [x86_64]
+      Environment:
+        Variables:
+          R2_ACCOUNT_ID: !Ref R2AccountId
+          R2_ACCESS_KEY_ID: !Ref R2AccessKeyId
+          R2_SECRET_ACCESS_KEY: !Ref R2SecretAccessKey
+          R2_BUCKET: !Ref R2Bucket
+      LoggingConfig: { LogFormat: JSON }
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: .
+      DockerTag: v1
+
+  MediaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${MediaFunction}
+      RetentionInDays: 14
+
+Outputs:
+  FunctionName: { Value: !Ref MediaFunction }
+  FunctionArn: { Value: !GetAtt MediaFunction.Arn }
