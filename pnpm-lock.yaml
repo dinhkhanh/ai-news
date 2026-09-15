@@ -56,6 +56,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.15.6)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
@@ -3904,6 +3907,10 @@ packages:
     resolution: {integrity: sha512-IO8C/dzEb6O3F9/twg6ZLXz164a2fhTnEWb95H23Dm4OuN+92NmEAlTrupP9VW6Jm3sO26tQlqyvyi4CsnY9GA==}
     engines: {node: '>=12'}
 
+  dotenv@17.4.2:
+    resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
+    engines: {node: '>=12'}
+
   drizzle-kit@0.31.10:
     resolution: {integrity: sha512-7OZcmQUrdGI+DUNNsKBn1aW8qSoKuTH7d0mYgSP8bAzdFzKoovxEFnoGQp2dVs82EOJeYycqRtciopszwUf8bw==}
     hasBin: true
@@ -7430,7 +7437,7 @@ snapshots:
       c12: 3.3.4
       chalk: 5.6.2
       commander: 12.1.0
-      dotenv: 17.3.1
+      dotenv: 17.4.2
       drizzle-orm: 0.41.0(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.15.6)(better-sqlite3@12.11.1)(kysely@0.28.17)(pg@8.23.0)(postgres@3.4.9)
       open: 10.2.0
       pg: 8.23.0
@@ -10774,7 +10781,7 @@ snapshots:
       chokidar: 5.0.0
       confbox: 0.2.4
       defu: 6.1.7
-      dotenv: 17.3.1
+      dotenv: 17.4.2
       exsolve: 1.1.1
       giget: 3.3.1
       jiti: 2.7.0
@@ -11019,6 +11026,8 @@ snapshots:
       tslib: 2.8.1
 
   dotenv@17.3.1: {}
+
+  dotenv@17.4.2: {}
 
   drizzle-kit@0.31.10:
     dependencies:
