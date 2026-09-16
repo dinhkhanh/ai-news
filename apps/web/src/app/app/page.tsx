@@ -18,7 +18,17 @@ import { createProject } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-const STATE_LABEL: Record<string, string> = { created: "đang tải", fetched: "chờ xác nhận", scripted: "có kịch bản", composed: "đã dựng", in_review: "chờ duyệt", approved: "đã duyệt", rendered: "đã kết xuất", published: "đã đăng", failed: "lỗi" };
+const STATE_LABEL: Record<string, string> = {
+  created: "đang tải",
+  fetched: "chờ xác nhận",
+  scripted: "có kịch bản",
+  composed: "đã dựng",
+  in_review: "chờ duyệt",
+  approved: "đã duyệt",
+  rendered: "đã kết xuất",
+  published: "đã đăng",
+  failed: "lỗi",
+};
 
 export default async function AppHome() {
   const ws = await requireWorkspace();
@@ -65,19 +75,32 @@ export default async function AppHome() {
           <CardHeader>
             <CardTitle className="text-base">Dự án mới từ bài báo</CardTitle>
             <CardDescription>
-              Dán link bài. Hệ thống lấy nội dung, nhận diện ngôn ngữ, rồi chờ bạn xác nhận văn bản trước khi viết kịch bản — hoặc bật «tự động» để chạy thẳng tới video.
+              Dán link bài. Hệ thống lấy nội dung, nhận diện ngôn ngữ, rồi chờ bạn xác nhận văn bản trước khi viết kịch
+              bản — hoặc bật «tự động» để chạy thẳng tới video.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ActionForm action={createProject} className="space-y-3">
               <div className="space-y-1">
                 <Label htmlFor="url">Link bài báo</Label>
-                <Input id="url" name="url" type="url" placeholder="https://vnexpress.net/…" required autoComplete="off" />
+                <Input
+                  id="url"
+                  name="url"
+                  type="url"
+                  placeholder="https://vnexpress.net/…"
+                  required
+                  autoComplete="off"
+                />
               </div>
               <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1">
                   <Label htmlFor="durationSec">Thời lượng</Label>
-                  <select id="durationSec" name="durationSec" defaultValue="60" className="h-9 rounded-md border bg-background px-2 text-sm">
+                  <select
+                    id="durationSec"
+                    name="durationSec"
+                    defaultValue="60"
+                    className="h-9 rounded-md border bg-background px-2 text-sm"
+                  >
                     {DURATION_PRESETS.map((d) => (
                       <option key={d} value={d}>
                         {d} giây
@@ -87,7 +110,12 @@ export default async function AppHome() {
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="tone">Giọng điệu</Label>
-                  <select id="tone" name="tone" defaultValue="punchy" className="h-9 rounded-md border bg-background px-2 text-sm">
+                  <select
+                    id="tone"
+                    name="tone"
+                    defaultValue="punchy"
+                    className="h-9 rounded-md border bg-background px-2 text-sm"
+                  >
                     {SCRIPT_TONES.map((t) => (
                       <option key={t.key} value={t.key}>
                         {t.vi} · {t.en}
@@ -95,7 +123,10 @@ export default async function AppHome() {
                     ))}
                   </select>
                 </div>
-                <label className="flex items-center gap-2 pb-2 text-sm" title="Bỏ qua các bước xác nhận: lấy bài → kịch bản → dựng → kết xuất chạy liên tiếp. Duyệt và đăng vẫn cần người.">
+                <label
+                  className="flex items-center gap-2 pb-2 text-sm"
+                  title="Bỏ qua các bước xác nhận: lấy bài → kịch bản → dựng → kết xuất chạy liên tiếp. Duyệt và đăng vẫn cần người."
+                >
                   <input type="checkbox" name="auto" className="size-4" /> tự động tới video
                 </label>
                 <label className="flex items-center gap-2 pb-2 text-sm">
@@ -109,7 +140,9 @@ export default async function AppHome() {
           </CardContent>
         </Card>
       ) : (
-        <p className="text-sm text-muted-foreground">Vai trò {ws.role} chỉ được xem. Nhờ admin cấp quyền editor để tạo dự án.</p>
+        <p className="text-sm text-muted-foreground">
+          Vai trò {ws.role} chỉ được xem. Nhờ admin cấp quyền editor để tạo dự án.
+        </p>
       )}
 
       <Table>
@@ -133,21 +166,33 @@ export default async function AppHome() {
           {projects.map((p) => (
             <TableRow key={p.id}>
               <TableCell className="max-w-md">
-                <Link href={`/app/projects/${p.id}`} className="block truncate font-medium hover:underline">
+                <Link href={`/app/projects/${p.id}`} key={p.id} className="block truncate font-medium hover:underline">
                   {p.title ?? p.url}
                 </Link>
                 <div className="text-xs text-muted-foreground">{displayHost(p.url)}</div>
               </TableCell>
               <TableCell>
-                <Badge variant={p.state === "failed" ? "destructive" : p.state === "scripted" ? "default" : "secondary"}>
+                <Badge
+                  variant={p.state === "failed" ? "destructive" : p.state === "scripted" ? "default" : "secondary"}
+                >
                   {p.busyStep ? `${p.busyStep}…` : (STATE_LABEL[p.state] ?? p.state)}
                 </Badge>
-                {p.autoPipeline ? <Badge variant="outline" className="ml-1">tự động</Badge> : null}
-                {p.sensitiveTopic ? <Badge variant="outline" className="ml-1">nhạy cảm</Badge> : null}
+                {p.autoPipeline ? (
+                  <Badge variant="outline" className="ml-1">
+                    tự động
+                  </Badge>
+                ) : null}
+                {p.sensitiveTopic ? (
+                  <Badge variant="outline" className="ml-1">
+                    nhạy cảm
+                  </Badge>
+                ) : null}
               </TableCell>
               <TableCell className="text-xs">{p.language}</TableCell>
               <TableCell className="text-xs">{p.ownerName}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">{p.createdAt.toISOString().slice(0, 16).replace("T", " ")}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {p.createdAt.toISOString().slice(0, 16).replace("T", " ")}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
