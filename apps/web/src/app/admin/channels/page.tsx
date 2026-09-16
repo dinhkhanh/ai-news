@@ -1,5 +1,6 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { withServiceContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,8 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const [orgs, channels, members, integrations, flags] = await Promise.all([
     db.select({ id: schema.organization.id, name: schema.organization.name, kind: schema.organization.kind }).from(schema.organization).orderBy(asc(schema.organization.name)),
-    db.select().from(schema.channels).orderBy(asc(schema.channels.platform), asc(schema.channels.name)),
+    // channels/channel_grants are RLS-scoped: read them in the service context.
+    withServiceContext((tx) => tx.select().from(schema.channels).orderBy(asc(schema.channels.platform), asc(schema.channels.name))),
     db
       .select({ organizationId: schema.member.organizationId, userId: schema.member.userId, role: schema.member.role, email: schema.user.email, name: schema.user.name })
       .from(schema.member)
@@ -22,7 +24,9 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
     db.select({ provider: schema.integrations.provider, enabled: schema.integrations.enabled, vaultRef: schema.integrations.vaultRef }).from(schema.integrations).where(inArray(schema.integrations.provider, ["meta_app", "tiktok_app"])),
     flagsEnabled(["publish_youtube", "publish_facebook", "publish_instagram", "publish_tiktok", "scheduling"]),
   ]);
-  const grants = channels.length ? await db.select().from(schema.channelGrants).where(inArray(schema.channelGrants.channelId, channels.map((c) => c.id))) : [];
+  const grants = channels.length
+    ? await withServiceContext((tx) => tx.select().from(schema.channelGrants).where(inArray(schema.channelGrants.channelId, channels.map((c) => c.id))))
+    : [];
   const metaReady = integrations.some((i) => i.provider === "meta_app" && i.enabled && i.vaultRef);
   const tiktokReady = integrations.some((i) => i.provider === "tiktok_app" && i.enabled && i.vaultRef);
 

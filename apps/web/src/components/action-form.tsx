@@ -38,7 +38,7 @@ export function ActionForm({ action, children, className, resetOnSuccess }: Prop
         if (resetOnSuccess) queueMicrotask(() => setTimeout(() => form.reset(), 0));
       }}
     >
-      <fieldset disabled={pending} className="contents space-y-4">
+      <fieldset disabled={pending} className="contents space-4">
         {children}
       </fieldset>
     </form>

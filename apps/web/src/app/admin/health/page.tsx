@@ -1,5 +1,6 @@
 import { desc } from "drizzle-orm";
-import { db, schema } from "@/db";
+import { schema } from "@/db";
+import { withServiceContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,8 @@ const ENV_CHECKS: Array<[string, string]> = [
 ];
 
 export default async function HealthPage() {
-  const renders = await db.select().from(schema.renders).orderBy(desc(schema.renders.createdAt)).limit(20);
+  // renders is RLS-scoped: read across all workspaces in the service context.
+  const renders = await withServiceContext((tx) => tx.select().from(schema.renders).orderBy(desc(schema.renders.createdAt)).limit(20));
   let r2Status: string;
   try {
     const h = await headObject("tmp/_test/.probe");
