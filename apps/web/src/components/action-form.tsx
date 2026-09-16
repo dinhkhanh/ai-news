@@ -33,7 +33,7 @@ export function ActionForm({ action, children, className, resetOnSuccess }: Prop
         }
       }}
     >
-      <fieldset disabled={pending} className="contents">
+      <fieldset disabled={pending} className="contents space-y-4">
         {children}
       </fieldset>
     </form>
