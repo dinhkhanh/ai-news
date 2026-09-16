@@ -91,8 +91,8 @@ export const renderProjectFn = inngest.createFunction(
     for (let attempt = 1; ; attempt++) {
       const status = await step.run(`poll-${attempt}`, async () => {
         const s = await getRenderStatus(started);
-        const p = Math.max(0, Math.min(1, Number((s as { overallProgress?: number }).overallProgress ?? 0)));
-        await reportProgress(pctx, { label: s.done ? "Lambda kết xuất xong" : `Remotion Lambda đang kết xuất (${s.renderedFrames ?? 0}/${input.timeline.durationFrames} khung hình)`, pct: Math.round(8 + 70 * p) });
+        const p = Math.max(0, Math.min(1, s.overallProgress ?? 0));
+        await reportProgress(pctx, { label: s.done ? "Lambda kết xuất xong" : `Remotion Lambda đang kết xuất (${s.framesRendered ?? 0}/${input.timeline.durationFrames} khung hình)`, pct: Math.round(8 + 70 * p) });
         return s;
       });
       if (status.fatalErrorEncountered) {
