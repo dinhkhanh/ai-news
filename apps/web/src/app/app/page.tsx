@@ -166,7 +166,11 @@ export default async function AppHome() {
           {projects.map((p) => (
             <TableRow key={p.id}>
               <TableCell className="max-w-md">
-                <Link href={`/app/projects/${p.id}`} key={p.id} className="block truncate font-medium hover:underline">
+                <Link
+                  href={`/app/projects/${p.id}`}
+                  key={`project-${p.id}`}
+                  className="block truncate font-medium hover:underline"
+                >
                   {p.title ?? p.url}
                 </Link>
                 <div className="text-xs text-muted-foreground">{displayHost(p.url)}</div>
