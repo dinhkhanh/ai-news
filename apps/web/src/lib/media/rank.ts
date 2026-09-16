@@ -52,3 +52,55 @@ export async function rankCandidates(
     .sort((a, b) => b.score - a.score);
   return { ranked, costUsd };
 }
+
+const AssignSchema = z.object({
+  scenes: z.array(
+    z.object({
+      sceneId: z.string(),
+      /** Candidate numbers as given, best first; may be shorter than `want`. */
+      picks: z.array(z.number()),
+    }),
+  ),
+});
+
+const ASSIGN_SYSTEM = `You place still images into the scenes of a vertical short news video. You see every scene (voice-over + on-screen text, and how many pictures it needs) and numbered candidate images taken from the source article and from other outlets' coverage of the same story.
+For each scene list the candidate numbers that best illustrate it, best first, up to the number it needs. Prefer images whose subject matches the scene's facts (place, people, object, event). Never list the same candidate for two scenes. Skip images with burnt-in text, logos, watermarks, or that would mislead about the story. A scene may get fewer picks than it needs, or none, if nothing fits.`;
+
+export type ImageCandidate = { key: string; thumbnailUrl: string; hint?: string | null };
+
+/**
+ * One Haiku call assigns article/related images to scenes (each image at most
+ * once). Returns, per scene, candidate indexes best first. Falls back to [] on
+ * any failure so the caller can assign sequentially.
+ */
+export async function assignImages(
+  scenes: Array<{ id: string; voiceover: string; onScreenText: string; want: number }>,
+  candidates: ImageCandidate[],
+  ctx: Omit<LlmContext, "purpose">,
+): Promise<{ picks: Map<string, number[]>; costUsd: number }> {
+  const picks = new Map<string, number[]>();
+  if (candidates.length === 0 || scenes.length === 0) return { picks, costUsd: 0 };
+  const client = await anthropic();
+  const content: Anthropic.ContentBlockParam[] = [
+    { type: "text", text: `Scenes:\n${scenes.map((s) => `- ${s.id} (needs ${s.want}): VO "${s.voiceover}" / on-screen "${s.onScreenText}"`).join("\n")}\n\nCandidates:` },
+  ];
+  candidates.forEach((c, i) => {
+    content.push({ type: "text", text: `Candidate ${i + 1}${c.hint ? ` (${c.hint.slice(0, 120)})` : ""}` });
+    content.push({ type: "image", source: { type: "url", url: c.thumbnailUrl } });
+  });
+  const res = await client.messages.parse({
+    model: MODELS.classify,
+    max_tokens: 2048,
+    system: ASSIGN_SYSTEM,
+    output_config: { format: zodOutputFormat(AssignSchema) },
+    messages: [{ role: "user", content }],
+  });
+  const costUsd = await recordLlmUsage(res.model, res.usage, { ...ctx, purpose: "assign_images" }, { candidates: candidates.length, scenes: scenes.length });
+  const used = new Set<number>();
+  for (const s of res.parsed_output?.scenes ?? []) {
+    const idx = s.picks.map((n) => n - 1).filter((i) => Number.isInteger(i) && i >= 0 && i < candidates.length && !used.has(i));
+    for (const i of idx) used.add(i);
+    picks.set(s.sceneId, idx);
+  }
+  return { picks, costUsd };
+}

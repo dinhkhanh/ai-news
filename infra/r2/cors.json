@@ -1,0 +1,14 @@
+{
+  "rules": [
+    {
+      "id": "editor-uploads",
+      "allowed": {
+        "origins": ["http://localhost:3000", "https://ai-news.vercel.app", "https://*.vercel.app"],
+        "methods": ["GET", "PUT", "HEAD"],
+        "headers": ["content-type", "content-length"]
+      },
+      "exposeHeaders": ["etag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

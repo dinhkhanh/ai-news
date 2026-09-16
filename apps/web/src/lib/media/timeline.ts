@@ -4,15 +4,20 @@
  * R2 keys in every `src`. Unit-testable; URL resolution happens in
  * timeline-resolve.ts right before a render.
  */
-import { timelineSchema, type Brand, type Timeline, type Visual } from "@ai-news/video/schema";
+import { MAX_SHOT_SEC, timelineSchema, type Brand, type Shot, type Timeline, type Visual } from "@ai-news/video/schema";
 import type { TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
 
 export type SceneVoiceInput = { key: string; durationMs: number; words: TimedWord[] };
 export type SceneVisualInput =
-  | { kind: "video"; key: string; clipDurationSec: number; credit: string | null }
-  | { kind: "image"; key: string; credit: string | null }
+  | { kind: "video"; key: string; clipDurationSec: number; trimStartSec?: number; credit: string | null }
+  | { kind: "image"; key: string; kenBurns?: boolean; credit: string | null }
   | null;
+
+/** Shots a scene of this length needs so no picture stays longer than MAX_SHOT_SEC. */
+export function shotsNeeded(durationMs: number) {
+  return Math.max(1, Math.ceil(durationMs / (MAX_SHOT_SEC * 1000)));
+}
 
 export type BuildInput = {
   title: string;
@@ -25,7 +30,10 @@ export type BuildInput = {
     onScreenText: string;
     durationSec: number;
     voice: SceneVoiceInput | null;
+    /** First shot. */
     visual: SceneVisualInput;
+    /** Further shots after `visual`; the scene's time is split equally between all of them. */
+    shots?: SceneVisualInput[];
     /** Extra hold after the voice-over ends (editor), 0–5000 ms. */
     holdMs?: number;
     /** Caption chunks relative to this scene's voice start; default = automatic chunking of `voice.words`. */
@@ -44,12 +52,33 @@ export type BuildInput = {
 export type SceneTiming = { id: string; atSec: number; fromFrame: number; durationFrames: number; durationMs: number };
 
 const FPS = 30;
+/** Silence between scenes / after the last one / before the first (ms). Tight gaps keep the delivery punchy. */
+export const LEAD_MS = 250;
+export const GAP_MS = 200;
+export const TAIL_MS = 700;
+
+function toVisual(v: NonNullable<SceneVisualInput>): Visual {
+  if (v.kind === "video") return { kind: "video", src: v.key, trimStartSec: Math.max(0, v.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, v.clipDurationSec), fit: "cover", muted: true };
+  return { kind: "image", src: v.key, kenBurns: v.kenBurns ?? true };
+}
+
+/** Split `durationFrames` equally between the shots (a solid fill when the scene has none). */
+export function layoutShots(inputs: SceneVisualInput[], durationFrames: number): Shot[] {
+  const present = inputs.filter((v): v is NonNullable<SceneVisualInput> => v !== null);
+  if (present.length === 0) return [{ from: 0, durationFrames, visual: { kind: "solid" }, credit: null }];
+  const n = present.length;
+  return present.map((v, i) => {
+    const from = Math.round((i * durationFrames) / n);
+    const end = i === n - 1 ? durationFrames : Math.round(((i + 1) * durationFrames) / n);
+    return { from, durationFrames: Math.max(1, end - from), visual: toVisual(v), credit: v.credit };
+  });
+}
 
 /** Scene start offsets: needed before the audio mix exists (the mix places VO segments at these offsets). */
 export function sceneTimings(input: Pick<BuildInput, "scenes" | "gapMs" | "tailMs" | "leadMs">): { timings: SceneTiming[]; durationSec: number } {
-  const gap = input.gapMs ?? 350;
-  const tail = input.tailMs ?? 900;
-  const lead = input.leadMs ?? 250;
+  const gap = input.gapMs ?? GAP_MS;
+  const tail = input.tailMs ?? TAIL_MS;
+  const lead = input.leadMs ?? LEAD_MS;
   let cursorMs = 0;
   const timings: SceneTiming[] = input.scenes.map((s, i) => {
     const last = i === input.scenes.length - 1;
@@ -70,12 +99,9 @@ export function buildTimeline(input: BuildInput): { timeline: Timeline; duration
   const credits = new Set<string>();
   const scenes = input.scenes.map((s, i) => {
     const t = timings[i];
-    let visual: Visual;
-    if (s.visual?.kind === "video") visual = { kind: "video", src: s.visual.key, trimStartSec: 0, clipDurationSec: Math.max(0.5, s.visual.clipDurationSec), fit: "cover", muted: true };
-    else if (s.visual?.kind === "image") visual = { kind: "image", src: s.visual.key, kenBurns: true };
-    else visual = { kind: "solid" };
-    if (s.visual?.credit) credits.add(s.visual.credit);
-    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual, credit: s.visual?.credit ?? null, voiceSrc: s.voice?.key ?? null };
+    const shots = layoutShots([s.visual, ...(s.shots ?? [])], t.durationFrames);
+    for (const sh of shots) if (sh.credit) credits.add(sh.credit);
+    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual: shots[0].visual, shots, credit: shots[0].credit, voiceSrc: s.voice?.key ?? null };
   });
   const captions = input.scenes.flatMap((s, i) => {
     if (!s.voice) return [];

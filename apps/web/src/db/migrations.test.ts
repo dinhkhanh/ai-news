@@ -64,23 +64,25 @@ describe("migrations", () => {
     expect(domains.rows.map((r) => r.domain)).toContain("suzu.group");
     const quotas = await pg.query<{ resource: string; daily_limit: number }>("select resource, daily_limit from quotas where scope='user' and scope_id='*'");
     expect(Object.fromEntries(quotas.rows.map((r) => [r.resource, r.daily_limit]))).toEqual({ scripts: 20, ai_media: 5, render_minutes: 30, publishes: 10 });
-    const voice = await pg.query<{ voice: string }>("select voice from voice_presets where language='vi' and is_default");
-    expect(voice.rows[0]?.voice).toBe("vi-VN-Chirp3-HD-Charon");
+    // Migration 0008: the energetic Fenrir voice at a faster rate is the platform default; Charon stays as an alternate at 1.15.
+    const voice = await pg.query<{ voice: string; rate: string }>("select voice, rate from voice_presets where language='vi' and is_default");
+    expect(voice.rows).toEqual([{ voice: "vi-VN-Chirp3-HD-Fenrir", rate: "1.22" }]);
+    const charon = await pg.query<{ rate: string }>("select rate from voice_presets where voice='vi-VN-Chirp3-HD-Charon'");
+    expect(charon.rows[0]?.rate).toBe("1.15");
   });
 
-  it("seed one promoted built-in prompt template per purpose/language (phase 2)", async () => {
+  it("seed exactly one promoted built-in prompt template per purpose/language (phase 2 v1, punchy script v2 from migration 0008)", async () => {
     const { rows } = await pg.query<{ purpose: string; language: string; version: number; promoted: boolean; len: number }>(
-      "select purpose, language, version, promoted, length(body)::int as len from prompt_templates order by purpose, language",
+      "select purpose, language, version, promoted, length(body)::int as len from prompt_templates order by purpose, language, version",
     );
-    expect(rows.map((r) => `${r.purpose}/${r.language}`).sort()).toEqual(["faithfulness/en", "faithfulness/vi", "script/en", "script/vi"]);
-    for (const r of rows) {
-      expect(r.version).toBe(1);
-      expect(r.promoted).toBe(true);
-      expect(r.len).toBeGreaterThan(400);
-    }
-    // Re-applying the seed statement is a no-op (guarded by "where not exists").
+    const promoted = rows.filter((r) => r.promoted);
+    expect(promoted.map((r) => `${r.purpose}/${r.language}@${r.version}`).sort()).toEqual(["faithfulness/en@1", "faithfulness/vi@1", "script/en@2", "script/vi@2"]);
+    for (const r of rows) expect(r.len).toBeGreaterThan(400);
+    expect(rows.filter((r) => r.purpose === "script").map((r) => r.version)).toEqual([1, 2, 1, 2]);
+    for (const r of rows.filter((r) => r.version === 2)) expect(r.promoted).toBe(true);
+    // Re-applying the seed statements is a no-op (guarded by "where not exists").
     const { rows: after } = await pg.query<{ n: number }>("select count(*)::int as n from prompt_templates");
-    expect(after[0].n).toBe(4);
+    expect(after[0].n).toBe(6);
   });
 
   it("add the phase 2 columns", async () => {

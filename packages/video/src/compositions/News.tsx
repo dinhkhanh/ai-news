@@ -2,25 +2,29 @@ import React, { useMemo } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { SAFE_ZONES, type Brand, type Caption, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { SAFE_ZONES, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const fontFamily = (name: Brand["fonts"]["heading"]) => (name === "Inter" ? inter.fontFamily : beVietnamPro.fontFamily);
 
 const FADE_FRAMES = 8;
+/** Frames of punch-in at the start of every shot after the first (hard cut + quick settle). */
+const PUNCH_FRAMES = 6;
 
 /* ---------------------------------------------------------------- visuals */
 
-const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand }> = ({ visual, durationFrames, brand }) => {
+const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand; variant?: number }> = ({ visual, durationFrames, brand, variant = 0 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   if (visual.kind === "solid") {
     return <AbsoluteFill style={{ background: `linear-gradient(160deg, ${brand.colours.primary}, ${brand.colours.background})` }} />;
   }
   if (visual.kind === "image") {
-    const scale = visual.kenBurns ? interpolate(frame, [0, durationFrames], [1.04, 1.16], { extrapolateRight: "clamp" }) : 1;
-    const tx = visual.kenBurns ? interpolate(frame, [0, durationFrames], [0, -24], { extrapolateRight: "clamp" }) : 0;
+    // Alternate zoom-in / zoom-out and pan direction from shot to shot so consecutive stills do not feel identical.
+    const zoomOut = variant % 2 === 1;
+    const scale = visual.kenBurns ? interpolate(frame, [0, durationFrames], zoomOut ? [1.18, 1.06] : [1.04, 1.16], { extrapolateRight: "clamp" }) : 1;
+    const tx = visual.kenBurns ? interpolate(frame, [0, durationFrames], [0, zoomOut ? 24 : -24], { extrapolateRight: "clamp" }) : 0;
     return (
       <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
         <Img src={visual.src} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${scale}) translateX(${tx}px)` }} />
@@ -41,6 +45,29 @@ const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Bra
     <AbsoluteFill style={{ backgroundColor: brand.colours.background }}>
       {clipFrames < durationFrames ? <Loop durationInFrames={clipFrames}>{video}</Loop> : video}
     </AbsoluteFill>
+  );
+};
+
+/** Hard cut into each shot with a quick punch-in so the change registers. */
+const ShotPunch: React.FC<{ first: boolean; children: React.ReactNode }> = ({ first, children }) => {
+  const frame = useCurrentFrame();
+  const scale = first ? 1 : interpolate(frame, [0, PUNCH_FRAMES], [1.06, 1], { extrapolateRight: "clamp" });
+  return <AbsoluteFill style={{ transform: `scale(${scale})` }}>{children}</AbsoluteFill>;
+};
+
+/** A scene's shots in sequence; a scene without explicit shots is one shot of its `visual`. */
+const SceneShots: React.FC<{ scene: TimelineScene; brand: Brand }> = ({ scene, brand }) => {
+  const shots: Shot[] = scene.shots.length ? scene.shots : [{ from: 0, durationFrames: scene.durationFrames, visual: scene.visual, credit: scene.credit }];
+  return (
+    <>
+      {shots.map((shot, i) => (
+        <Sequence key={i} from={shot.from} durationInFrames={shot.durationFrames} name={`${scene.id} shot ${i + 1}`}>
+          <ShotPunch first={i === 0}>
+            <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} />
+          </ShotPunch>
+        </Sequence>
+      ))}
+    </>
   );
 };
 
@@ -213,7 +240,7 @@ export const News: React.FC<Timeline> = (timeline) => {
       {scenes.map((scene) => (
         <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationFrames} name={`${scene.id} ${scene.kind}`}>
           <SceneFade durationFrames={scene.durationFrames}>
-            <SceneVisual visual={scene.visual} durationFrames={scene.durationFrames} brand={brand} />
+            <SceneShots scene={scene} brand={brand} />
             <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.55) 100%)" }} />
           </SceneFade>
           <Headline text={scene.headline} kind={scene.kind} brand={brand} />

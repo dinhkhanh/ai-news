@@ -1,21 +1,26 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { createUploadUrl, importVisualFromUrl, registerUpload } from "@/app/app/projects/[id]/edit/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { SceneVerdict } from "@/lib/llm/schemas";
-import { sceneCaptions, setCaptionText, type EditorScene, type EditorVisual } from "@/lib/media/editor";
+import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 import { cn } from "@/lib/utils";
 import type { VisualOption } from "./types";
 
 type Props = {
+  projectId: string;
   scene: EditorScene;
   index: number;
   total: number;
   options: VisualOption[];
   urls: Record<string, string>;
+  /** R2 key → where else in the video it is used ("s3", "s3 #2"); a picture should appear once. */
+  usedKeys: Record<string, string[]>;
   verdict: { verdict: SceneVerdict["verdict"]; note: string | null; evidence: string | null } | null;
   disabled: boolean;
   /** Regeneration needs a saved document and an idle project. */
@@ -25,47 +30,148 @@ type Props = {
   onRemove: () => void;
   onRegenerate: (what: "voice" | "broll", payload: { voiceover?: string; brollTerms?: string[] }) => void;
   onSeek: () => void;
+  /** An uploaded / linked file became a swap option (with its presigned URL for the preview). */
+  onOptionAdded: (option: VisualOption, url: string) => void;
 };
 
+const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm";
 const verdictLabel = (v?: SceneVerdict["verdict"]) => (v === "supported" ? "Có căn cứ" : v === "partial" ? "Một phần" : v === "unsupported" ? "Không căn cứ" : "Chưa kiểm");
 
-function OptionThumb({ o, url, selected, onPick }: { o: VisualOption; url: string | null; selected: boolean; onPick: () => void }) {
+/** Dimensions / duration of a local file or a URL, read in the browser (no server probe needed). */
+function probeMedia(src: string, kind: "image" | "video"): Promise<{ width: number | null; height: number | null; durationSec: number | null }> {
+  return new Promise((resolve) => {
+    const done = (v: { width: number | null; height: number | null; durationSec: number | null }) => resolve(v);
+    const timer = setTimeout(() => done({ width: null, height: null, durationSec: null }), 15_000);
+    if (kind === "image") {
+      const im = new Image();
+      im.onload = () => (clearTimeout(timer), done({ width: im.naturalWidth, height: im.naturalHeight, durationSec: null }));
+      im.onerror = () => (clearTimeout(timer), done({ width: null, height: null, durationSec: null }));
+      im.src = src;
+    } else {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.muted = true;
+      v.onloadedmetadata = () => (clearTimeout(timer), done({ width: v.videoWidth || null, height: v.videoHeight || null, durationSec: Number.isFinite(v.duration) ? v.duration : null }));
+      v.onerror = () => (clearTimeout(timer), done({ width: null, height: null, durationSec: null }));
+      v.src = src;
+    }
+  });
+}
+
+const fromOption = (o: VisualOption, durationSec?: number | null): EditorVisual =>
+  o.kind === "video"
+    ? { kind: "video", key: o.key, clipDurationSec: durationSec ?? o.durationSec ?? 5, trimStartSec: 0, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl }
+    : { kind: "image", key: o.key, kenBurns: true, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl };
+
+function Thumb({ src, video, className }: { src: string | null; video: boolean; className?: string }) {
+  if (!src) return null;
+  return video ? (
+    <video src={src} muted preload="metadata" className={cn("h-full w-full object-cover", className)} />
+  ) : (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" className={cn("h-full w-full object-cover", className)} loading="lazy" />
+  );
+}
+
+function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; url: string | null; selected: boolean; usedAt: string[]; onPick: () => void }) {
   const src = o.thumbnailUrl ?? url;
+  const providerLabel = o.provider === "related" ? "báo khác" : o.provider === "article" ? "bài gốc" : o.provider === "upload" ? "tải lên" : o.provider === "url" ? "đường dẫn" : o.provider;
   return (
-    <button type="button" onClick={onPick} title={`${o.provider}${o.searchTerm ? ` · ${o.searchTerm}` : ""}${o.rankScore != null ? ` · ${o.rankScore.toFixed(0)}/100` : ""}`} className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded border bg-muted", selected && "ring-2 ring-primary")}>
-      {src ? (
-        o.kind === "video" && !o.thumbnailUrl ? (
-          <video src={src} muted preload="metadata" className="h-full w-full object-cover" />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
-        )
-      ) : null}
-      <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 text-[9px] text-white">
-        {o.kind === "video" ? `${o.durationSec?.toFixed(0) ?? "?"} s` : "ảnh"}
-      </span>
+    <button
+      type="button"
+      onClick={onPick}
+      title={`${providerLabel}${o.searchTerm ? ` · ${o.searchTerm}` : ""}${o.rankScore != null ? ` · ${o.rankScore.toFixed(0)}/100` : ""}${usedAt.length ? ` · đã dùng ở ${usedAt.join(", ")}` : ""}`}
+      className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded border bg-muted", selected && "ring-2 ring-primary", usedAt.length && !selected && "opacity-50")}
+    >
+      <Thumb src={src} video={o.kind === "video" && !o.thumbnailUrl} />
+      <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 text-[9px] text-white">{o.kind === "video" ? `${o.durationSec?.toFixed(0) ?? "?"} s` : providerLabel}</span>
+      {usedAt.length ? <span className="absolute left-0 top-0 rounded-br bg-amber-500 px-1 text-[9px] text-black">đã dùng</span> : null}
     </button>
   );
 }
 
-/** Everything editable on one scene: headline, visual (swap/trim/hold), captions, voice and B-roll regeneration, faithfulness. */
-export function SceneInspector({ scene, index, total, options, urls, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek }: Props) {
+/** Everything editable on one scene: headline, shots (swap/upload/link/trim/hold), captions, voice and B-roll regeneration, faithfulness. */
+export function SceneInspector({ projectId, scene, index, total, options, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded }: Props) {
   const [voiceText, setVoiceText] = useState(scene.voiceover);
   const [terms, setTerms] = useState(scene.brollTerms.join(", "));
   const [showAll, setShowAll] = useState(false);
+  const [shotIdx, setShotIdx] = useState(0);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
   const captions = useMemo(() => sceneCaptions(scene), [scene]);
+  const shots = sceneShots(scene);
+  const active = Math.min(shotIdx, shots.length - 1);
+  const shot = shots[active];
   const forScene = options.filter((o) => o.sceneId === scene.id);
   const others = options.filter((o) => o.sceneId !== scene.id);
   const shown = showAll ? [...forScene, ...others] : forScene.length ? forScene : others.slice(0, 12);
-  const setVisual = (visual: EditorVisual) => onChange({ ...scene, visual });
-  const pick = (o: VisualOption) =>
-    setVisual(
-      o.kind === "video"
-        ? { kind: "video", key: o.key, clipDurationSec: o.durationSec ?? 5, trimStartSec: 0, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl }
-        : { kind: "image", key: o.key, kenBurns: true, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl },
-    );
-  const currentKey = scene.visual.kind === "solid" ? null : scene.visual.key;
-  const voiceMs = scene.voice?.durationMs ?? scene.durationSec * 1000;
+  const voiceMs = sceneVoiceMs(scene);
+  const missing = shotsMissing(scene);
+  const perShotSec = voiceMs / 1000 / shots.length;
+  const usedElsewhere = (key: string) => (usedKeys[key] ?? []).filter((at) => !at.startsWith(`${scene.id} `) && at !== scene.id);
+  const currentKey = shot.kind === "solid" ? null : shot.key;
+  const dupHere = currentKey ? usedElsewhere(currentKey) : [];
+
+  const setActive = (visual: EditorVisual) => onChange(setShot(scene, active, visual));
+  const pick = (o: VisualOption) => setActive(fromOption(o));
+  const addShot = () => {
+    onChange({ ...scene, shots: [...scene.shots, { kind: "solid" }] });
+    setShotIdx(shots.length);
+  };
+  const dropShot = () => {
+    onChange(removeShot(scene, active));
+    setShotIdx(Math.max(0, active - 1));
+  };
+
+  const applyAdded = async (res: { ok: true; option: VisualOption; url: string; message: string } | { ok: false; message: string }, probeUrl?: string) => {
+    if (!res.ok) return void toast.error(res.message);
+    let option = res.option;
+    if (option.kind === "video" && !option.durationSec && probeUrl) {
+      const p = await probeMedia(probeUrl, "video");
+      option = { ...option, durationSec: p.durationSec };
+    }
+    onOptionAdded(option, res.url);
+    setActive(fromOption(option));
+    toast.success(res.message);
+  };
+
+  const upload = async (file: File) => {
+    const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : null;
+    if (!kind) return void toast.error("Chỉ nhận JPG, PNG, WebP, MP4, MOV hoặc WebM");
+    setBusy("Đang tải lên…");
+    try {
+      const ticket = await createUploadUrl({ projectId, filename: file.name, contentType: file.type, sizeBytes: file.size });
+      if (!ticket.ok) throw new Error(ticket.message);
+      const objectUrl = URL.createObjectURL(file);
+      const probe = await probeMedia(objectUrl, kind).finally(() => URL.revokeObjectURL(objectUrl));
+      const put = await fetch(ticket.url, { method: "PUT", body: file, headers: { "Content-Type": file.type } }).catch(() => null);
+      if (!put || !put.ok) throw new Error(put ? `Tải lên thất bại (HTTP ${put.status})` : "Tải lên thất bại: trình duyệt bị chặn (CORS của bucket R2 chưa cho phép domain này, xem infra/r2/cors.json)");
+      const res = await registerUpload({ projectId, key: ticket.key, filename: file.name, contentType: file.type, width: probe.width, height: probe.height, durationSec: probe.durationSec });
+      await applyAdded(res);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Tải lên thất bại");
+    } finally {
+      setBusy(null);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const importUrl = async () => {
+    const url = linkUrl.trim();
+    if (!url) return;
+    setBusy("Đang lấy tệp từ đường dẫn…");
+    try {
+      const res = await importVisualFromUrl({ projectId, url });
+      await applyAdded(res, res.ok ? res.url : undefined);
+      if (res.ok) setLinkUrl("");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const thumbOf = (v: EditorVisual) => (v.kind === "solid" ? { src: null, video: false } : v.thumbnailUrl ? { src: v.thumbnailUrl, video: false } : { src: urls[v.key] ?? null, video: v.kind === "video" });
 
   return (
     <div className="space-y-4 text-sm">
@@ -97,25 +203,58 @@ export function SceneInspector({ scene, index, total, options, urls, verdict, di
         <Input id="headline" value={scene.onScreenText} maxLength={120} disabled={disabled} onChange={(e) => onChange({ ...scene, onScreenText: e.target.value })} />
       </div>
 
-      {/* ---- visual ---- */}
+      {/* ---- shots ---- */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label>Hình ảnh</Label>
-          <span className="text-xs text-muted-foreground">
-            {scene.visual.kind === "video" ? `clip ${scene.visual.clipDurationSec.toFixed(0)} s · ${scene.visual.credit ?? ""}` : scene.visual.kind === "image" ? `ảnh · ${scene.visual.credit ?? ""}` : "nền màu"}
-          </span>
+          <Label>Cảnh quay ({shots.length}) · mỗi hình {perShotSec.toFixed(1)} s</Label>
+          {!disabled ? (
+            <div className="flex gap-2 text-xs">
+              <button type="button" className="underline" onClick={addShot} disabled={shots.length >= 13}>
+                + thêm cảnh quay
+              </button>
+              {shots.length > 1 ? (
+                <button type="button" className="text-destructive underline" onClick={dropShot}>
+                  bỏ cảnh quay {active + 1}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
-          <button type="button" disabled={disabled} onClick={() => setVisual({ kind: "solid" })} className={cn("flex h-24 w-14 shrink-0 items-center justify-center rounded border bg-gradient-to-br from-slate-900 to-slate-700 text-[10px] text-white", scene.visual.kind === "solid" && "ring-2 ring-primary")}>
+          {shots.map((v, i) => {
+            const t = thumbOf(v);
+            return (
+              <button key={i} type="button" onClick={() => setShotIdx(i)} className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded border bg-gradient-to-br from-slate-900 to-slate-700", i === active && "ring-2 ring-primary")} title={v.kind === "solid" ? "nền màu" : v.key}>
+                <Thumb src={t.src} video={t.video} />
+                <span className="absolute left-0 top-0 rounded-br bg-black/70 px-1 text-[10px] text-white">{i + 1}</span>
+                <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 text-[9px] text-white">{v.kind === "video" ? "clip" : v.kind === "image" ? "ảnh" : "nền màu"}</span>
+              </button>
+            );
+          })}
+        </div>
+        {missing > 0 ? (
+          <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+            Cảnh dài {(voiceMs / 1000).toFixed(1)} s nhưng chỉ có {shots.length} hình ({perShotSec.toFixed(1)} s/hình). Thêm {missing} hình nữa để đổi hình mỗi ≤ 5 s.
+          </p>
+        ) : null}
+        {dupHere.length ? <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">Hình này cũng dùng ở {dupHere.join(", ")}. Mỗi hình chỉ nên xuất hiện một lần trong video.</p> : null}
+
+        <div className="text-xs text-muted-foreground">
+          Cảnh quay {active + 1}: {shot.kind === "video" ? `clip ${shot.clipDurationSec.toFixed(0)} s · ${shot.credit ?? ""}` : shot.kind === "image" ? `ảnh · ${shot.credit ?? ""}` : "nền màu"}
+        </div>
+
+        {/* swap options for the active shot */}
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          <button type="button" disabled={disabled} onClick={() => setActive({ kind: "solid" })} className={cn("flex h-24 w-14 shrink-0 items-center justify-center rounded border bg-gradient-to-br from-slate-900 to-slate-700 text-[10px] text-white", shot.kind === "solid" && "ring-2 ring-primary")}>
             nền màu
           </button>
           {shown.map((o) => (
-            <OptionThumb key={o.assetId} o={o} url={urls[o.key] ?? null} selected={o.key === currentKey} onPick={() => !disabled && pick(o)} />
+            <OptionThumb key={o.assetId} o={o} url={urls[o.key] ?? null} selected={o.key === currentKey} usedAt={usedElsewhere(o.key)} onPick={() => !disabled && pick(o)} />
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span>
-            {forScene.length} ứng viên cho cảnh này · {others.length} từ cảnh khác
+            {forScene.length} ứng viên cho cảnh này · {others.length} khác trong dự án
           </span>
           {others.length ? (
             <button type="button" className="underline" onClick={() => setShowAll((v) => !v)}>
@@ -123,7 +262,28 @@ export function SceneInspector({ scene, index, total, options, urls, verdict, di
             </button>
           ) : null}
         </div>
-        {scene.visual.kind === "video" ? (
+
+        {/* upload / link */}
+        {!disabled ? (
+          <div className="space-y-2 rounded-md border p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void upload(e.target.files[0])} />
+              <Button type="button" size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => fileRef.current?.click()}>
+                Tải ảnh / video lên
+              </Button>
+              <span className="text-[11px] text-muted-foreground">JPG, PNG, WebP, MP4, MOV, WebM · tối đa 200 MB · thay cho cảnh quay {active + 1}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input value={linkUrl} disabled={Boolean(busy)} placeholder="https://…/anh.jpg hoặc …/clip.mp4 (link trực tiếp tới tệp)" onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className="h-8 text-sm" />
+              <Button type="button" size="sm" variant="outline" disabled={Boolean(busy) || !/^https?:\/\//i.test(linkUrl.trim())} onClick={() => void importUrl()}>
+                Lấy
+              </Button>
+            </div>
+            {busy ? <p className="text-[11px] text-muted-foreground">{busy}</p> : null}
+          </div>
+        ) : null}
+
+        {shot.kind === "video" ? (
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1">
               <Label htmlFor="trim">Cắt clip từ (giây)</Label>
@@ -131,19 +291,19 @@ export function SceneInspector({ scene, index, total, options, urls, verdict, di
                 id="trim"
                 type="number"
                 min={0}
-                max={Math.max(0, scene.visual.clipDurationSec - 1)}
+                max={Math.max(0, shot.clipDurationSec - 1)}
                 step={0.5}
-                value={scene.visual.trimStartSec}
+                value={shot.trimStartSec}
                 disabled={disabled}
-                onChange={(e) => scene.visual.kind === "video" && setVisual({ ...scene.visual, trimStartSec: Math.min(Math.max(0, Number(e.target.value) || 0), Math.max(0, scene.visual.clipDurationSec - 1)) })}
+                onChange={(e) => shot.kind === "video" && setActive({ ...shot, trimStartSec: Math.min(Math.max(0, Number(e.target.value) || 0), Math.max(0, shot.clipDurationSec - 1)) })}
                 className="w-28"
               />
             </div>
-            <span className="pb-2 text-xs text-muted-foreground">Clip ngắn hơn cảnh sẽ lặp lại.</span>
+            <span className="pb-2 text-xs text-muted-foreground">Clip ngắn hơn cảnh quay sẽ lặp lại.</span>
           </div>
-        ) : scene.visual.kind === "image" ? (
+        ) : shot.kind === "image" ? (
           <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={scene.visual.kenBurns} disabled={disabled} onChange={(e) => scene.visual.kind === "image" && setVisual({ ...scene.visual, kenBurns: e.target.checked })} /> hiệu ứng Ken Burns (phóng chậm)
+            <input type="checkbox" checked={shot.kenBurns} disabled={disabled} onChange={(e) => shot.kind === "image" && setActive({ ...shot, kenBurns: e.target.checked })} /> hiệu ứng Ken Burns (phóng chậm)
           </label>
         ) : null}
         <div className="flex items-center gap-3">

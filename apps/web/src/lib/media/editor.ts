@@ -11,7 +11,7 @@ import { brandSchema, type Timeline } from "@ai-news/video/schema";
 import { z } from "zod";
 import { proportionalTimings, type TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
-import { buildTimeline, type BuildInput, type SceneVisualInput } from "./timeline";
+import { buildTimeline, GAP_MS, LEAD_MS, shotsNeeded, TAIL_MS, type BuildInput, type SceneVisualInput } from "./timeline";
 
 const timedWordSchema = z.object({ w: z.string(), s: z.number(), e: z.number() });
 const captionChunkSchema = z.object({ text: z.string().max(200), startMs: z.number(), endMs: z.number(), words: z.array(timedWordSchema) });
@@ -47,7 +47,10 @@ export const editorSceneSchema = z.object({
   brollTerms: z.array(z.string().max(80)).max(6).default([]),
   durationSec: z.number().positive(),
   voice: z.object({ key: z.string().min(1), durationMs: z.number().positive(), words: z.array(timedWordSchema) }).nullable(),
+  /** First shot of the scene. */
   visual: editorVisualSchema,
+  /** Further shots; the scene's time is split equally between `visual` and these so the picture changes every ≤ 5 s. */
+  shots: z.array(editorVisualSchema).max(12).default([]),
   holdMs: z.number().min(0).max(5000).default(0),
   /** Caption chunks relative to the scene's voice start; null = automatic chunking of voice.words. */
   captions: z.array(captionChunkSchema).nullable().default(null),
@@ -77,9 +80,35 @@ export const editorDocSchema = z.object({
 export type EditorDoc = z.infer<typeof editorDocSchema>;
 
 const FPS = 30;
-const LEAD_MS = 250;
-const GAP_MS = 350;
-const TAIL_MS = 900;
+
+/** Every shot of a scene in order (first = `visual`). */
+export function sceneShots(scene: Pick<EditorScene, "visual" | "shots">): EditorVisual[] {
+  return [scene.visual, ...scene.shots];
+}
+
+/** Replace shot `index` (0 = `visual`). */
+export function setShot(scene: EditorScene, index: number, visual: EditorVisual): EditorScene {
+  if (index === 0) return { ...scene, visual };
+  return { ...scene, shots: scene.shots.map((s, i) => (i === index - 1 ? visual : s)) };
+}
+
+/** Remove shot `index`; removing the first promotes the next one. A scene always keeps at least one shot. */
+export function removeShot(scene: EditorScene, index: number): EditorScene {
+  const all = sceneShots(scene);
+  if (all.length <= 1) return scene;
+  const rest = all.filter((_, i) => i !== index);
+  return { ...scene, visual: rest[0], shots: rest.slice(1) };
+}
+
+/** Voice length of a scene in ms (script estimate before synthesis). */
+export function sceneVoiceMs(scene: Pick<EditorScene, "voice" | "durationSec" | "holdMs">) {
+  return (scene.voice?.durationMs ?? Math.round(scene.durationSec * 1000)) + scene.holdMs;
+}
+
+/** How many shots this scene still lacks for a picture change every ≤ 5 s (0 = fine). */
+export function shotsMissing(scene: EditorScene) {
+  return Math.max(0, shotsNeeded(sceneVoiceMs(scene)) - sceneShots(scene).length);
+}
 
 /** Caption chunks for a scene (explicit edits, else automatic). */
 export function sceneCaptions(scene: EditorScene): CaptionChunk[] {
@@ -96,8 +125,8 @@ export function setCaptionText(chunk: CaptionChunk, text: string): CaptionChunk 
 }
 
 function toVisualInput(v: EditorVisual): SceneVisualInput {
-  if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, credit: v.credit };
-  if (v.kind === "image") return { kind: "image", key: v.key, credit: v.credit };
+  if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit };
+  if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, credit: v.credit };
   return null;
 }
 
@@ -119,6 +148,7 @@ export function buildFromDoc(doc: EditorDoc, audio: { mixKey: string; voiceKey: 
       durationSec: s.durationSec,
       voice: s.voice,
       visual: toVisualInput(s.visual),
+      shots: s.shots.map(toVisualInput),
       holdMs: s.holdMs,
       captions: s.captions ?? undefined,
     })),
@@ -129,15 +159,7 @@ export function buildFromDoc(doc: EditorDoc, audio: { mixKey: string; voiceKey: 
     gapMs: GAP_MS,
     tailMs: TAIL_MS,
   };
-  const built = buildTimeline(input);
-  // Video visuals keep their trim/kenBurns settings, which the generic builder does not know about.
-  built.timeline.scenes = built.timeline.scenes.map((sc, i) => {
-    const v = doc.scenes[i].visual;
-    if (sc.visual.kind === "video" && v.kind === "video") return { ...sc, visual: { ...sc.visual, trimStartSec: v.trimStartSec } };
-    if (sc.visual.kind === "image" && v.kind === "image") return { ...sc, visual: { ...sc.visual, kenBurns: v.kenBurns } };
-    return sc;
-  });
-  return built;
+  return buildTimeline(input);
 }
 
 /** Everything the audio mix depends on. Equal signatures → the previous mix file can be reused. */
@@ -160,7 +182,7 @@ export function docKeys(doc: EditorDoc): string[] {
   const keys = new Set<string>();
   for (const s of doc.scenes) {
     if (s.voice) keys.add(s.voice.key);
-    if (s.visual.kind !== "solid") keys.add(s.visual.key);
+    for (const v of sceneShots(s)) if (v.kind !== "solid") keys.add(v.key);
   }
   if (doc.music) keys.add(doc.music.key);
   if (doc.brand.logoSrc) keys.add(doc.brand.logoSrc);
@@ -213,10 +235,13 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
     const storedWords = Array.isArray(v?.words) ? v.words : null;
     const voice = key ? { key, durationMs, words: storedWords ?? words } : null;
     const st = b.stock?.[sc.id]?.selected ?? null;
-    let visual: EditorVisual;
-    if (sc.visual.kind === "video") visual = { kind: "video", key: sc.visual.src, clipDurationSec: sc.visual.clipDurationSec, trimStartSec: sc.visual.trimStartSec, credit: sc.credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null };
-    else if (sc.visual.kind === "image") visual = { kind: "image", key: sc.visual.src, kenBurns: sc.visual.kenBurns, credit: sc.credit, assetId: null, thumbnailUrl: null };
-    else visual = { kind: "solid" };
+    const fromTimeline = (v: Timeline["scenes"][number]["visual"], credit: string | null): EditorVisual => {
+      if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null };
+      if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, credit, assetId: null, thumbnailUrl: null };
+      return { kind: "solid" };
+    };
+    const visual = fromTimeline(sc.visual, sc.credit);
+    const shots = (sc.shots ?? []).slice(1).map((sh) => fromTimeline(sh.visual, sh.credit));
     return {
       id: sc.id,
       kind: sc.kind,
@@ -226,6 +251,7 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
       durationSec: Math.round((durationMs / 1000) * 10) / 10,
       voice,
       visual,
+      shots,
       holdMs: 0,
       captions: null,
     };
@@ -258,6 +284,7 @@ export function describeChanges(prev: EditorDoc, next: EditorDoc): string[] {
         else out.push(`${n.id}: chỉnh hình`);
       } else out.push(`${n.id}: đổi ${n.visual.kind === "video" ? "clip" : n.visual.kind === "image" ? "ảnh" : "sang nền màu"}`);
     }
+    if (JSON.stringify(p.shots) !== JSON.stringify(n.shots)) out.push(p.shots.length !== n.shots.length ? `${n.id}: ${n.shots.length + 1} cảnh quay` : `${n.id}: đổi cảnh quay`);
     if (p.voice?.key !== n.voice?.key) out.push(`${n.id}: giọng đọc mới`);
     else if (JSON.stringify(sceneCaptions(p)) !== JSON.stringify(sceneCaptions(n))) out.push(`${n.id}: sửa phụ đề`);
     if (p.holdMs !== n.holdMs) out.push(`${n.id}: giữ thêm ${n.holdMs} ms`);
@@ -278,3 +305,4 @@ export function moveScene(doc: EditorDoc, from: number, to: number): EditorDoc {
 }
 
 export const EDITOR_FPS = FPS;
+export { LEAD_MS, GAP_MS, TAIL_MS };

@@ -57,6 +57,13 @@
       "when": 1789520347083,
       "tag": "0007_auto_pipeline",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789528066277,
+      "tag": "0008_punchy_voice",
+      "breakpoints": true
     }
   ]
 }

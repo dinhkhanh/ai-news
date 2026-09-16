@@ -10,6 +10,7 @@ import { fetchSceneBroll } from "@/lib/media/broll";
 import { voicePlacement, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { pickMusic } from "@/lib/media/music";
 import { loadPronunciations, loadVoicePreset, synthesizeScene } from "@/lib/media/tts";
+import { shotsNeeded } from "@/lib/media/timeline";
 import { r2Key } from "@/lib/r2";
 import { docOfRow, saveTimelineVersion } from "@/lib/review";
 
@@ -82,22 +83,25 @@ export const regenerateSceneFn = inngest.createFunction(
     if (what === "broll" && scene) {
       const terms = (brollTerms?.length ? brollTerms : scene.brollTerms).map((t) => t.trim()).filter(Boolean);
       if (!terms.length) throw new NonRetriableError("Add at least one English search term for the B-roll");
-      const wantSec = (scene.voice?.durationMs ?? scene.durationSec * 1000) / 1000;
+      const sceneMs = (scene.voice?.durationMs ?? scene.durationSec * 1000) + scene.holdMs;
+      const wantSec = Math.min(5, sceneMs / 1000);
+      const keep = shotsNeeded(sceneMs);
       const res = await step.run("broll", async () => {
         // Skip clips this project already fetched for the scene so a retry brings something new.
         const seen = await withOrgContext(ctx, (tx) => tx.query.assets.findMany({ where: and(eq(schema.assets.projectId, projectId), eq(schema.assets.sceneId, scene.id)), columns: { provider: true, providerId: true } }));
         const exclude = new Set(seen.map((a) => `${a.provider}:${a.providerId}`));
-        return fetchSceneBroll({ id: scene.id, voiceover: scene.voiceover, onScreenText: scene.onScreenText, brollTerms: terms }, { wantSec, buildId, keep: 3, exclude }, pctx);
+        return fetchSceneBroll({ id: scene.id, voiceover: scene.voiceover, onScreenText: scene.onScreenText, brollTerms: terms }, { wantSec, buildId, keep: Math.max(2, keep), exclude }, pctx);
       });
       if (!res.selected) throw new NonRetriableError(`Không tìm được clip mới cho ${scene.id}${res.errors[0] ? `: ${res.errors[0]}` : " (chưa có key Pexels/Pixabay?)"}`);
-      const sel = res.selected;
+      const clips = [res.selected, ...res.alternates].slice(0, keep).map((c) => ({ kind: "video" as const, key: c.key, clipDurationSec: c.durationSec ?? 5, trimStartSec: 0, credit: c.credit, assetId: c.assetId, thumbnailUrl: c.thumbnailUrl }));
+      // New clips take the first shots; keep the scene's remaining stills so the ≤ 5 s cadence holds.
+      const keepStills = [scene.visual, ...scene.shots].filter((v) => v.kind === "image").slice(0, Math.max(0, keep - clips.length));
+      const all = [...clips, ...keepStills];
       next = {
         ...base.doc,
-        scenes: base.doc.scenes.map((s, i) =>
-          i === sceneIdx ? { ...s, brollTerms: terms, visual: { kind: "video", key: sel.key, clipDurationSec: sel.durationSec ?? 5, trimStartSec: 0, credit: sel.credit, assetId: sel.assetId, thumbnailUrl: sel.thumbnailUrl } } : s,
-        ),
+        scenes: base.doc.scenes.map((s, i) => (i === sceneIdx ? { ...s, brollTerms: terms, visual: all[0], shots: all.slice(1) } : s)),
       };
-      changes.push(`${scene.id}: B-roll mới (${res.searched} ứng viên, ${terms.join(", ")})`);
+      changes.push(`${scene.id}: B-roll mới (${clips.length} clip, ${res.searched} ứng viên, ${terms.join(", ")})`);
       build.stock = { ...base.stock, [scene.id]: { selected: res.selected, alternates: res.alternates, searched: res.searched, errors: res.errors, rankCostUsd: res.rankCostUsd } };
     }
 

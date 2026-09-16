@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { brandSchema } from "@ai-news/video/schema";
-import { audioSignature, buildFromDoc, describeChanges, docFromTimeline, docKeys, editorDocSchema, moveScene, sceneCaptions, setCaptionText, voicePlacement, type EditorDoc } from "./editor";
+import { audioSignature, buildFromDoc, describeChanges, docFromTimeline, docKeys, editorDocSchema, GAP_MS, LEAD_MS, moveScene, removeShot, sceneCaptions, setCaptionText, setShot, shotsMissing, TAIL_MS, voicePlacement, type EditorDoc, type EditorVisual } from "./editor";
+import { layoutShots, shotsNeeded } from "./timeline";
 
 const words = (text: string, ms: number) => {
   const ws = text.split(" ");
@@ -27,9 +28,9 @@ describe("buildFromDoc", () => {
   it("lays scenes out with lead/gap/tail and stores per-scene voice keys", () => {
     const { timeline, timings, durationSec } = buildFromDoc(doc, { mixKey: "media/o/p/mix/b1.wav", voiceKey: null });
     expect(timeline.scenes.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
-    expect(timings[0].atSec).toBe(0.25);
-    expect(timings[1].atSec).toBeCloseTo(0.25 + 3 + 0.35, 5);
-    expect(durationSec).toBeCloseTo((250 + 3000 + 350 + 2500 + 350 + 1500 + 900) / 1000, 5);
+    expect(timings[0].atSec).toBe(LEAD_MS / 1000);
+    expect(timings[1].atSec).toBeCloseTo((LEAD_MS + 3000 + GAP_MS) / 1000, 5);
+    expect(durationSec).toBeCloseTo((LEAD_MS + 3000 + GAP_MS + 2500 + GAP_MS + 1500 + TAIL_MS) / 1000, 5);
     expect(timeline.scenes[0].voiceSrc).toBe("media/o/p/vo/b1-s1.wav");
     expect(timeline.audio.mixSrc).toBe("media/o/p/mix/b1.wav");
     expect(timeline.captions.length).toBeGreaterThan(2);
@@ -46,6 +47,46 @@ describe("buildFromDoc", () => {
   });
 });
 
+describe("shots", () => {
+  const img = (n: number): EditorVisual => ({ kind: "image", key: `media/o/p/aroll/b1-${n}.jpg`, kenBurns: true, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null });
+  it("needs one shot per 5 s", () => {
+    expect(shotsNeeded(3000)).toBe(1);
+    expect(shotsNeeded(5000)).toBe(1);
+    expect(shotsNeeded(5001)).toBe(2);
+    expect(shotsNeeded(12_000)).toBe(3);
+  });
+  it("splits the scene equally between shots, solid when there is nothing", () => {
+    const shots = layoutShots([{ kind: "image", key: "a", credit: null }, { kind: "video", key: "b", clipDurationSec: 4, trimStartSec: 1, credit: "Video: Pexels" }, { kind: "image", key: "c", kenBurns: false, credit: null }], 301);
+    expect(shots.map((s) => [s.from, s.durationFrames])).toEqual([[0, 100], [100, 101], [201, 100]]);
+    expect(shots[1].visual).toMatchObject({ kind: "video", trimStartSec: 1 });
+    expect(shots[2].visual).toMatchObject({ kind: "image", kenBurns: false });
+    expect(layoutShots([null], 90)).toEqual([{ from: 0, durationFrames: 90, visual: { kind: "solid" }, credit: null }]);
+  });
+  it("builds scene shots into the timeline and collects every credit and key", () => {
+    const withShots: EditorDoc = { ...doc, scenes: doc.scenes.map((s, i) => (i === 1 ? { ...s, voice: { ...s.voice!, durationMs: 11_000 }, shots: [img(1), img(2)] } : s)) };
+    const { timeline } = buildFromDoc(withShots, null);
+    expect(timeline.scenes[1].shots.length).toBe(3);
+    expect(timeline.scenes[1].shots.map((sh) => sh.from + sh.durationFrames).at(-1)).toBe(timeline.scenes[1].durationFrames);
+    expect(timeline.scenes[1].visual).toMatchObject({ kind: "image", src: "media/o/p/aroll/b1-0.jpg" });
+    expect(timeline.scenes[0].shots.length).toBe(1);
+    expect(docKeys(withShots)).toContain("media/o/p/aroll/b1-2.jpg");
+    expect(shotsMissing(withShots.scenes[1])).toBe(0);
+    expect(shotsMissing({ ...withShots.scenes[1], shots: [] })).toBe(2);
+    // Round trip through the stored document keeps the shots.
+    expect(docFromTimeline(timeline, { doc: withShots }).scenes[1].shots.length).toBe(2);
+  });
+  it("edits shots: replace, remove, promote", () => {
+    const scene = { ...doc.scenes[1], shots: [img(1), img(2)] };
+    expect(setShot(scene, 2, img(9)).shots[1]).toEqual(img(9));
+    expect(setShot(scene, 0, img(9)).visual).toEqual(img(9));
+    const removed = removeShot(scene, 0);
+    expect(removed.visual).toEqual(img(1));
+    expect(removed.shots).toEqual([img(2)]);
+    expect(removeShot(doc.scenes[1], 0)).toBe(doc.scenes[1]);
+    expect(describeChanges(doc, { ...doc, scenes: doc.scenes.map((s, i) => (i === 1 ? scene : s)) })).toContain("s2: 3 cảnh quay");
+  });
+});
+
 describe("audio signature + placement", () => {
   it("changes only when the mix would change", () => {
     const sig = audioSignature(doc);
@@ -57,8 +98,8 @@ describe("audio signature + placement", () => {
   });
   it("places voice segments at scene offsets", () => {
     const p = voicePlacement(moveScene(doc, 2, 0));
-    expect(p.voice[0]).toEqual({ key: "media/o/p/vo/b1-s3.wav", atSec: 0.25 });
-    expect(p.voice[1].atSec).toBeCloseTo(0.25 + 1.5 + 0.35, 5);
+    expect(p.voice[0]).toEqual({ key: "media/o/p/vo/b1-s3.wav", atSec: LEAD_MS / 1000 });
+    expect(p.voice[1].atSec).toBeCloseTo((LEAD_MS + 1500 + GAP_MS) / 1000, 5);
   });
 });
 
@@ -73,7 +114,7 @@ describe("captions", () => {
     const scene = { ...doc.scenes[0], captions: chunks.map((c, i) => (i === 0 ? edited : c)) };
     const built = buildFromDoc({ ...doc, scenes: [scene, ...doc.scenes.slice(1)] }, null);
     expect(built.timeline.captions[0].text).toBe("Sáng nay, TP.HCM");
-    expect(built.timeline.captions[0].startMs).toBe(chunks[0].startMs + 250);
+    expect(built.timeline.captions[0].startMs).toBe(chunks[0].startMs + LEAD_MS);
   });
 });
 

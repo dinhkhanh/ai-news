@@ -146,3 +146,71 @@ export async function firecrawlScrape(url: string, timeoutMs = 60_000): Promise<
   }
   return { html: json.data.html ?? null, markdown: json.data.markdown ?? null, metadata: json.data.metadata ?? {}, ms: Date.now() - t0 };
 }
+
+export type SearchHit = { url: string; title: string | null; imageUrl: string | null };
+
+/**
+ * Firecrawl web/news search (v2). Costs credits like a scrape; the counter is
+ * decremented the same way. Returns [] when the integration is off.
+ */
+export async function firecrawlSearch(query: string, opts: { limit?: number; language?: "vi" | "en"; timeoutMs?: number } = {}): Promise<SearchHit[]> {
+  const { row, secret } = await integrationSecret("firecrawl");
+  if (!secret) return [];
+  if (row?.creditsRemaining != null && row.creditsRemaining <= 0) return [];
+  const res = await fetch("https://api.firecrawl.dev/v2/search", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ query, limit: opts.limit ?? 8, sources: ["news", "web"], tbs: "qdr:m", location: opts.language === "vi" ? "Vietnam" : undefined }),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+  });
+  type Hit = { url?: string; title?: string; imageUrl?: string };
+  const json = (await res.json().catch(() => null)) as { success?: boolean; error?: string; data?: Hit[] | { web?: Hit[]; news?: Hit[] } } | null;
+  if (!res.ok || !json?.success || !json.data) throw new Error(`Firecrawl search failed: HTTP ${res.status} ${json?.error ?? ""}`.trim());
+  if (row?.creditsRemaining != null) {
+    await db.update(schema.integrations).set({ creditsRemaining: Math.max(0, row.creditsRemaining - 1) }).where(eq(schema.integrations.provider, "firecrawl"));
+  }
+  const hits = Array.isArray(json.data) ? json.data : [...(json.data.news ?? []), ...(json.data.web ?? [])];
+  return hits.filter((h): h is Hit & { url: string } => typeof h.url === "string").map((h) => ({ url: h.url, title: h.title ?? null, imageUrl: h.imageUrl ?? null }));
+}
+
+/** Bing News RSS: free, no key, direct article links. Used when Firecrawl is off or returns nothing. */
+export async function bingNewsSearch(query: string, opts: { language?: "vi" | "en"; timeoutMs?: number } = {}): Promise<SearchHit[]> {
+  const url = new URL("https://www.bing.com/news/search");
+  url.searchParams.set("q", query.slice(0, 200));
+  url.searchParams.set("format", "rss");
+  url.searchParams.set("setlang", opts.language === "vi" ? "vi" : "en");
+  if (opts.language === "vi") url.searchParams.set("cc", "VN");
+  const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Language": opts.language === "vi" ? "vi,en;q=0.8" : "en" }, signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000) });
+  if (!res.ok) throw new Error(`Bing News HTTP ${res.status}`);
+  const xml = await res.text();
+  const unwrap = (v: string | undefined) =>
+    (v ?? "")
+      .replace(/^<!\[CDATA\[|\]\]>$/g, "")
+      .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .trim();
+  // Bing wraps links in a click tracker (bing.com/news/apiclick.aspx?...&url=<article>); unwrap to the article URL.
+  const direct = (link: string) => {
+    try {
+      const u = new URL(link);
+      const target = u.hostname.endsWith("bing.com") ? u.searchParams.get("url") : null;
+      return target && /^https?:\/\//.test(target) ? target : link;
+    } catch {
+      return link;
+    }
+  };
+  const out: SearchHit[] = [];
+  for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+    const item = m[1];
+    const link = direct(unwrap(/<link>([\s\S]*?)<\/link>/.exec(item)?.[1]));
+    if (!/^https?:\/\//.test(link)) continue;
+    const title = unwrap(/<title>([\s\S]*?)<\/title>/.exec(item)?.[1]) || null;
+    const image = unwrap(/<News:Image>([\s\S]*?)<\/News:Image>/.exec(item)?.[1]) || null;
+    out.push({ url: link, title, imageUrl: image });
+  }
+  return out;
+}

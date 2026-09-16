@@ -20,7 +20,7 @@ describe("renderTemplate", () => {
       expect(t.body.length).toBeGreaterThan(400);
     }
     expect(toneGuidance("urgent", "vi")).toMatch(/nóng/);
-    expect(toneGuidance("unknown-tone", "en")).toMatch(/Broadcast/);
+    expect(toneGuidance("unknown-tone", "en")).toMatch(/Punchy/); // unknown tone → the first (default) tone
   });
 });
 

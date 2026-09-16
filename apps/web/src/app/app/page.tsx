@@ -87,7 +87,7 @@ export default async function AppHome() {
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="tone">Giọng điệu</Label>
-                  <select id="tone" name="tone" defaultValue="news" className="h-9 rounded-md border bg-background px-2 text-sm">
+                  <select id="tone" name="tone" defaultValue="punchy" className="h-9 rounded-md border bg-background px-2 text-sm">
                     {SCRIPT_TONES.map((t) => (
                       <option key={t.key} value={t.key}>
                         {t.vi} · {t.en}

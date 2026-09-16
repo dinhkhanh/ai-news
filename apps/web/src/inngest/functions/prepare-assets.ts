@@ -12,9 +12,11 @@ import { loadBrand } from "@/lib/media/brand";
 import { fetchSceneBroll, type ChosenAsset, type SceneStock } from "@/lib/media/broll";
 import { audioSignature, buildFromDoc, editorDocSchema, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { pickMusic } from "@/lib/media/music";
+import { assignImages } from "@/lib/media/rank";
+import { findRelatedImages, storeRelatedImages } from "@/lib/media/related";
 import { mixDocAudio } from "@/lib/media/remix";
 import { downloadToR2, stockProvidersAvailable } from "@/lib/media/stock";
-import { sceneTimings } from "@/lib/media/timeline";
+import { sceneTimings, shotsNeeded } from "@/lib/media/timeline";
 import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice } from "@/lib/media/tts";
 import { deleteObject, r2Key } from "@/lib/r2";
 
@@ -28,6 +30,11 @@ const ext = (url: string, fallback: string) => {
  * ranked by Haiku, deduped org-wide), TTS with word timings and pronunciations,
  * music, media-Lambda audio mix, then a new timeline version. The project moves
  * to `composed`; re-running creates the next version and leaves old assets.
+ *
+ * Every scene is cut into shots so the picture changes at least every 5 s
+ * (`shotsNeeded`), and no visual is used twice in the video. When the article's
+ * own images plus stock clips cannot cover the budget, images from other
+ * outlets' coverage of the same story are fetched (`findRelatedImages`).
  */
 export const prepareAssetsFn = inngest.createFunction(
   {
@@ -69,8 +76,9 @@ export const prepareAssetsFn = inngest.createFunction(
         language: row.project.language,
         tone: row.project.tone,
         title: row.project.title ?? s.title,
+        articleTitle: row.article?.title ?? row.project.title ?? s.title,
         source: { name: row.article?.siteName ?? null, url: row.project.canonicalUrl ?? row.project.url },
-        images: (row.article?.images ?? []).filter((im) => !/\.(gif|svg)(?:$|\?)/i.test(im.url) && (im.width ?? 1000) >= 600).slice(0, 4),
+        images: (row.article?.images ?? []).filter((im) => !/\.(gif|svg)(?:$|\?)/i.test(im.url) && (im.width ?? 1000) >= 600).slice(0, 12),
         scenes: s.scenes.map((sc) => ({ id: sc.id, kind: sc.kind, voiceover: sc.voiceover, onScreenText: sc.onScreenText, brollTerms: sc.brollTerms, durationSec: sc.durationSec })),
       };
     });
@@ -119,7 +127,11 @@ export const prepareAssetsFn = inngest.createFunction(
       return out;
     });
 
-    /* ---- stock B-roll per scene (parallel): search → rank thumbnails → download top 2 ---- */
+    /* ---- shot budget: one picture per ≤ 5 s of voice, one for the CTA ---- */
+    const voiceMs = (id: string, fallbackSec: number) => voices.find((v) => v.sceneId === id)?.durationMs ?? fallbackSec * 1000;
+    const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
+
+    /* ---- stock B-roll per scene (parallel): search → rank thumbnails → download as many clips as the scene needs ---- */
     const providers = await step.run("stock-providers", () => stockProvidersAvailable());
     const stockEnabled = !skipStock && (providers.pexels || providers.pixabay);
     const stock: Record<string, SceneStock> = {};
@@ -129,14 +141,64 @@ export const prepareAssetsFn = inngest.createFunction(
           .filter((sc) => sc.kind !== "cta" && sc.brollTerms.length)
           .map((sc) =>
             step.run(`stock-${sc.id}`, async (): Promise<[string, SceneStock]> => {
-              const voice = voices.find((v) => v.sceneId === sc.id);
-              const wantSec = (voice?.durationMs ?? sc.durationSec * 1000) / 1000;
-              return [sc.id, await fetchSceneBroll(sc, { wantSec, buildId: input.buildId }, pctx)];
+              const wantSec = Math.min(5, voiceMs(sc.id, sc.durationSec) / 1000);
+              return [sc.id, await fetchSceneBroll(sc, { wantSec, buildId: input.buildId, keep: need[sc.id] }, pctx)];
             }),
           ),
       );
       for (const [id, r] of results) stock[id] = r;
     }
+
+    /* ---- pictures still missing after stock: article images, then other outlets' coverage of the same story ---- */
+    const stockCount = (id: string) => (stock[id] ? (stock[id].selected ? 1 : 0) + stock[id].alternates.length : 0);
+    const imageDeficit = input.scenes.reduce((a, sc) => a + Math.max(0, need[sc.id] - stockCount(sc.id)), 0);
+    const related = await step.run("related-aroll", async () => {
+      const shortfall = imageDeficit - aroll.length;
+      if (shortfall <= 0) return { assets: [] as ChosenAsset[], pages: 0, found: 0, errors: [] as string[], shortfall };
+      const found = await findRelatedImages({ query: input.articleTitle, language: input.language, excludeUrls: [input.source.url], want: shortfall });
+      const stored = await storeRelatedImages(found.images, { buildId: input.buildId, max: shortfall + 2 }, pctx);
+      return { assets: stored.assets, pages: found.pages, found: found.images.length, errors: [...found.errors, ...stored.errors], shortfall };
+    });
+    const imagePool: ChosenAsset[] = [...aroll, ...related.assets];
+
+    /* ---- which image goes to which scene: Haiku matches subjects; every image at most once ---- */
+    const assignment = await step.run("assign-images", async () => {
+      const wanting = input.scenes.map((sc) => ({ id: sc.id, voiceover: sc.voiceover, onScreenText: sc.onScreenText, want: Math.max(0, need[sc.id] - stockCount(sc.id)) })).filter((s) => s.want > 0);
+      let picks: Record<string, number[]> = {};
+      let costUsd = 0;
+      let method: "haiku" | "sequential" = "sequential";
+      if (wanting.length && imagePool.length) {
+        try {
+          const r = await assignImages(wanting, imagePool.map((a) => ({ key: a.key, thumbnailUrl: a.thumbnailUrl ?? "", hint: a.provider === "related" ? "other outlet" : "source article" })).filter((c) => c.thumbnailUrl), pctx);
+          picks = Object.fromEntries(r.picks);
+          costUsd = r.costUsd;
+          method = "haiku";
+        } catch (e) {
+          console.warn("[assets] image assignment failed, assigning in order", e);
+        }
+      }
+      // Greedy: ranked picks first, then whatever is left in pool order. Never the same image twice.
+      const used = new Set<number>();
+      const perScene: Record<string, number[]> = {};
+      for (const w of wanting) {
+        const chosen: number[] = [];
+        for (const i of picks[w.id] ?? []) {
+          if (chosen.length >= w.want || used.has(i)) continue;
+          used.add(i);
+          chosen.push(i);
+        }
+        perScene[w.id] = chosen;
+      }
+      for (const w of wanting) {
+        const chosen = perScene[w.id];
+        for (let i = 0; i < imagePool.length && chosen.length < w.want; i++) {
+          if (used.has(i)) continue;
+          used.add(i);
+          chosen.push(i);
+        }
+      }
+      return { perScene, method, costUsd, unused: imagePool.length - used.size };
+    });
 
     /* ---- music ---- */
     const preTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })) });
@@ -144,19 +206,15 @@ export const prepareAssetsFn = inngest.createFunction(
 
     /* ---- editor document (docs/PLAN.md §4.7): the source every later version is rebuilt from ---- */
     const doc: EditorDoc = await step.run("compose-doc", async () => {
-      let imageIdx = 0;
-      const nextImage = (): EditorScene["visual"] => {
-        if (!aroll.length) return { kind: "solid" };
-        const im = aroll[imageIdx % aroll.length];
-        imageIdx += 1;
-        return { kind: "image", key: im.key, kenBurns: true, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl };
-      };
+      const clip = (st: ChosenAsset): EditorScene["visual"] => ({ kind: "video", key: st.key, clipDurationSec: st.durationSec ?? 5, trimStartSec: 0, credit: st.credit, assetId: st.assetId, thumbnailUrl: st.thumbnailUrl });
+      const still = (im: ChosenAsset): EditorScene["visual"] => ({ kind: "image", key: im.key, kenBurns: true, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl });
       const scenes: EditorScene[] = input.scenes.map((sc) => {
         const v = voices.find((x) => x.sceneId === sc.id) ?? null;
-        const st = stock[sc.id]?.selected ?? null;
-        const visual: EditorScene["visual"] = st
-          ? { kind: "video", key: st.key, clipDurationSec: st.durationSec ?? 5, trimStartSec: 0, credit: st.credit, assetId: st.assetId, thumbnailUrl: st.thumbnailUrl }
-          : nextImage();
+        const s = stock[sc.id];
+        const clips = s ? [...(s.selected ? [s.selected] : []), ...s.alternates].slice(0, need[sc.id]).map(clip) : [];
+        const stills = (assignment.perScene[sc.id] ?? []).map((i) => still(imagePool[i]));
+        const all = [...clips, ...stills];
+        const visual: EditorScene["visual"] = all[0] ?? { kind: "solid" };
         return {
           id: sc.id,
           kind: sc.kind,
@@ -166,6 +224,7 @@ export const prepareAssetsFn = inngest.createFunction(
           durationSec: sc.durationSec,
           voice: v ? { key: v.key, durationMs: v.durationMs, words: v.words } : null,
           visual,
+          shots: all.slice(1),
           holdMs: 0,
           captions: null,
         };
@@ -195,6 +254,8 @@ export const prepareAssetsFn = inngest.createFunction(
         stock: Object.fromEntries(Object.entries(stock).map(([id, s]) => [id, { selected: s.selected, alternates: s.alternates, searched: s.searched, errors: s.errors, rankCostUsd: s.rankCostUsd }])),
         stockEnabled,
         aroll: aroll.map((a) => ({ assetId: a.assetId, key: a.key })),
+        related: { assets: related.assets.map((a) => ({ assetId: a.assetId, key: a.key })), pages: related.pages, found: related.found, shortfall: related.shortfall, errors: related.errors },
+        shots: { need, assign: assignment.method, unusedImages: assignment.unused, assignCostUsd: assignment.costUsd },
         music: music.pick ? { source: music.pick.source, title: music.pick.title, licence: music.pick.licence, key: music.pick.key } : null,
         musicError: music.error,
         mix: { mixKey: mix.mixKey, voiceKey: mix.voiceKey, integratedLufs: mix.integratedLufs, signature: audioSignature(doc), reused: false },
@@ -213,10 +274,10 @@ export const prepareAssetsFn = inngest.createFunction(
         await tx.update(schema.projects).set({ state: "composed", busyStep: null, lastError: null, approvedTimelineId: null, approvedBy: null, approvedAt: null }).where(eq(schema.projects.id, projectId));
         return t;
       });
-      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + mix.costUsd;
+      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + mix.costUsd;
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: "timeline.built",
-        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
+        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, need[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
       });
       return { ...row, durationSec };
     });

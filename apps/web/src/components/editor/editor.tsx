@@ -10,13 +10,13 @@ import { ReviewPanel } from "@/components/review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { audioSignature, buildFromDoc, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { audioSignature, buildFromDoc, sceneShots, shotsMissing, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { cn } from "@/lib/utils";
 import { CommentsPanel } from "./comments-panel";
 import { Preview } from "./preview";
 import { SceneInspector } from "./scene-inspector";
 import { SceneList } from "./scene-list";
-import type { EditorProps } from "./types";
+import type { EditorProps, VisualOption } from "./types";
 
 const FPS = 30;
 
@@ -27,8 +27,11 @@ function resolveForPlayer(t: Timeline, urls: Record<string, string>): Timeline {
     ...t,
     brand: { ...t.brand, logoSrc: u(t.brand.logoSrc) },
     scenes: t.scenes.map((s) => {
-      const src = s.visual.kind === "solid" ? null : u(s.visual.src);
-      return { ...s, voiceSrc: u(s.voiceSrc), visual: s.visual.kind === "solid" || !src ? { kind: "solid" as const } : { ...s.visual, src } };
+      const visual = (v: Timeline["scenes"][number]["visual"]) => {
+        const src = v.kind === "solid" ? null : u(v.src);
+        return v.kind === "solid" || !src ? { kind: "solid" as const } : { ...v, src };
+      };
+      return { ...s, voiceSrc: u(s.voiceSrc), visual: visual(s.visual), shots: s.shots.map((sh) => ({ ...sh, visual: visual(sh.visual) })) };
     }),
     audio: { ...t.audio, mixSrc: u(t.audio.mixSrc), voiceSrc: u(t.audio.voiceSrc), musicSrc: u(t.audio.musicSrc) },
   };
@@ -44,6 +47,13 @@ export function Editor(props: EditorProps) {
   const [note, setNote] = useState("");
   const [pending, startTransition] = useTransition();
   const [saving, setSaving] = useState(false);
+  // Uploads and linked files join the swap options (and get a presigned URL for the preview) without a reload.
+  const [options, setOptions] = useState<VisualOption[]>(props.options);
+  const [urls, setUrls] = useState<Record<string, string>>(props.urls);
+  const addOption = (o: VisualOption, url: string) => {
+    setOptions((list) => [o, ...list.filter((x) => x.assetId !== o.assetId)]);
+    setUrls((u) => ({ ...u, [o.key]: url }));
+  };
 
   const savedJson = useMemo(() => JSON.stringify(props.doc), [props.doc]);
   const dirty = JSON.stringify(doc) !== savedJson;
@@ -52,7 +62,15 @@ export function Editor(props: EditorProps) {
   const mixUsable = Boolean(props.mix && props.mix.signature === audioSignature(doc));
 
   const built = useMemo(() => buildFromDoc(doc, mixUsable && props.mix ? { mixKey: props.mix.mixKey, voiceKey: null } : null), [doc, mixUsable, props.mix]);
-  const playerTimeline = useMemo(() => resolveForPlayer(built.timeline, props.urls), [built.timeline, props.urls]);
+  const playerTimeline = useMemo(() => resolveForPlayer(built.timeline, urls), [built.timeline, urls]);
+  // Where each picture is used, so the inspector can flag repeats across scenes.
+  const usedKeys = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const s of doc.scenes) sceneShots(s).forEach((v, i) => v.kind !== "solid" && (out[v.key] = [...(out[v.key] ?? []), i === 0 ? s.id : `${s.id} #${i + 1}`]));
+    return out;
+  }, [doc.scenes]);
+  const shortScenes = doc.scenes.filter((s) => shotsMissing(s) > 0).map((s) => s.id);
+  const repeatedKeys = Object.values(usedKeys).filter((at) => at.length > 1).length;
   const timings = built.timings.map((t) => ({ id: t.id, atSec: t.atSec, durationMs: t.durationMs }));
   const selected = doc.scenes.find((s) => s.id === selectedId) ?? doc.scenes[0] ?? null;
   const selectedIndex = selected ? doc.scenes.findIndex((s) => s.id === selected.id) : -1;
@@ -115,7 +133,7 @@ export function Editor(props: EditorProps) {
   const thumb = (s: EditorScene) => {
     if (s.visual.kind === "solid") return { url: null, video: false };
     if (s.visual.thumbnailUrl) return { url: s.visual.thumbnailUrl, video: false };
-    return { url: props.urls[s.visual.key] ?? null, video: s.visual.kind === "video" };
+    return { url: urls[s.visual.key] ?? null, video: s.visual.kind === "video" };
   };
 
   const coverFrame = doc.coverAtSec != null ? Math.round(doc.coverAtSec * FPS) : null;
@@ -128,10 +146,18 @@ export function Editor(props: EditorProps) {
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>{(built.timeline.durationFrames / FPS).toFixed(1)} s</span>
           <span>· {doc.scenes.length} cảnh</span>
+          <span>· {built.timeline.scenes.reduce((a, s) => a + s.shots.length, 0)} hình</span>
           <span>· {built.timeline.captions.length} phụ đề</span>
           {mixUsable ? <Badge variant="outline">âm thanh đã trộn</Badge> : <Badge variant="secondary">xem trước: lời + nhạc chưa trộn (lưu để trộn lại)</Badge>}
         </div>
         {props.lastError ? <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs">{props.lastError}</p> : null}
+        {shortScenes.length || repeatedKeys ? (
+          <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-[11px] text-amber-800 dark:text-amber-300">
+            {shortScenes.length ? `Cảnh ${shortScenes.join(", ")} giữ một hình quá 5 s. ` : ""}
+            {repeatedKeys ? `${repeatedKeys} hình bị dùng lặp lại. ` : ""}
+            Thêm hình trong “Chi tiết cảnh” (tải lên, dán link hoặc chọn từ kho).
+          </p>
+        ) : null}
         {busy ? <p className="text-xs text-muted-foreground">Đang chạy bước {props.busyStep}… trang tự làm mới khi xong.</p> : null}
 
         <div className="space-y-2 rounded-md border p-3">
@@ -237,11 +263,13 @@ export function Editor(props: EditorProps) {
           {selected ? (
             <SceneInspector
               key={selected.id}
+              projectId={props.projectId}
               scene={selected}
               index={selectedIndex}
               total={doc.scenes.length}
-              options={props.options}
-              urls={props.urls}
+              options={options}
+              urls={urls}
+              usedKeys={usedKeys}
               verdict={props.verdicts?.[selected.id] ?? null}
               disabled={readOnly}
               canRegenerate={canRegenerate}
@@ -250,6 +278,7 @@ export function Editor(props: EditorProps) {
               onRemove={() => removeScene(selected.id)}
               onRegenerate={(what, payload) => regenerate(what, { sceneId: selected.id, ...payload })}
               onSeek={() => seekToScene(selected.id)}
+              onOptionAdded={addOption}
             />
           ) : (
             <p className="text-sm text-muted-foreground">Chọn một cảnh.</p>

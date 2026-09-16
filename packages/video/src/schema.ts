@@ -75,13 +75,31 @@ export const visualSchema = z.discriminatedUnion("kind", [
 ]);
 export type Visual = z.infer<typeof visualSchema>;
 
+/**
+ * One visual within a scene. Scenes longer than ~5 s are cut into several
+ * shots so the picture changes every 4–5 s; `from` is relative to the scene.
+ */
+export const shotSchema = z.object({
+  from: z.number().int().nonnegative(),
+  durationFrames: z.number().int().positive(),
+  visual: visualSchema,
+  credit: z.string().nullable().default(null),
+});
+export type Shot = z.infer<typeof shotSchema>;
+
+/** Longest a single shot should stay on screen. */
+export const MAX_SHOT_SEC = 5;
+
 export const sceneSchema = z.object({
   id: z.string(),
   kind: z.enum(["hook", "body", "cta"]),
   from: z.number().int().nonnegative(),
   durationFrames: z.number().int().positive(),
   headline: z.string().default(""),
+  /** First shot (kept for older timelines and thumbnails); `shots` is authoritative when non-empty. */
   visual: visualSchema,
+  /** Consecutive shots covering the scene; empty = the single `visual` for the whole scene. */
+  shots: z.array(shotSchema).default([]),
   /** Provenance for the on-screen attribution line. */
   credit: z.string().nullable().default(null),
   /**

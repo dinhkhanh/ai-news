@@ -11,7 +11,8 @@ Updated 2026-09-16.
 - Volume: 20 to 50 videos/day.
 - Workspaces: one personal workspace per user. Team workspaces later (phase 6).
 - Output: 1080x1920, 30 fps, H.264 High, CRF 18, AAC 192 kbps, -14 LUFS, -1 dBTP. Never lowered for cost.
-- Default Vietnamese voice: `vi-VN-Chirp3-HD-Charon`, rate 1.0, news-narrator preset. Alternate `vi-VN-Chirp3-HD-Kore`. SSML fallback `vi-VN-Neural2-D`. Phase 1 listening test may swap within Chirp 3 HD.
+- Default Vietnamese voice: `vi-VN-Chirp3-HD-Fenrir` at rate 1.22 (energetic, fast; migration 0008, 2026-09-16). Alternates `Puck` 1.20, `Charon`/`Kore` 1.15. SSML fallback `vi-VN-Neural2-D`. Scripts use the punchy template v2 (short sentences, hook on the strongest fact, ~3.1 words/s); default tone `punchy`.
+- Visual cadence: every scene is cut into shots so no picture stays longer than 5 s and no picture repeats in a video. Sources in order: stock clips (Pexels/Pixabay), the article's own images, then images from other outlets covering the same story (Firecrawl search → Bing News RSS fallback, plain-HTTP fetch). Haiku assigns images to scenes. Editors can add shots per scene from the project pool, an upload (presigned PUT to R2, bucket CORS in `infra/r2/cors.json`) or a direct file URL.
 - Media sourcing: stock APIs, article media, AI generation, optional web-video downloader (flag). Legal cleared.
 - Shared API keys and platform app credentials managed in admin, stored in Supabase Vault.
 - Social channels connected per workspace by admin, granted to users. OAuth consent by channel owner.
