@@ -12,13 +12,18 @@ export async function uploadTrack(_: ActionState, fd: FormData): Promise<ActionS
     const file = fd.get("file");
     if (!(file instanceof File) || file.size === 0) throw new Error("Choose an audio file");
     if (file.size > 25 * 1024 * 1024) throw new Error("Track must be under 25 MB");
-    if (!/^audio\/(mpeg|mp3|wav|x-wav|mp4|aac|ogg)$/.test(file.type)) throw new Error(`Unsupported audio type ${file.type}`);
+    const ext = file.name.split(".").pop()?.toLowerCase() || "mp3";
+    // Browsers report .mp4/.m4a as video/mp4 or audio/x-m4a (and sometimes an empty type). The mix Lambda
+    // maps `[1:a]` explicitly, so any container ffmpeg can demux is fine — accept by MIME or by extension.
+    const mimeOk = /^(audio\/(mpeg|mp3|wav|x-wav|wave|mp4|x-m4a|m4a|aac|ogg|flac|x-flac)|video\/mp4)$/.test(file.type);
+    const extOk = /^(mp3|wav|m4a|mp4|aac|ogg|flac)$/.test(ext);
+    if (!mimeOk && !extOk) throw new Error(`Unsupported audio type ${file.type || ext}`);
+    const contentType = file.type === "video/mp4" || file.type === "" ? (ext === "mp3" ? "audio/mpeg" : ext === "wav" ? "audio/wav" : ext === "ogg" ? "audio/ogg" : ext === "flac" ? "audio/flac" : "audio/mp4") : file.type;
     const title = str(fd, "title") || file.name.replace(/\.[^.]+$/, "");
     const licence = str(fd, "licence");
     if (!licence) throw new Error("Licence is required (e.g. 'Purchased: Epidemic Sound #1234')");
-    const ext = file.name.split(".").pop()?.toLowerCase() || "mp3";
     const key = r2Key.library(`music/${crypto.randomUUID()}.${ext}`);
-    await putObject(key, Buffer.from(await file.arrayBuffer()), file.type);
+    await putObject(key, Buffer.from(await file.arrayBuffer()), contentType);
     const moodTags = str(fd, "moodTags").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
     const durationRaw = str(fd, "durationSec");
     await db.insert(schema.musicLibrary).values({ title, r2Path: key, moodTags, licence, licenceUrl: str(fd, "licenceUrl") || null, durationSec: durationRaw ? Number(durationRaw).toFixed(2) : null, uploadedBy: session.user.id });

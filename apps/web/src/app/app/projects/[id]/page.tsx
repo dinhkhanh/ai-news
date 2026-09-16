@@ -80,26 +80,30 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const data = await withOrgContext(ws, async (tx) => {
     const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, id) });
     if (!project) return null;
-    const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, id), orderBy: desc(schema.articles.createdAt) });
-    const scripts = await tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) });
-    const timelines = await tx.query.timelines.findMany({ where: eq(schema.timelines.projectId, id), orderBy: desc(schema.timelines.version) });
-    const renders = await tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) });
-    const reviews = await tx
-      .select({ id: schema.projectReviews.id, action: schema.projectReviews.action, note: schema.projectReviews.note, timelineVersion: schema.projectReviews.timelineVersion, faithfulnessOverride: schema.projectReviews.faithfulnessOverride, createdAt: schema.projectReviews.createdAt, actorName: schema.user.name })
-      .from(schema.projectReviews)
-      .leftJoin(schema.user, eq(schema.user.id, schema.projectReviews.actorId))
-      .where(eq(schema.projectReviews.projectId, id))
-      .orderBy(desc(schema.projectReviews.createdAt))
-      .limit(10);
-    const [{ openComments }] = await tx.select({ openComments: count() }).from(schema.comments).where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt)));
-    const channels = await tx.query.channels.findMany({ where: eq(schema.channels.organizationId, project.organizationId), orderBy: [schema.channels.platform, schema.channels.name] });
-    const grants = await tx.query.channelGrants.findMany({ where: eq(schema.channelGrants.userId, ws.userId) });
-    const publications = await tx
-      .select({ id: schema.publications.id, platform: schema.publications.platform, channelId: schema.publications.channelId, status: schema.publications.status, attempts: schema.publications.attempts, scheduledAt: schema.publications.scheduledAt, publishedAt: schema.publications.publishedAt, platformUrl: schema.publications.platformUrl, privacy: schema.publications.privacy, aiDisclosure: schema.publications.aiDisclosure, error: schema.publications.error, analyticsJson: schema.publications.analyticsJson, renderId: schema.publications.renderId, createdByName: schema.user.name })
-      .from(schema.publications)
-      .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
-      .where(eq(schema.publications.projectId, id))
-      .orderBy(desc(schema.publications.createdAt));
+    // One round trip to the pooler is ~60 ms; issue the independent queries together so the
+    // connection pipelines them instead of paying that ten times in a row.
+    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications] = await Promise.all([
+      tx.query.articles.findFirst({ where: eq(schema.articles.projectId, id), orderBy: desc(schema.articles.createdAt) }),
+      tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) }),
+      tx.query.timelines.findMany({ where: eq(schema.timelines.projectId, id), orderBy: desc(schema.timelines.version) }),
+      tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) }),
+      tx
+        .select({ id: schema.projectReviews.id, action: schema.projectReviews.action, note: schema.projectReviews.note, timelineVersion: schema.projectReviews.timelineVersion, faithfulnessOverride: schema.projectReviews.faithfulnessOverride, createdAt: schema.projectReviews.createdAt, actorName: schema.user.name })
+        .from(schema.projectReviews)
+        .leftJoin(schema.user, eq(schema.user.id, schema.projectReviews.actorId))
+        .where(eq(schema.projectReviews.projectId, id))
+        .orderBy(desc(schema.projectReviews.createdAt))
+        .limit(10),
+      tx.select({ openComments: count() }).from(schema.comments).where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt))),
+      tx.query.channels.findMany({ where: eq(schema.channels.organizationId, project.organizationId), orderBy: [schema.channels.platform, schema.channels.name] }),
+      tx.query.channelGrants.findMany({ where: eq(schema.channelGrants.userId, ws.userId) }),
+      tx
+        .select({ id: schema.publications.id, platform: schema.publications.platform, channelId: schema.publications.channelId, status: schema.publications.status, attempts: schema.publications.attempts, scheduledAt: schema.publications.scheduledAt, publishedAt: schema.publications.publishedAt, platformUrl: schema.publications.platformUrl, privacy: schema.publications.privacy, aiDisclosure: schema.publications.aiDisclosure, error: schema.publications.error, analyticsJson: schema.publications.analyticsJson, renderId: schema.publications.renderId, createdByName: schema.user.name })
+        .from(schema.publications)
+        .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
+        .where(eq(schema.publications.projectId, id))
+        .orderBy(desc(schema.publications.createdAt)),
+    ]);
     return { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications };
   });
   if (!data) notFound();
@@ -114,22 +118,27 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
       return null;
     }
   };
+  const publisher = writer && canApprove(ws);
+  const imageKeys = Array.from(new Set((timelineJson?.scenes ?? []).flatMap((sc) => (sc.visual.kind === "image" ? [sc.visual.src] : []))));
+  const recentRenders = renders.slice(0, 10);
+  // Everything below is independent: presigning is local crypto and the quota / flag lookups are one query each.
+  const [imageSigned, mixUrl, renderSigned, screenshotUrl, [renderLimit, renderUsed], publishFlags, [publishLimit, publishUsed]] = await Promise.all([
+    Promise.all(imageKeys.map((key) => sign(key))),
+    sign(timelineJson?.audio.mixSrc),
+    Promise.all(recentRenders.map(async (r) => [r.id, { video: r.status === "done" ? await sign(r.outputPath, 3600) : null, cover: await sign(r.coverPath) }] as const)),
+    sign(article?.screenshotPath),
+    writer ? Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0],
+    publisher ? flagsEnabled(["publish_youtube", "publish_facebook", "publish_instagram", "publish_tiktok", "scheduling"]) : ({} as Record<string, boolean>),
+    publisher ? Promise.all([dailyLimit(ws.userId, "publishes"), usedToday(ws.userId, "publishes")]) : [0, 0],
+  ]);
   const imageUrls: Record<string, string> = {};
-  for (const sc of timelineJson?.scenes ?? []) {
-    if (sc.visual.kind === "image" && !imageUrls[sc.visual.src]) {
-      const u = await sign(sc.visual.src);
-      if (u) imageUrls[sc.visual.src] = u;
-    }
-  }
-  const mixUrl = await sign(timelineJson?.audio.mixSrc);
-  const renderLinks = new Map<string, { video: string | null; cover: string | null }>();
-  for (const r of renders.slice(0, 10)) renderLinks.set(r.id, { video: r.status === "done" ? await sign(r.outputPath, 3600) : null, cover: await sign(r.coverPath) });
-  const [renderLimit, renderUsed] = writer ? await Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0];
+  imageKeys.forEach((key, i) => {
+    const u = imageSigned[i];
+    if (u) imageUrls[key] = u;
+  });
+  const renderLinks = new Map<string, { video: string | null; cover: string | null }>(renderSigned);
   // Publishing (phase 5): the approved version's finished render, granted channels, defaults from the script's per-platform metadata.
   const approvedRender = project.approvedTimelineId ? (renders.find((r) => r.timelineId === project.approvedTimelineId && r.status === "done") ?? null) : null;
-  const publisher = writer && canApprove(ws);
-  const publishFlags = publisher ? await flagsEnabled(["publish_youtube", "publish_facebook", "publish_instagram", "publish_tiktok", "scheduling"]) : {};
-  const [publishLimit, publishUsed] = publisher ? await Promise.all([dailyLimit(ws.userId, "publishes"), usedToday(ws.userId, "publishes")]) : [0, 0];
   const approvedScript = scripts.find((s) => s.id === timelines.find((t) => t.id === project.approvedTimelineId)?.scriptId) ?? scripts[0] ?? null;
   const scriptMeta = (approvedScript?.scenesJson as unknown as StoredScript | null)?.metadata ?? null;
   const publishChannels: PublishChannel[] = channels.map((c) => ({
@@ -167,14 +176,6 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   });
   const busy = Boolean(busyStep(project));
   const selected = scripts.find((s) => String(s.version) === sp.v) ?? scripts[0] ?? null;
-  let screenshotUrl: string | null = null;
-  if (article?.screenshotPath) {
-    try {
-      screenshotUrl = await presignGet(article.screenshotPath, 900);
-    } catch {
-      screenshotUrl = null;
-    }
-  }
   const flags = article?.flags ?? {};
   const flagNotes = [
     flags.paywall ? "Bài có tường phí: nội dung có thể bị cắt, hãy kiểm tra hoặc dán thủ công." : null,
@@ -278,13 +279,14 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                 <Label htmlFor="text">Nội dung</Label>
                 <Textarea id="text" name="text" rows={18} defaultValue={article.text} className="text-sm leading-relaxed" />
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex gap-2">{writer ? refetchButtons(project.id, busy) : null}</div>
+              <div className="flex justify-end">
                 <Button type="submit" disabled={!writer || busy}>
                   Xác nhận văn bản
                 </Button>
               </div>
             </ActionForm>
+            {/* Separate forms: they must not nest inside the confirm form. */}
+            {writer ? <div className="flex flex-wrap gap-2">{refetchButtons(project.id, busy)}</div> : null}
             {writer ? <details className="text-sm"><summary className="cursor-pointer text-muted-foreground">Dán nội dung thủ công</summary><div className="mt-2">{pasteForm(project.id, busy)}</div></details> : null}
           </CardContent>
         </Card>
@@ -343,13 +345,13 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                 <input type="hidden" name="language" value={project.language} />
                 <Input name="title" defaultValue={article.title ?? ""} />
                 <Textarea name="text" rows={12} defaultValue={article.text} className="text-sm" />
-                <div className="flex justify-between gap-2">
-                  <div className="flex gap-2">{writer ? refetchButtons(project.id, busy) : null}</div>
+                <div className="flex justify-end">
                   <Button type="submit" size="sm" variant="outline" disabled={!writer || busy}>
                     Lưu và xác nhận lại
                   </Button>
                 </div>
               </ActionForm>
+              {writer ? <div className="mt-2 flex flex-wrap gap-2">{refetchButtons(project.id, busy)}</div> : null}
             </details>
           </CardContent>
         </Card>

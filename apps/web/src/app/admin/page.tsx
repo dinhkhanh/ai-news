@@ -1,43 +1,37 @@
-import { count, desc, gte, sql, sum } from "drizzle-orm";
-import { db, schema } from "@/db";
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
-async function loadStats() {
+type Stats = {
+  users: number;
+  orgs: number;
+  projects: number;
+  renders: number;
+  events: number;
+  spendUsd: number;
+  byProvider: Array<{ provider: string; usd: number }>;
+};
+
+/** One round-trip: `admin_overview_stats()` (migration 0010) aggregates every tile server-side. */
+async function loadStats(): Promise<Stats> {
   const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-  const [[users], [orgs], [projects], [renders], [events], [costs], recent] = await Promise.all([
-    db.select({ n: count() }).from(schema.user),
-    db.select({ n: count() }).from(schema.organization),
-    db.select({ n: count() }).from(schema.projects),
-    db.select({ n: count() }).from(schema.renders),
-    db.select({ n: count() }).from(schema.activityEvents).where(gte(schema.activityEvents.createdAt, since)),
-    db.select({ usd: sum(schema.usageCosts.costUsd) }).from(schema.usageCosts).where(gte(schema.usageCosts.createdAt, since)),
-    db
-      .select({
-        provider: schema.usageCosts.provider,
-        usd: sql<string>`coalesce(sum(${schema.usageCosts.costUsd}), 0)`,
-      })
-      .from(schema.usageCosts)
-      .where(gte(schema.usageCosts.createdAt, since))
-      .groupBy(schema.usageCosts.provider)
-      .orderBy(desc(sql`sum(${schema.usageCosts.costUsd})`)),
-  ]);
-  return { users, orgs, projects, renders, events, costs, recent };
+  const rows = await db.execute<{ stats: Stats }>(sql`select admin_overview_stats(${since}) as stats`);
+  return rows[0].stats;
 }
 
 export default async function AdminOverview() {
-  const { users, orgs, projects, renders, events, costs, recent } = await loadStats();
+  const s = await loadStats();
 
   const tiles: Array<[string, string | number]> = [
-    ["Users", users.n],
-    ["Workspaces", orgs.n],
-    ["Projects", projects.n],
-    ["Renders", renders.n],
-    ["Activity events (30 d)", events.n],
-    ["Spend (30 d)", `$${Number(costs.usd ?? 0).toFixed(2)}`],
+    ["Users", s.users],
+    ["Workspaces", s.orgs],
+    ["Projects", s.projects],
+    ["Renders", s.renders],
+    ["Activity events (30 d)", s.events],
+    ["Spend (30 d)", `$${Number(s.spendUsd ?? 0).toFixed(2)}`],
   ];
-
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Overview</h1>
@@ -56,12 +50,12 @@ export default async function AdminOverview() {
           <CardTitle className="text-sm">Spend by provider (30 d)</CardTitle>
         </CardHeader>
         <CardContent>
-          {recent.length === 0 ? (
+          {s.byProvider.length === 0 ? (
             <p className="text-sm text-muted-foreground">No usage recorded yet.</p>
           ) : (
             <table className="w-full text-sm">
               <tbody>
-                {recent.map((r) => (
+                {s.byProvider.map((r) => (
                   <tr key={r.provider} className="border-t">
                     <td className="py-1.5">{r.provider}</td>
                     <td className="py-1.5 text-right tabular-nums">${Number(r.usd).toFixed(4)}</td>

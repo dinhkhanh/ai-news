@@ -17,13 +17,16 @@ const IDLE_MS = 45000;
 export function useProjectStatuses(initial: ProjectStatus[]) {
   const router = useRouter();
   const [statuses, setStatuses] = useState(initial);
-  const [seenInitial, setSeenInitial] = useState(initial);
+  // Compared by content, not identity: <PipelineStatus> builds a fresh `[initial]` array every render,
+  // and adopting on identity would set state on every render (infinite re-render loop).
+  const initialKey = initial.map((s) => `${s.id}:${s.rev}`).join(",");
+  const [seenKey, setSeenKey] = useState(initialKey);
   const latest = useRef(initial);
   const inFlight = useRef(false);
 
   // A server re-render (after an action or a refresh) is the new truth: adopt it during render, not in an effect.
-  if (initial !== seenInitial) {
-    setSeenInitial(initial);
+  if (initialKey !== seenKey) {
+    setSeenKey(initialKey);
     setStatuses(initial);
   }
   useEffect(() => {

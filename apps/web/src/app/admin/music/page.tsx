@@ -36,8 +36,8 @@ export default async function MusicPage() {
         <CardContent>
           <ActionForm action={uploadTrack} className="grid gap-3 md:grid-cols-3" resetOnSuccess>
             <div className="space-y-1">
-              <Label htmlFor="file">Audio file (MP3/WAV/AAC, ≤ 25 MB)</Label>
-              <Input id="file" name="file" type="file" accept="audio/*" required />
+              <Label htmlFor="file">Audio file (MP3/WAV/M4A/MP4/AAC/OGG, ≤ 25 MB)</Label>
+              <Input id="file" name="file" type="file" accept="audio/*,video/mp4,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.flac" required />
             </div>
             <div className="space-y-1">
               <Label htmlFor="title">Title</Label>

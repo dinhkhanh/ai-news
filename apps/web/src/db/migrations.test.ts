@@ -116,4 +116,20 @@ describe("migrations", () => {
     const { rows } = await pg.query<{ lock_version: number }>("select lock_version from projects");
     expect(rows[0].lock_version).toBe(1);
   });
+
+  it("aggregate the admin overview in one call (migration 0010)", async () => {
+    await pg.exec(`insert into usage_costs(provider, units, unit_type, cost_usd, organization_id) values
+        ('anthropic', 1, 'tokens', 0.25, 'o1'), ('anthropic', 1, 'tokens', 0.50, 'o1'), ('pexels', 1, 'calls', 0.10, 'o1'),
+        ('mubert', 1, 'calls', 9.99, 'o1');
+      update usage_costs set created_at = now() - interval '40 days' where provider = 'mubert';
+      insert into activity_events(type, organization_id) values ('project.created', 'o1'), ('project.created', 'o1');
+      update activity_events set created_at = now() - interval '40 days' where id = (select max(id) from activity_events);`);
+    const { rows } = await pg.query<{ s: Record<string, unknown> }>("select admin_overview_stats(now() - interval '30 days') as s");
+    expect(rows[0].s).toEqual({
+      users: 1, orgs: 1, projects: 1, renders: 0, events: 1, spendUsd: 0.85,
+      byProvider: [{ provider: "anthropic", usd: 0.75 }, { provider: "pexels", usd: 0.1 }],
+    });
+    const { rows: empty } = await pg.query<{ s: Record<string, unknown> }>("select admin_overview_stats(now() + interval '1 day') as s");
+    expect(empty[0].s).toMatchObject({ events: 0, spendUsd: 0, byProvider: [] });
+  });
 });
