@@ -21,16 +21,21 @@ export function ActionForm({ action, children, className, resetOnSuccess }: Prop
     if (state.ok) window.dispatchEvent(new CustomEvent(ACTION_EVENT, { detail: state }));
   }, [state]);
   return (
+    // The action is dispatched from onSubmit instead of the `action` prop on purpose. With a function
+    // `action`, React stamps `action="javascript:throw new Error('A React form was unexpectedly
+    // submitted…')"` on every client-rendered form; if the browser's native submission ever runs
+    // (an event React did not intercept, e.g. right after a soft navigation or refresh), the user gets
+    // that error. Without the prop the worst case is a plain GET reload of the page.
     <form
-      action={formAction}
       className={cn(className, pending && "cursor-progress opacity-70")}
       aria-busy={pending || undefined}
       data-pending={pending || undefined}
       onSubmit={(e) => {
-        if (resetOnSuccess) {
-          const form = e.currentTarget;
-          queueMicrotask(() => setTimeout(() => form.reset(), 0));
-        }
+        e.preventDefault();
+        const form = e.currentTarget;
+        const submitter = (e.nativeEvent as SubmitEvent).submitter;
+        formAction(new FormData(form, submitter instanceof HTMLElement ? submitter : undefined));
+        if (resetOnSuccess) queueMicrotask(() => setTimeout(() => form.reset(), 0));
       }}
     >
       <fieldset disabled={pending} className="contents space-y-4">
