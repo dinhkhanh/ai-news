@@ -7,6 +7,7 @@ import { inngest } from "@/inngest/client";
 import { projectFetchRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
 import { parsePreset } from "@/lib/presets";
+import { startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
 import { canonicalizeUrl, isPrivateHost } from "@/lib/url";
 import { assertWorkspaceWriter } from "@/lib/workspace";
@@ -35,7 +36,7 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
     const [project] = await withOrgContext(ws, (tx) =>
       tx
         .insert(schema.projects)
-        .values({ organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, durationSec, tone, autoPipeline: auto, busyStep: "fetch" })
+        .values({ organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, durationSec, tone, autoPipeline: auto, busyStep: "fetch", busyProgress: startProgress() })
         .returning({ id: schema.projects.id }),
     );
     await log("project.created", { url, durationSec, tone, auto, duplicateOf: existing?.id ?? null }, project.id);

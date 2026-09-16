@@ -4,7 +4,7 @@ import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
-import { AutoRefresh } from "@/components/auto-refresh";
+import { PipelineStatus } from "@/components/pipeline-status";
 import { ScriptReview } from "@/components/script-review";
 import { ReviewPanel } from "@/components/review-panel";
 import { PublishPanel, type PublicationView, type PublishChannel } from "@/components/publish-panel";
@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { StoredFaithfulness, StoredScript } from "@/lib/llm/schemas";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { flagsEnabled } from "@/lib/flags";
-import { busyIsStale, busyStep } from "@/lib/project-state";
+import { buildStatus, busyStep } from "@/lib/project-state";
 import { buildMetadata, PLATFORM_SPEC, type Analytics } from "@/lib/publish/platforms";
 import { presignGet } from "@/lib/r2";
 import { canApprove, needsFaithfulnessOverride } from "@/lib/review";
@@ -158,9 +158,14 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     renderVersion: renders.find((r) => r.id === x.renderId)?.timelineVersion ?? null,
     createdByName: x.createdByName,
   }));
-  const publishingBusy = publications.some((x) => x.status === "publishing" || x.status === "processing");
+  const status = buildStatus({
+    project,
+    latestScriptVersion: scripts[0]?.version ?? 0,
+    latestTimelineVersion: timelines[0]?.version ?? 0,
+    renders: { total: renders.length, active: renders.filter((r) => r.status === "queued" || r.status === "rendering" || r.status === "post_processing").length },
+    publications: { total: publications.length, active: publications.filter((x) => x.status === "publishing" || x.status === "processing").length },
+  });
   const busy = Boolean(busyStep(project));
-  const stale = busyIsStale(project);
   const selected = scripts.find((s) => String(s.version) === sp.v) ?? scripts[0] ?? null;
   let screenshotUrl: string | null = null;
   if (article?.screenshotPath) {
@@ -180,7 +185,6 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <AutoRefresh active={busy || publishingBusy} everyMs={publishingBusy && !busy ? 15000 : undefined} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">
@@ -193,8 +197,6 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <Badge variant={project.state === "failed" ? "destructive" : project.state === "scripted" ? "default" : "secondary"}>{STATE_LABEL[project.state] ?? project.state}</Badge>
             {project.autoPipeline ? <Badge variant="default">tự động</Badge> : null}
-            {busy ? <Badge variant="outline">đang chạy: {project.busyStep}…</Badge> : null}
-            {stale ? <Badge variant="destructive">bước {project.busyStep} không phản hồi, có thể chạy lại</Badge> : null}
             <Badge variant="outline">{project.language === "vi" ? "Tiếng Việt" : "English"}</Badge>
             {project.sensitiveTopic ? <Badge variant="destructive">chủ đề nhạy cảm → cần publisher duyệt</Badge> : null}
             <a href={project.url} target="_blank" rel="noreferrer" className="text-muted-foreground underline">
@@ -212,6 +214,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         ) : null}
       </div>
 
+      <PipelineStatus initial={status} />
       {sp.duplicate ? <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">Bài này đã có dự án trong workspace; bạn đang xem dự án đó.</p> : null}
       {project.lastError ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
@@ -231,7 +234,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <CardTitle className="text-base">{busy ? "Đang lấy bài báo…" : "Chưa lấy được bài báo"}</CardTitle>
             <CardDescription>
               {busy
-                ? "Cloudflare Browser Rendering → HTTP → Firecrawl. Trang tự làm mới."
+                ? "Cloudflare Browser Rendering → HTTP → Firecrawl. Trang tự cập nhật khi xong."
                 : "Thử lấy lại, dùng Firecrawl, hoặc dán nội dung bài thủ công bên dưới."}
             </CardDescription>
           </CardHeader>
@@ -310,7 +313,6 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {project.busyStep === "script" ? <p className="text-sm text-muted-foreground">Đang viết kịch bản và kiểm chứng… thường mất 1–3 phút. Trang tự làm mới.</p> : null}
             {scripts.length > 1 ? (
               <div className="flex flex-wrap gap-1 text-xs">
                 {scripts.map((s) => (
@@ -377,7 +379,6 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {project.busyStep === "assets" ? <p className="text-sm text-muted-foreground">Đang tổng hợp giọng đọc, tìm B-roll, trộn âm… thường mất 2–4 phút. Trang tự làm mới.</p> : null}
             {timelines.length > 1 ? (
               <div className="flex flex-wrap gap-1 text-xs">
                 {timelines.map((t) => (
@@ -482,7 +483,6 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <CardDescription>1080×1920, 30 fps, H.264 CRF 18, −14 LUFS. Bản ghim không bao giờ hết hạn; bản khác giữ 12 tháng.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {project.busyStep === "render" ? <p className="text-sm text-muted-foreground">Đang kết xuất trên Remotion Lambda… 1–3 phút. Trang tự làm mới.</p> : null}
             {renders.slice(0, 10).map((r) => {
               const links = renderLinks.get(r.id);
               const checks = (r.qaJson as { checks?: Record<string, { ok: boolean; expected?: unknown; actual?: unknown }> } | null)?.checks ?? {};

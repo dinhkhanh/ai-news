@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { inngest } from "../client";
 import { projectScriptRequested } from "../events";
 import { autoAfterScript } from "../auto-pipeline";
+import { reportProgress } from "@/lib/progress";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -28,7 +29,7 @@ export const generateScriptFn = inngest.createFunction(
       const { projectId, organizationId, requestedBy } = event.data.event.data;
       const message = event.data.error?.message ?? "script generation failed";
       await withOrgContext({ userId: requestedBy, organizationId }, (tx) =>
-        tx.update(schema.projects).set({ busyStep: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
+        tx.update(schema.projects).set({ busyStep: null, busyProgress: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
       );
       await logActivity({ actorId: requestedBy, organizationId, projectId, type: "script.failed", payload: { error: message.slice(0, 500) } });
     },
@@ -36,8 +37,10 @@ export const generateScriptFn = inngest.createFunction(
   async ({ event, step }) => {
     const { projectId, organizationId, requestedBy, durationSec, tone, templateId } = event.data;
     const ctx = { userId: requestedBy, organizationId };
+    const pctx = { ...ctx, projectId };
 
     const input = await step.run("load-article", async () => {
+      await reportProgress(pctx, { label: "Đọc bài đã xác nhận", pct: 3 });
       const row = await withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
@@ -58,6 +61,7 @@ export const generateScriptFn = inngest.createFunction(
     });
 
     const generated = await step.run("generate-script", async () => {
+      await reportProgress(pctx, { label: `Claude Opus 5 viết kịch bản ${durationSec} giây (${tone})`, pct: 8 });
       try {
         const r = await generateScript({ article: input.article, language: input.language, durationSec, tone, templateId }, { ...ctx, projectId });
         return { script: r.script, template: r.template, model: r.model, usage: r.usage, costUsd: r.costUsd };
@@ -69,6 +73,7 @@ export const generateScriptFn = inngest.createFunction(
     });
 
     const scriptRow = await step.run("store-script", async () => {
+      await reportProgress(pctx, { label: "Lưu kịch bản", pct: 60 });
       const [row] = await withOrgContext(ctx, async (tx) => {
         const latest = await tx.query.scripts.findFirst({ where: eq(schema.scripts.projectId, projectId), orderBy: desc(schema.scripts.version) });
         return tx
@@ -92,6 +97,7 @@ export const generateScriptFn = inngest.createFunction(
     });
 
     const faithfulness = await step.run("faithfulness", async (): Promise<StoredFaithfulness | null> => {
+      await reportProgress(pctx, { label: "Kiểm chứng từng cảnh với bài gốc", pct: 65 });
       try {
         const { result } = await checkFaithfulness({ article: input.article, script: generated.script as StoredScript, language: input.language }, { ...ctx, projectId });
         return result;
@@ -102,6 +108,7 @@ export const generateScriptFn = inngest.createFunction(
     });
 
     await step.run("finalise", async () => {
+      await reportProgress(pctx, { label: "Hoàn tất", pct: 95 });
       await withOrgContext(ctx, async (tx) => {
         await tx
           .update(schema.scripts)
@@ -115,7 +122,7 @@ export const generateScriptFn = inngest.createFunction(
           .update(schema.projects)
           .set({
             state: "scripted",
-            busyStep: null,
+            busyStep: null, busyProgress: null,
             lastError: null,
             sensitiveTopic: Boolean(project?.sensitiveTopic || generated.script.sensitiveTopic),
             title: project?.title ?? generated.script.title,

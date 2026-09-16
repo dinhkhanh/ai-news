@@ -3,7 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
-import { AutoRefresh } from "@/components/auto-refresh";
+import { LiveStep, ProjectsWatcher } from "@/components/pipeline-status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
+import { loadProjectStatuses } from "@/lib/project-status";
 import { dailyLimit, usedToday } from "@/lib/quota";
 import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
@@ -56,11 +57,12 @@ export default async function AppHome() {
     dailyLimit(ws.userId, "scripts"),
     usedToday(ws.userId, "scripts"),
   ]);
-  const anyBusy = projects.some((p) => p.busyStep);
+  // Only the projects with a step running are polled (src/components/pipeline-status.tsx).
+  const statuses = await loadProjectStatuses(ws, projects.filter((p) => p.busyStep).map((p) => p.id));
 
   return (
+    <ProjectsWatcher initial={statuses}>
     <div className="mx-auto max-w-5xl space-y-6">
-      <AutoRefresh active={anyBusy} everyMs={6000} />
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dự án</h1>
@@ -176,11 +178,11 @@ export default async function AppHome() {
                 <div className="text-xs text-muted-foreground">{displayHost(p.url)}</div>
               </TableCell>
               <TableCell>
-                <Badge
-                  variant={p.state === "failed" ? "destructive" : p.state === "scripted" ? "default" : "secondary"}
-                >
-                  {p.busyStep ? `${p.busyStep}…` : (STATE_LABEL[p.state] ?? p.state)}
-                </Badge>
+                <LiveStep id={p.id}>
+                  <Badge variant={p.state === "failed" ? "destructive" : p.state === "scripted" ? "default" : "secondary"}>
+                    {STATE_LABEL[p.state] ?? p.state}
+                  </Badge>
+                </LiveStep>
                 {p.autoPipeline ? (
                   <Badge variant="outline" className="ml-1">
                     tự động
@@ -202,5 +204,6 @@ export default async function AppHome() {
         </TableBody>
       </Table>
     </div>
+    </ProjectsWatcher>
   );
 }

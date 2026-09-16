@@ -5,7 +5,7 @@ import { db, schema } from "@/db";
 import { logActivity } from "@/lib/activity";
 import { auth } from "@/lib/auth";
 import type { OrgRole } from "@/lib/permissions";
-import { requireSession } from "@/lib/session";
+import { getSession, requireSession } from "@/lib/session";
 
 export type Workspace = {
   userId: string;
@@ -21,6 +21,17 @@ const WRITE_ROLES: OrgRole[] = ["editor", "publisher", "admin", "owner"];
 export async function requireWorkspace(): Promise<Workspace> {
   const session = await requireSession();
   return resolveWorkspace(session.user.id, session.user.role, (session.session as { activeOrganizationId?: string | null }).activeOrganizationId ?? null);
+}
+
+/** Active workspace for route handlers: null when signed out (no redirect). */
+export async function getWorkspace(): Promise<Workspace | null> {
+  const session = await getSession();
+  if (!session) return null;
+  try {
+    return await resolveWorkspace(session.user.id, session.user.role, (session.session as { activeOrganizationId?: string | null }).activeOrganizationId ?? null);
+  } catch {
+    return null;
+  }
 }
 
 async function resolveWorkspace(userId: string, platformRole: string | null | undefined, activeOrgId: string | null): Promise<Workspace> {

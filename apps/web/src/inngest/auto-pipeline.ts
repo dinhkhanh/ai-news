@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
+import { startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
 import { projectAssetsRequested, projectRenderRequested, projectScriptRequested } from "./events";
 
@@ -43,7 +44,7 @@ export async function autoAfterFetch(ctx: Ctx, projectId: string) {
   }
   await withOrgContext(ctx, async (tx) => {
     if (!article.confirmedAt) await tx.update(schema.articles).set({ confirmedAt: new Date(), confirmedBy: ctx.userId }).where(eq(schema.articles.id, article.id));
-    await tx.update(schema.projects).set({ busyStep: "script", lastError: null }).where(eq(schema.projects.id, projectId));
+    await tx.update(schema.projects).set({ busyStep: "script", busyProgress: startProgress("Tự động: bước tiếp theo đang xếp hàng…"), lastError: null }).where(eq(schema.projects.id, projectId));
   });
   await logActivity({ actorId: ctx.userId, organizationId: ctx.organizationId, projectId, type: "script.requested", payload: { auto: true, durationSec: project.durationSec, tone: project.tone } });
   return projectScriptRequested.create({ projectId, organizationId: ctx.organizationId, requestedBy: ctx.userId, durationSec: project.durationSec, tone: project.tone });
@@ -53,7 +54,7 @@ export async function autoAfterFetch(ctx: Ctx, projectId: string) {
 export async function autoAfterScript(ctx: Ctx, projectId: string, scriptId: string) {
   const project = await loadAuto(ctx, projectId);
   if (!project) return null;
-  await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "assets", lastError: null }).where(eq(schema.projects.id, projectId)));
+  await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress("Tự động: bước tiếp theo đang xếp hàng…"), lastError: null }).where(eq(schema.projects.id, projectId)));
   await logActivity({ actorId: ctx.userId, organizationId: ctx.organizationId, projectId, type: "assets.requested", payload: { auto: true, scriptId } });
   return projectAssetsRequested.create({ projectId, organizationId: ctx.organizationId, requestedBy: ctx.userId, scriptId });
 }
@@ -68,7 +69,7 @@ export async function autoAfterAssets(ctx: Ctx, projectId: string, timelineId: s
   } catch (e) {
     return pause(ctx, projectId, "render", e instanceof Error ? e.message : String(e));
   }
-  await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "render", lastError: null }).where(eq(schema.projects.id, projectId)));
+  await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "render", busyProgress: startProgress("Tự động: bước tiếp theo đang xếp hàng…"), lastError: null }).where(eq(schema.projects.id, projectId)));
   await logActivity({ actorId: ctx.userId, organizationId: ctx.organizationId, projectId, type: "quota.render_minutes", payload: { minutes: Math.round(minutes * 100) / 100, timelineId } });
   await logActivity({ actorId: ctx.userId, organizationId: ctx.organizationId, projectId, type: "render.requested", payload: { auto: true, timelineId } });
   return projectRenderRequested.create({ projectId, organizationId: ctx.organizationId, requestedBy: ctx.userId, timelineId });

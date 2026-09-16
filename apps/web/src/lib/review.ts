@@ -117,7 +117,7 @@ export async function saveTimelineVersion(input: SaveVersionInput) {
     const wasReviewed = ["in_review", "approved", "rendered"].includes(base.project.state);
     await tx
       .update(schema.projects)
-      .set({ state: wasReviewed ? "composed" : base.project.state, approvedTimelineId: null, approvedBy: null, approvedAt: null, busyStep: null, lastError: null })
+      .set({ state: wasReviewed ? "composed" : base.project.state, approvedTimelineId: null, approvedBy: null, approvedAt: null, busyStep: null, busyProgress: null, lastError: null })
       .where(eq(schema.projects.id, input.projectId));
     return t;
   });

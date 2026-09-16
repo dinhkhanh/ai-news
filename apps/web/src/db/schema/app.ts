@@ -3,6 +3,7 @@
  * organization_id and are protected by RLS (see migrations/*_rls.sql).
  */
 import { sql } from "drizzle-orm";
+import type { BusyProgress } from "@/lib/project-state";
 import {
   bigint,
   boolean,
@@ -225,6 +226,8 @@ export const projects = pgTable(
     inngestRunId: text("inngest_run_id"),
     /** Pipeline step currently running for this project (fetch | script | ...), null when idle. */
     busyStep: text("busy_step"),
+    /** Live progress of the running step, written by the Inngest function (src/lib/progress.ts); null when idle. */
+    busyProgress: jsonb("busy_progress").$type<BusyProgress>(),
     /** Script presets (docs/PLAN.md §4.2): target length and tone. */
     durationSec: integer("duration_sec").notNull().default(60),
     tone: text("tone").notNull().default("news"),

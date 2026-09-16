@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { inngest } from "../client";
 import { projectSceneRegenerateRequested } from "../events";
+import { reportProgress } from "@/lib/progress";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -31,7 +32,7 @@ export const regenerateSceneFn = inngest.createFunction(
       const { projectId, organizationId, requestedBy, what, sceneId } = event.data.event.data;
       const message = event.data.error?.message ?? "regeneration failed";
       await withOrgContext({ userId: requestedBy, organizationId }, (tx) =>
-        tx.update(schema.projects).set({ busyStep: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
+        tx.update(schema.projects).set({ busyStep: null, busyProgress: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
       );
       await logActivity({ actorId: requestedBy, organizationId, projectId, type: "scene.regenerate_failed", payload: { what, sceneId, error: message.slice(0, 500) } });
     },
@@ -43,6 +44,7 @@ export const regenerateSceneFn = inngest.createFunction(
     const buildId = nanoid(8);
 
     const base = await step.run("load", async () => {
+      await reportProgress(pctx, { label: "Đọc phiên bản hiện tại", pct: 5 });
       const row = await withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
@@ -68,6 +70,7 @@ export const regenerateSceneFn = inngest.createFunction(
       const text = (voiceover ?? scene.voiceover).trim();
       if (text.length < 2) throw new NonRetriableError("Voice-over text is empty");
       const v = await step.run("voice", async () => {
+        await reportProgress(pctx, { label: `Đọc lại lời cảnh ${scene.id} (Google TTS)`, pct: 20 });
         const preset = await loadVoicePreset(ctx, base.doc.language);
         const pronunciations = await loadPronunciations(ctx, base.doc.language);
         return synthesizeScene({ sceneId: scene.id, text, language: base.doc.language, preset, pronunciations, r2Key: r2Key.media(organizationId, projectId, `vo/${buildId}-${scene.id}.wav`) }, pctx);
@@ -87,6 +90,7 @@ export const regenerateSceneFn = inngest.createFunction(
       const wantSec = Math.min(5, sceneMs / 1000);
       const keep = shotsNeeded(sceneMs);
       const res = await step.run("broll", async () => {
+        await reportProgress(pctx, { label: `Tìm B-roll mới cho cảnh ${scene.id}`, pct: 20 });
         // Skip clips this project already fetched for the scene so a retry brings something new.
         const seen = await withOrgContext(ctx, (tx) => tx.query.assets.findMany({ where: and(eq(schema.assets.projectId, projectId), eq(schema.assets.sceneId, scene.id)), columns: { provider: true, providerId: true } }));
         const exclude = new Set(seen.map((a) => `${a.provider}:${a.providerId}`));
@@ -107,6 +111,7 @@ export const regenerateSceneFn = inngest.createFunction(
 
     if (what === "music") {
       const music = await step.run("music", async () => {
+        await reportProgress(pctx, { label: "Chọn nhạc mới", pct: 20 });
         const { durationSec } = voicePlacement(base.doc);
         return pickMusic({ tone: base.tone, durationSec, r2Key: r2Key.media(organizationId, projectId, `music/${buildId}.mp3`) }, pctx);
       });
@@ -117,7 +122,10 @@ export const regenerateSceneFn = inngest.createFunction(
       build.musicError = music.error;
     }
 
-    const saved = await step.run("save-version", () => saveTimelineVersion({ ws: ctx, projectId, doc: next, baseVersion: base.version, kind: "regenerated", changes, build }));
+    const saved = await step.run("save-version", async () => {
+      await reportProgress(pctx, { label: "Trộn âm lại và lưu phiên bản mới", pct: 75 });
+      return saveTimelineVersion({ ws: ctx, projectId, doc: next, baseVersion: base.version, kind: "regenerated", changes, build });
+    });
     return { timelineId: saved.id, version: saved.version, changes: saved.changes };
   },
 );

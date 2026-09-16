@@ -2,6 +2,8 @@
 import { useActionState, useEffect } from "react";
 import { toast } from "sonner";
 import type { ActionState } from "@/lib/admin";
+import { ACTION_EVENT } from "@/components/pipeline-status";
+import { cn } from "@/lib/utils";
 
 type Props = {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
@@ -15,11 +17,14 @@ export function ActionForm({ action, children, className, resetOnSuccess }: Prop
   const [state, formAction, pending] = useActionState(action, { ok: false });
   useEffect(() => {
     if (state.message) (state.ok ? toast.success : toast.error)(state.message);
+    // Let the status pollers on the page pick up the new busy step right away.
+    if (state.ok) window.dispatchEvent(new CustomEvent(ACTION_EVENT, { detail: state }));
   }, [state]);
   return (
     <form
       action={formAction}
-      className={className}
+      className={cn(className, pending && "cursor-progress opacity-70")}
+      aria-busy={pending || undefined}
       data-pending={pending || undefined}
       onSubmit={(e) => {
         if (resetOnSuccess) {

@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
-import { AutoRefresh } from "@/components/auto-refresh";
+import { PipelineStatus } from "@/components/pipeline-status";
 import { EditorLoader } from "@/components/editor/editor-loader";
 import type { EditorProps, VisualOption } from "@/components/editor/types";
 import { Badge } from "@/components/ui/badge";
 import { docKeys } from "@/lib/media/editor";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { busyStep } from "@/lib/project-state";
+import { loadProjectStatus } from "@/lib/project-status";
 import { canApprove, docOfRow, verdictsOfScript } from "@/lib/review";
 import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
@@ -90,6 +91,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const urls = await presignMap(keys, 3600);
 
   const busy = busyStep(project);
+  const status = await loadProjectStatus(ws, project.id);
   const props: EditorProps = {
     projectId: project.id,
     projectTitle: project.title ?? project.url,
@@ -116,7 +118,6 @@ export default async function EditPage({ params, searchParams }: { params: Promi
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-3">
-      <AutoRefresh active={Boolean(busy)} everyMs={5000} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">
@@ -133,7 +134,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="outline">timeline v{selected.version}</Badge>
-          {busy ? <Badge variant="secondary">đang chạy: {busy}…</Badge> : null}
+          {status ? <PipelineStatus initial={status} variant="inline" /> : null}
           {project.approvedTimelineId === selected.id ? <Badge>đã duyệt</Badge> : null}
         </div>
       </div>

@@ -77,7 +77,7 @@ export async function applyCheck(ctx: Ctx, pub: { id: string; projectId: string 
           metadata: { ...pub.metadata, handles: { ...(pub.metadata.handles ?? {}), ...(result.handles ?? {}) }, lastStatus: result.raw ?? null } as Record<string, unknown>,
         })
         .where(eq(schema.publications.id, pub.id));
-      if (pub.projectId) await tx.update(schema.projects).set({ state: "published", busyStep: null }).where(eq(schema.projects.id, pub.projectId));
+      if (pub.projectId) await tx.update(schema.projects).set({ state: "published", busyStep: null, busyProgress: null }).where(eq(schema.projects.id, pub.projectId));
     });
     await logActivity({ actorId: ctx.userId, organizationId: ctx.organizationId, projectId: pub.projectId, type: "publication.published", payload: { publicationId: pub.id, platform: pub.platform, postId: result.postId ?? null, url: result.url ?? null } });
     await notifySlack(`:rocket: Published on ${pub.platform} — ${opts.title ?? pub.id} ${result.url ?? ""} ${env().APP_URL}/app/projects/${pub.projectId ?? ""}`);

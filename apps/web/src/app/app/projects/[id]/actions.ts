@@ -9,7 +9,7 @@ import { projectAssetsRequested, projectFetchRequested, projectRenderRequested, 
 import { run, str, type ActionState } from "@/lib/admin";
 import { countWords } from "@/lib/fetch/readability";
 import { parsePreset } from "@/lib/presets";
-import { busyStep } from "@/lib/project-state";
+import { busyStep, startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
 import { copyObject } from "@/lib/r2";
 import { assertWorkspaceWriter, type Workspace } from "@/lib/workspace";
@@ -57,7 +57,7 @@ export async function refetchArticle(_: ActionState, fd: FormData): Promise<Acti
     await loadProject(ws, projectId);
     const m = str(fd, "method");
     const method = m === "browser_rendering" || m === "http" || m === "firecrawl" ? m : undefined;
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", lastError: null }).where(eq(schema.projects.id, projectId)));
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectFetchRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, method }));
     await log("article.refetch_requested", { method: method ?? "auto" }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
@@ -74,7 +74,7 @@ export async function pasteArticle(_: ActionState, fd: FormData): Promise<Action
     const title = str(fd, "title");
     const text = String(fd.get("text") ?? "").trim();
     if (countWords(text) < 40) throw new Error("Paste at least 40 words of article text");
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", lastError: null }).where(eq(schema.projects.id, projectId)));
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectFetchRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
     await log("article.pasted", { words: countWords(text) }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
@@ -92,7 +92,7 @@ export async function requestScript(_: ActionState, fd: FormData): Promise<Actio
     if (!article?.confirmedAt) throw new Error("Confirm the article text first");
     const { durationSec, tone } = parsePreset(fd);
     const quota = await assertQuota(ws.userId, "scripts");
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "script", lastError: null, durationSec, tone }).where(eq(schema.projects.id, projectId)));
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "script", busyProgress: startProgress(), lastError: null, durationSec, tone }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectScriptRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, durationSec, tone }));
     await log("script.requested", { durationSec, tone, quotaUsed: quota.used + 1, quotaLimit: quota.limit }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
@@ -126,7 +126,7 @@ export async function requestAssets(_: ActionState, fd: FormData): Promise<Actio
     const skipStock = fd.get("skipStock") === "on";
     const script = await withOrgContext(ws, (tx) => tx.query.scripts.findFirst({ where: eq(schema.scripts.projectId, projectId), orderBy: desc(schema.scripts.version) }));
     if (!script) throw new Error("Generate a script first");
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", lastError: null }).where(eq(schema.projects.id, projectId)));
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectAssetsRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, scriptId, skipStock }));
     await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
@@ -147,7 +147,7 @@ export async function requestRender(_: ActionState, fd: FormData): Promise<Actio
     if (!timeline) throw new Error("Build the timeline first");
     const minutes = Number(timeline.durationSec ?? 60) / 60;
     const quota = await assertQuota(ws.userId, "render_minutes");
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "render", lastError: null }).where(eq(schema.projects.id, projectId)));
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "render", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectRenderRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: timeline.id }));
     await log("quota.render_minutes", { minutes: Math.round(minutes * 100) / 100, timelineId: timeline.id }, projectId);
     await log("render.requested", { timelineId: timeline.id, version: timeline.version, quotaUsed: quota.used, quotaLimit: quota.limit }, projectId);

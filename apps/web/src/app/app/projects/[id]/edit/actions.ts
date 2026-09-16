@@ -8,7 +8,7 @@ import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
 import { projectSceneRegenerateRequested } from "@/inngest/events";
 import { downloadToR2 } from "@/lib/media/stock";
-import { busyStep } from "@/lib/project-state";
+import { busyStep, startProgress } from "@/lib/project-state";
 import { deleteObject, headObject, presignGet, presignPut, r2Key } from "@/lib/r2";
 import { saveTimelineVersion } from "@/lib/review";
 import { isPrivateHost } from "@/lib/url";
@@ -51,7 +51,7 @@ export async function regenerateScene(input: { projectId: string; timelineId: st
     if (!timeline) throw new Error("Timeline not found");
     const voiceover = input.voiceover?.trim().slice(0, 2000) || undefined;
     const brollTerms = input.brollTerms?.map((t) => t.trim().slice(0, 80)).filter(Boolean).slice(0, 6);
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "regenerate", lastError: null }).where(eq(schema.projects.id, input.projectId)));
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "regenerate", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, input.projectId)));
     await inngest.send(
       projectSceneRegenerateRequested.create({ projectId: input.projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: input.timelineId, what: input.what, sceneId: input.sceneId, voiceover, brollTerms: brollTerms?.length ? brollTerms : undefined }),
     );

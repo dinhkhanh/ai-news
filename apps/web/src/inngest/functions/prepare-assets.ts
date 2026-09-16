@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { inngest } from "../client";
 import { projectAssetsRequested } from "../events";
 import { autoAfterAssets } from "../auto-pipeline";
+import { reportProgress, tickProgress } from "@/lib/progress";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -46,7 +47,7 @@ export const prepareAssetsFn = inngest.createFunction(
       const { projectId, organizationId, requestedBy } = event.data.event.data;
       const message = event.data.error?.message ?? "asset preparation failed";
       await withOrgContext({ userId: requestedBy, organizationId }, (tx) =>
-        tx.update(schema.projects).set({ busyStep: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
+        tx.update(schema.projects).set({ busyStep: null, busyProgress: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
       );
       await logActivity({ actorId: requestedBy, organizationId, projectId, type: "assets.failed", payload: { error: message.slice(0, 500) } });
     },
@@ -57,6 +58,7 @@ export const prepareAssetsFn = inngest.createFunction(
     const pctx = { ...ctx, projectId };
 
     const input = await step.run("load", async () => {
+      await reportProgress(pctx, { label: "Đọc kịch bản", pct: 2 });
       const row = await withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
@@ -87,23 +89,29 @@ export const prepareAssetsFn = inngest.createFunction(
     const brand = await step.run("brand", () => loadBrand(ctx));
 
     /* ---- voice-over per scene (parallel) ---- */
-    const voiceSetup = await step.run("voice-setup", async () => ({
-      preset: await loadVoicePreset(ctx, input.language),
-      pronunciations: await loadPronunciations(ctx, input.language),
-    }));
+    const voiceSetup = await step.run("voice-setup", async () => {
+      await reportProgress(pctx, { label: `Tổng hợp giọng đọc (${input.scenes.length} cảnh)`, pct: 5, total: input.scenes.length });
+      return {
+        preset: await loadVoicePreset(ctx, input.language),
+        pronunciations: await loadPronunciations(ctx, input.language),
+      };
+    });
     const voices: SceneVoice[] = await Promise.all(
       input.scenes.map((sc) =>
-        step.run(`voice-${sc.id}`, () =>
-          synthesizeScene(
+        step.run(`voice-${sc.id}`, async () => {
+          const v = await synthesizeScene(
             { sceneId: sc.id, text: sc.voiceover, language: input.language, preset: voiceSetup.preset, pronunciations: voiceSetup.pronunciations, r2Key: media(`vo/${input.buildId}-${sc.id}.wav`) },
             pctx,
-          ),
-        ),
+          );
+          await tickProgress(pctx, { label: "Giọng đọc", total: input.scenes.length, from: 5, to: 28 });
+          return v;
+        }),
       ),
     );
 
     /* ---- article A-roll (images) ---- */
     const aroll = await step.run("aroll", async (): Promise<ChosenAsset[]> => {
+      await reportProgress(pctx, { label: `Tải ảnh từ bài báo (${input.images.length})`, pct: 30 });
       const out: ChosenAsset[] = [];
       for (const [i, im] of input.images.entries()) {
         try {
@@ -132,19 +140,25 @@ export const prepareAssetsFn = inngest.createFunction(
     const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
 
     /* ---- stock B-roll per scene (parallel): search → rank thumbnails → download as many clips as the scene needs ---- */
-    const providers = await step.run("stock-providers", () => stockProvidersAvailable());
+    const stockScenes = input.scenes.filter((sc) => sc.kind !== "cta" && sc.brollTerms.length);
+    const providers = await step.run("stock-providers", async () => {
+      const p = await stockProvidersAvailable();
+      const on = !skipStock && (p.pexels || p.pixabay);
+      await reportProgress(pctx, { label: on ? `Tìm B-roll Pexels/Pixabay, Haiku xếp hạng (${stockScenes.length} cảnh)` : "Bỏ qua stock B-roll", pct: 36, total: stockScenes.length });
+      return p;
+    });
     const stockEnabled = !skipStock && (providers.pexels || providers.pixabay);
     const stock: Record<string, SceneStock> = {};
     if (stockEnabled) {
       const results = await Promise.all(
-        input.scenes
-          .filter((sc) => sc.kind !== "cta" && sc.brollTerms.length)
-          .map((sc) =>
-            step.run(`stock-${sc.id}`, async (): Promise<[string, SceneStock]> => {
-              const wantSec = Math.min(5, voiceMs(sc.id, sc.durationSec) / 1000);
-              return [sc.id, await fetchSceneBroll(sc, { wantSec, buildId: input.buildId, keep: need[sc.id] }, pctx)];
-            }),
-          ),
+        stockScenes.map((sc) =>
+          step.run(`stock-${sc.id}`, async (): Promise<[string, SceneStock]> => {
+            const wantSec = Math.min(5, voiceMs(sc.id, sc.durationSec) / 1000);
+            const r = await fetchSceneBroll(sc, { wantSec, buildId: input.buildId, keep: need[sc.id] }, pctx);
+            await tickProgress(pctx, { label: "B-roll cảnh", total: stockScenes.length, from: 36, to: 62 });
+            return [sc.id, r];
+          }),
+        ),
       );
       for (const [id, r] of results) stock[id] = r;
     }
@@ -154,6 +168,7 @@ export const prepareAssetsFn = inngest.createFunction(
     const imageDeficit = input.scenes.reduce((a, sc) => a + Math.max(0, need[sc.id] - stockCount(sc.id)), 0);
     const related = await step.run("related-aroll", async () => {
       const shortfall = imageDeficit - aroll.length;
+      await reportProgress(pctx, { label: shortfall > 0 ? `Tìm thêm ${shortfall} ảnh từ báo khác cùng tin` : "Đủ ảnh, không cần tìm thêm", pct: 64 });
       if (shortfall <= 0) return { assets: [] as ChosenAsset[], pages: 0, found: 0, errors: [] as string[], shortfall };
       const found = await findRelatedImages({ query: input.articleTitle, language: input.language, excludeUrls: [input.source.url], want: shortfall });
       const stored = await storeRelatedImages(found.images, { buildId: input.buildId, max: shortfall + 2 }, pctx);
@@ -163,6 +178,7 @@ export const prepareAssetsFn = inngest.createFunction(
 
     /* ---- which image goes to which scene: Haiku matches subjects; every image at most once ---- */
     const assignment = await step.run("assign-images", async () => {
+      await reportProgress(pctx, { label: "Xếp ảnh vào cảnh (Haiku)", pct: 72 });
       const wanting = input.scenes.map((sc) => ({ id: sc.id, voiceover: sc.voiceover, onScreenText: sc.onScreenText, want: Math.max(0, need[sc.id] - stockCount(sc.id)) })).filter((s) => s.want > 0);
       let picks: Record<string, number[]> = {};
       let costUsd = 0;
@@ -202,10 +218,14 @@ export const prepareAssetsFn = inngest.createFunction(
 
     /* ---- music ---- */
     const preTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })) });
-    const music = await step.run("music", () => pickMusic({ tone: input.tone, durationSec: preTiming.durationSec, r2Key: media(`music/${input.buildId}.mp3`) }, pctx));
+    const music = await step.run("music", async () => {
+      await reportProgress(pctx, { label: "Chọn nhạc nền", pct: 78 });
+      return pickMusic({ tone: input.tone, durationSec: preTiming.durationSec, r2Key: media(`music/${input.buildId}.mp3`) }, pctx);
+    });
 
     /* ---- editor document (docs/PLAN.md §4.7): the source every later version is rebuilt from ---- */
     const doc: EditorDoc = await step.run("compose-doc", async () => {
+      await reportProgress(pctx, { label: "Ghép cảnh, chia shot ≤ 5 giây", pct: 82 });
       const clip = (st: ChosenAsset): EditorScene["visual"] => ({ kind: "video", key: st.key, clipDurationSec: st.durationSec ?? 5, trimStartSec: 0, credit: st.credit, assetId: st.assetId, thumbnailUrl: st.thumbnailUrl });
       const still = (im: ChosenAsset): EditorScene["visual"] => ({ kind: "image", key: im.key, kenBurns: true, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl });
       const scenes: EditorScene[] = input.scenes.map((sc) => {
@@ -242,10 +262,14 @@ export const prepareAssetsFn = inngest.createFunction(
     });
 
     /* ---- audio mix (media Lambda) ---- */
-    const mix = await step.run("mix", () => mixDocAudio(doc, pctx, input.buildId));
+    const mix = await step.run("mix", async () => {
+      await reportProgress(pctx, { label: "Trộn âm −16 LUFS (media Lambda)", pct: 85 });
+      return mixDocAudio(doc, pctx, input.buildId);
+    });
 
     /* ---- timeline version ---- */
     const stored = await step.run("store-timeline", async () => {
+      await reportProgress(pctx, { label: "Lưu timeline", pct: 95 });
       const { timeline, durationSec } = buildFromDoc(doc, { mixKey: mix.mixKey, voiceKey: mix.voiceKey });
       const buildJson = {
         buildId: input.buildId,
@@ -271,7 +295,7 @@ export const prepareAssetsFn = inngest.createFunction(
         const selectedIds = Object.values(stock).flatMap((s) => (s.selected ? [s.selected.assetId] : []));
         if (selectedIds.length) await tx.update(schema.assets).set({ selected: true }).where(inArray(schema.assets.id, selectedIds));
         // A rebuild supersedes any approval of the previous version.
-        await tx.update(schema.projects).set({ state: "composed", busyStep: null, lastError: null, approvedTimelineId: null, approvedBy: null, approvedAt: null }).where(eq(schema.projects.id, projectId));
+        await tx.update(schema.projects).set({ state: "composed", busyStep: null, busyProgress: null, lastError: null, approvedTimelineId: null, approvedBy: null, approvedAt: null }).where(eq(schema.projects.id, projectId));
         return t;
       });
       const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + mix.costUsd;

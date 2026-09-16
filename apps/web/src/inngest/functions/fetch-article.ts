@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { inngest } from "../client";
 import { projectFetchRequested } from "../events";
 import { autoAfterFetch } from "../auto-pipeline";
+import { reportProgress } from "@/lib/progress";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -29,7 +30,7 @@ export const fetchArticleFn = inngest.createFunction(
       const { projectId, organizationId, requestedBy } = event.data.event.data;
       const message = event.data.error?.message ?? "fetch failed";
       await withOrgContext({ userId: requestedBy, organizationId }, (tx) =>
-        tx.update(schema.projects).set({ busyStep: null, state: "failed", lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
+        tx.update(schema.projects).set({ busyStep: null, busyProgress: null, state: "failed", lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId)),
       );
       await logActivity({ actorId: requestedBy, organizationId, projectId, type: "article.fetch_failed", payload: { error: message.slice(0, 500) } });
     },
@@ -37,8 +38,10 @@ export const fetchArticleFn = inngest.createFunction(
   async ({ event, step }) => {
     const { projectId, organizationId, requestedBy, method, manual } = event.data;
     const ctx = { userId: requestedBy, organizationId };
+    const pctx = { ...ctx, projectId };
 
     const project = await step.run("load-project", async () => {
+      await reportProgress(pctx, { label: "Mở dự án", pct: 5 });
       const row = await withOrgContext(ctx, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) }));
       if (!row) throw new NonRetriableError("Project not found in this workspace");
       await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", lastError: null }).where(eq(schema.projects.id, projectId)));
@@ -46,6 +49,7 @@ export const fetchArticleFn = inngest.createFunction(
     });
 
     const fetched = await step.run("extract", async () => {
+      await reportProgress(pctx, { label: manual ? "Lưu nội dung dán" : method ? `Lấy nội dung bài qua ${method}` : "Lấy nội dung bài (Browser Rendering → HTTP → Firecrawl)", pct: 10 });
       if (manual) {
         return { method: "manual" as FetchMethod, extracted: manualArticle({ ...manual, url: project.url }), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[] };
       }
@@ -59,6 +63,7 @@ export const fetchArticleFn = inngest.createFunction(
     });
 
     const snapshot = await step.run("snapshot-to-r2", async () => {
+      await reportProgress(pctx, { label: "Lưu bản chụp trang", pct: 60 });
       const out: { snapshotPath: string | null; screenshotPath: string | null } = { snapshotPath: null, screenshotPath: null };
       try {
         if (fetched.rawHtml) out.snapshotPath = await putObject(r2Key.article(organizationId, projectId, "snapshot.html"), fetched.rawHtml, "text/html; charset=utf-8");
@@ -71,6 +76,7 @@ export const fetchArticleFn = inngest.createFunction(
     });
 
     const classification = await step.run("classify", async () => {
+      await reportProgress(pctx, { label: "Nhận diện ngôn ngữ và chủ đề nhạy cảm (Haiku)", pct: 70 });
       const { extracted } = fetched;
       try {
         const c = await classifyArticle({ title: extracted.title, text: extracted.text }, { ...ctx, projectId });
@@ -83,6 +89,7 @@ export const fetchArticleFn = inngest.createFunction(
     });
 
     await step.run("store-article", async () => {
+      await reportProgress(pctx, { label: "Lưu bài báo", pct: 92 });
       const { extracted } = fetched;
       let canonicalUrl = project.url;
       if (extracted.canonicalUrl) {
@@ -124,7 +131,7 @@ export const fetchArticleFn = inngest.createFunction(
             language: classification.language,
             sensitiveTopic: classification.sensitiveTopic,
             state: "fetched",
-            busyStep: null,
+            busyStep: null, busyProgress: null,
             lastError: null,
             inngestRunId: null,
           })

@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { Timeline } from "@ai-news/video/schema";
 import { inngest } from "../client";
 import { projectRenderRequested } from "../events";
+import { reportProgress } from "@/lib/progress";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity, recordUsageCost } from "@/lib/activity";
@@ -33,7 +34,7 @@ export const renderProjectFn = inngest.createFunction(
       const { projectId, organizationId, requestedBy } = event.data.event.data;
       const message = event.data.error?.message ?? "render failed";
       await withOrgContext({ userId: requestedBy, organizationId }, async (tx) => {
-        await tx.update(schema.projects).set({ busyStep: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId));
+        await tx.update(schema.projects).set({ busyStep: null, busyProgress: null, lastError: message.slice(0, 2000) }).where(eq(schema.projects.id, projectId));
         await tx.update(schema.renders).set({ status: "failed", error: message.slice(0, 4000) }).where(and(eq(schema.renders.projectId, projectId), eq(schema.renders.status, "rendering")));
       });
       await logActivity({ actorId: requestedBy, organizationId, projectId, type: "render.failed", payload: { error: message.slice(0, 500) } });
@@ -43,8 +44,10 @@ export const renderProjectFn = inngest.createFunction(
   async ({ event, step }) => {
     const { projectId, organizationId, requestedBy, timelineId } = event.data;
     const ctx = { userId: requestedBy, organizationId };
+    const pctx = { ...ctx, projectId };
 
     const input = await step.run("load", async () => {
+      await reportProgress(pctx, { label: "Chuẩn bị timeline", pct: 2 });
       return withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
@@ -75,6 +78,7 @@ export const renderProjectFn = inngest.createFunction(
     const durationSec = input.durationSec || input.timeline.durationFrames / 30;
 
     const started = await step.run("start-remotion-render", async () => {
+      await reportProgress(pctx, { label: "Ký URL tài nguyên, khởi động Remotion Lambda", pct: 5 });
       const props = await resolveTimelineSrcs(input.timeline);
       const res = await startRender({ composition: "News", inputProps: props, outKey: rawKey, durationInFrames: input.timeline.durationFrames });
       await withOrgContext(ctx, (tx) =>
@@ -85,7 +89,12 @@ export const renderProjectFn = inngest.createFunction(
 
     let remotionCost = 0;
     for (let attempt = 1; ; attempt++) {
-      const status = await step.run(`poll-${attempt}`, () => getRenderStatus(started));
+      const status = await step.run(`poll-${attempt}`, async () => {
+        const s = await getRenderStatus(started);
+        const p = Math.max(0, Math.min(1, Number((s as { overallProgress?: number }).overallProgress ?? 0)));
+        await reportProgress(pctx, { label: s.done ? "Lambda kết xuất xong" : `Remotion Lambda đang kết xuất (${s.renderedFrames ?? 0}/${input.timeline.durationFrames} khung hình)`, pct: Math.round(8 + 70 * p) });
+        return s;
+      });
       if (status.fatalErrorEncountered) {
         const msg = status.errors.map((e: { message: string }) => e.message).join("\n");
         await step.run("mark-failed", () => withOrgContext(ctx, (tx) => tx.update(schema.renders).set({ status: "failed", error: msg.slice(0, 4000) }).where(eq(schema.renders.id, input.renderId))));
@@ -100,6 +109,7 @@ export const renderProjectFn = inngest.createFunction(
     }
 
     const post = await step.run("post-process", async () => {
+      await reportProgress(pctx, { label: "Chuẩn hoá −14 LUFS, cắt ảnh bìa, QA (media Lambda)", pct: 80 });
       await withOrgContext(ctx, (tx) => tx.update(schema.renders).set({ status: "post_processing" }).where(eq(schema.renders.id, input.renderId)));
       const t0 = Date.now();
       const norm = await invokeMediaLambda({ action: "loudnorm", input: { key: rawKey }, output: { key: outKey }, targetLufs: -14, truePeak: -1 });
@@ -116,6 +126,7 @@ export const renderProjectFn = inngest.createFunction(
     });
 
     await step.run("finalise", async () => {
+      await reportProgress(pctx, { label: "Ghi kết quả", pct: 96 });
       const passed = post.qa.ok && post.qa.passed;
       const mediaCost = (post.lambdaMs / 1000) * MEDIA_LAMBDA_USD_PER_SEC;
       const costUsd = remotionCost + mediaCost;
@@ -136,7 +147,7 @@ export const renderProjectFn = inngest.createFunction(
           .where(eq(schema.renders.id, input.renderId));
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         const state = passed && input.approved ? "rendered" : project?.state;
-        await tx.update(schema.projects).set({ state, busyStep: null, lastError: passed ? null : "Render QA failed; see the render row" }).where(eq(schema.projects.id, projectId));
+        await tx.update(schema.projects).set({ state, busyStep: null, busyProgress: null, lastError: passed ? null : "Render QA failed; see the render row" }).where(eq(schema.projects.id, projectId));
       });
       await recordUsageCost({ provider: "remotion_lambda", resource: "News", units: durationSec, unitType: "render_seconds", costUsd: remotionCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId, meta: { renderSeconds, functionName: env().REMOTION_FUNCTION_NAME } });
       await recordUsageCost({ provider: "media_lambda", resource: "loudnorm+cover+probe", units: post.lambdaMs / 1000, unitType: "seconds", costUsd: mediaCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId });

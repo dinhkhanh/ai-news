@@ -158,7 +158,7 @@ export function Editor(props: EditorProps) {
             Thêm hình trong “Chi tiết cảnh” (tải lên, dán link hoặc chọn từ kho).
           </p>
         ) : null}
-        {busy ? <p className="text-xs text-muted-foreground">Đang chạy bước {props.busyStep}… trang tự làm mới khi xong.</p> : null}
+        {busy ? <p className="text-xs text-muted-foreground">Đang chạy bước {props.busyStep}… tiến độ ở đầu trang; phiên bản mới tự mở khi xong.</p> : null}
 
         <div className="space-y-2 rounded-md border p-3">
           <div className="flex items-center justify-between">
