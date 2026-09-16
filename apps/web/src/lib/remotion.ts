@@ -52,12 +52,13 @@ export async function startRender(opts: {
     throw new Error("REMOTION_FUNCTION_NAME / REMOTION_SERVE_URL are not set (run packages/video deploy)");
   }
   // Remotion Lambda's headless browser occasionally hits a transient S3
-  // AccessDenied while loading the site bundle to enumerate compositions,
-  // even though the same object is reachable via plain HTTP or the S3 API at
-  // that exact moment (observed 2026-09-16: ~half of attempts for a few
-  // minutes, every retry within seconds succeeded). `maxRetries` below only
-  // covers frame-render chunks, not this one-time startup fetch, so retry it
-  // here explicitly before failing the whole render.
+  // AccessDenied while loading the site bundle to enumerate compositions
+  // (observed 2026-09-16; every retry within seconds succeeded). `maxRetries`
+  // below only covers frame-render chunks, not this one-time startup fetch,
+  // so retry it here explicitly before failing the whole render.
+  // NB: a *persistent* AccessDenied whose URL ends in `index.html\n/index.html`
+  // is not transient — it means REMOTION_SERVE_URL has a trailing newline
+  // (env() trims values now, but check the Vercel dashboard value too).
   const { renderId, bucketName } = await withRetry(
     () =>
       renderMediaOnLambda({

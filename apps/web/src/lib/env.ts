@@ -46,7 +46,13 @@ let cached: Env | undefined;
 
 export function env(): Env {
   if (cached) return cached;
-  const parsed = schema.safeParse(process.env);
+  // Trim every value: env vars pasted into Vercel/CI often carry a trailing
+  // newline, which e.g. makes Remotion append a second `/index.html` to
+  // REMOTION_SERVE_URL and breaks API keys sent as headers.
+  const raw = Object.fromEntries(
+    Object.entries(process.env).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v]),
+  );
+  const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     throw new Error(`Invalid environment: ${issues}`);
