@@ -20,6 +20,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/app" className="text-muted-foreground hover:text-foreground">
             Dự án
           </Link>
+          <Link href="/app/publications" className="text-muted-foreground hover:text-foreground">
+            Đã đăng
+          </Link>
           <Link href="/app/brand" className="text-muted-foreground hover:text-foreground">
             Bộ nhận diện
           </Link>

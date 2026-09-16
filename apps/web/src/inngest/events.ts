@@ -113,3 +113,20 @@ export const promptEvalRequested = eventType("prompt/eval.requested", {
     requestedBy: z.string(),
   }),
 });
+
+/** Phase 5 step 10: publish a render to a connected channel now or at `publications.scheduled_at`. */
+export const publicationRequested = eventType("publication/requested", {
+  schema: z.object({
+    publicationId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    channelId: z.string(),
+  }),
+});
+
+/** Cancels a scheduled publication run (matched on publicationId by `cancelOn`). */
+export const publicationCancelled = eventType("publication/cancelled", {
+  schema: z.object({
+    publicationId: z.string(),
+  }),
+});

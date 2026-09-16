@@ -43,6 +43,13 @@
       "when": 1789511152116,
       "tag": "0005_phase4_editor",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789514258285,
+      "tag": "0006_phase5_publishing",
+      "breakpoints": true
     }
   ]
 }

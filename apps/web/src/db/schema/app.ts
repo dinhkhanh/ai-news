@@ -63,6 +63,7 @@ export const publicationStatusEnum = pgEnum("publication_status", [
   "processing",
   "published",
   "failed",
+  "cancelled",
 ]);
 
 export const quotaScopeEnum = pgEnum("quota_scope", ["user", "org"]);
@@ -452,6 +453,12 @@ export const channels = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastRefreshAt: timestamp("last_refresh_at", { withTimezone: true }),
     healthy: boolean("healthy").notNull().default(true),
+    /** Platform-specific ids the publish step needs (Facebook page id, Instagram user id, TikTok open id / handle, public URL). */
+    meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+    lastError: text("last_error"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    /** Admin can pause a channel without disconnecting it. */
+    enabled: boolean("enabled").notNull().default(true),
     connectedBy: text("connected_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -488,12 +495,22 @@ export const publications = pgTable(
     renderId: uuid("render_id")
       .notNull()
       .references(() => renders.id, { onDelete: "restrict" }),
+    /** Denormalised from the channel for dashboards. */
+    platform: platformEnum("platform").notNull(),
+    /** One key per attempt (docs/PLAN.md §4.10); a retry gets a new key. */
     idempotencyKey: text("idempotency_key").notNull(),
+    attempts: integer("attempts").notNull().default(1),
     platformPostId: text("platform_post_id"),
+    platformUrl: text("platform_url"),
     status: publicationStatusEnum("status").notNull().default("draft"),
+    /** Title, description, hashtags, privacy as sent to the platform (+ per-platform handles while processing). */
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    privacy: text("privacy").notNull().default("public"),
+    aiDisclosure: boolean("ai_disclosure").notNull().default(false),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
     analyticsJson: jsonb("analytics_json").$type<Record<string, unknown>>(),
     analyticsAt: timestamp("analytics_at", { withTimezone: true }),
     error: text("error"),
@@ -505,6 +522,8 @@ export const publications = pgTable(
     uniqueIndex("publications_idem_uidx").on(t.idempotencyKey),
     index("publications_channel_idx").on(t.channelId),
     index("publications_scheduled_idx").on(t.status, t.scheduledAt),
+    index("publications_project_idx").on(t.projectId),
+    index("publications_org_created_idx").on(t.organizationId, t.createdAt),
   ],
 );
 

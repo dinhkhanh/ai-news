@@ -2,6 +2,7 @@ import "server-only";
 import { getRenderProgress, renderMediaOnLambda } from "@remotion/lambda-client";
 import { env } from "@/lib/env";
 import { r2Bucket, r2Endpoint } from "@/lib/r2";
+import { isTransientRemotionSiteError, withRetry } from "@/lib/retry";
 
 /** Fixed output spec (docs/PLAN.md §1). Never lowered for cost. */
 export const OUTPUT_SPEC = {
@@ -50,29 +51,40 @@ export async function startRender(opts: {
   if (!e.REMOTION_FUNCTION_NAME || !e.REMOTION_SERVE_URL) {
     throw new Error("REMOTION_FUNCTION_NAME / REMOTION_SERVE_URL are not set (run packages/video deploy)");
   }
-  const { renderId, bucketName } = await renderMediaOnLambda({
-    region,
-    functionName: e.REMOTION_FUNCTION_NAME,
-    serveUrl: e.REMOTION_SERVE_URL,
-    composition: opts.composition,
-    inputProps: opts.inputProps,
-    codec: OUTPUT_SPEC.codec,
-    crf: OUTPUT_SPEC.crf,
-    audioBitrate: OUTPUT_SPEC.audioBitrate,
-    audioCodec: OUTPUT_SPEC.audioCodec,
-    x264Preset: OUTPUT_SPEC.x264Preset,
-    imageFormat: "jpeg",
-    jpegQuality: 90,
-    privacy: "no-acl",
-    maxRetries: 2,
-    framesPerLambda: 60,
-    downloadBehavior: { type: "play-in-browser" },
-    outName: {
-      key: opts.outKey,
-      bucketName: r2Bucket(),
-      s3OutputProvider: r2OutputProvider(),
-    },
-  });
+  // Remotion Lambda's headless browser occasionally hits a transient S3
+  // AccessDenied while loading the site bundle to enumerate compositions,
+  // even though the same object is reachable via plain HTTP or the S3 API at
+  // that exact moment (observed 2026-09-16: ~half of attempts for a few
+  // minutes, every retry within seconds succeeded). `maxRetries` below only
+  // covers frame-render chunks, not this one-time startup fetch, so retry it
+  // here explicitly before failing the whole render.
+  const { renderId, bucketName } = await withRetry(
+    () =>
+      renderMediaOnLambda({
+        region,
+        functionName: e.REMOTION_FUNCTION_NAME!,
+        serveUrl: e.REMOTION_SERVE_URL!,
+        composition: opts.composition,
+        inputProps: opts.inputProps,
+        codec: OUTPUT_SPEC.codec,
+        crf: OUTPUT_SPEC.crf,
+        audioBitrate: OUTPUT_SPEC.audioBitrate,
+        audioCodec: OUTPUT_SPEC.audioCodec,
+        x264Preset: OUTPUT_SPEC.x264Preset,
+        imageFormat: "jpeg",
+        jpegQuality: 90,
+        privacy: "no-acl",
+        maxRetries: 2,
+        framesPerLambda: 60,
+        downloadBehavior: { type: "play-in-browser" },
+        outName: {
+          key: opts.outKey,
+          bucketName: r2Bucket(),
+          s3OutputProvider: r2OutputProvider(),
+        },
+      }),
+    { attempts: 4, delayMs: 3000, isRetryable: isTransientRemotionSiteError },
+  );
   return { renderId, bucketName, functionName: e.REMOTION_FUNCTION_NAME, region };
 }
 

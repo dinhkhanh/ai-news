@@ -8,6 +8,8 @@ const nav = [
   ["/admin/domains", "Domains"],
   ["/admin/workspaces", "Workspaces"],
   ["/admin/integrations", "Integrations"],
+  ["/admin/channels", "Channels"],
+  ["/admin/analytics", "Analytics"],
   ["/admin/prompts", "Prompt templates"],
   ["/admin/evals", "Eval set & runs"],
   ["/admin/music", "Music library"],

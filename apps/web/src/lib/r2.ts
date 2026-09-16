@@ -86,6 +86,20 @@ export async function getObjectBuffer(key: string) {
   return Buffer.from(await res.Body.transformToByteArray());
 }
 
+/** Streaming body (web ReadableStream) + size, for uploads that must not buffer the whole file. */
+export async function getObjectStream(key: string) {
+  const res = await r2().send(new GetObjectCommand({ Bucket: r2Bucket(), Key: key }));
+  if (!res.Body) throw new Error(`empty body for ${key}`);
+  return { stream: res.Body.transformToWebStream(), size: res.ContentLength ?? 0, contentType: res.ContentType ?? "video/mp4" };
+}
+
+/** Byte range [start, end] (inclusive) of an object, for chunked uploads. */
+export async function getObjectRange(key: string, start: number, end: number) {
+  const res = await r2().send(new GetObjectCommand({ Bucket: r2Bucket(), Key: key, Range: `bytes=${start}-${end}` }));
+  if (!res.Body) throw new Error(`empty body for ${key}`);
+  return Buffer.from(await res.Body.transformToByteArray());
+}
+
 /** Absolute URLs pass through; R2 keys become presigned GET URLs (Remotion Lambda fetches them). */
 export async function resolveSrc(keyOrUrl: string, expiresIn = 3 * 3600) {
   return /^https?:\/\//.test(keyOrUrl) ? keyOrUrl : presignGet(keyOrUrl, expiresIn);

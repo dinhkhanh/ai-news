@@ -7,6 +7,7 @@ import { ActionForm } from "@/components/action-form";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ScriptReview } from "@/components/script-review";
 import { ReviewPanel } from "@/components/review-panel";
+import { PublishPanel, type PublicationView, type PublishChannel } from "@/components/publish-panel";
 import { TimelineSummary, type BuildJson } from "@/components/timeline-summary";
 import type { Timeline } from "@ai-news/video/schema";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { StoredFaithfulness, StoredScript } from "@/lib/llm/schemas";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
+import { flagsEnabled } from "@/lib/flags";
 import { busyIsStale, busyStep } from "@/lib/project-state";
+import { buildMetadata, PLATFORM_SPEC, type Analytics } from "@/lib/publish/platforms";
 import { presignGet } from "@/lib/r2";
 import { canApprove, needsFaithfulnessOverride } from "@/lib/review";
 import { displayHost } from "@/lib/url";
@@ -35,6 +38,7 @@ const STATE_LABEL: Record<string, string> = {
   in_review: "Chờ duyệt",
   approved: "Đã duyệt",
   rendered: "Đã kết xuất",
+  published: "Đã đăng",
   failed: "Lỗi",
 };
 const KIND_LABEL: Record<string, string> = { built: "dựng", edited: "sửa", regenerated: "tạo lại" };
@@ -88,10 +92,18 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
       .orderBy(desc(schema.projectReviews.createdAt))
       .limit(10);
     const [{ openComments }] = await tx.select({ openComments: count() }).from(schema.comments).where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt)));
-    return { project, article, scripts, timelines, renders, reviews, openComments };
+    const channels = await tx.query.channels.findMany({ where: eq(schema.channels.organizationId, project.organizationId), orderBy: [schema.channels.platform, schema.channels.name] });
+    const grants = await tx.query.channelGrants.findMany({ where: eq(schema.channelGrants.userId, ws.userId) });
+    const publications = await tx
+      .select({ id: schema.publications.id, platform: schema.publications.platform, channelId: schema.publications.channelId, status: schema.publications.status, attempts: schema.publications.attempts, scheduledAt: schema.publications.scheduledAt, publishedAt: schema.publications.publishedAt, platformUrl: schema.publications.platformUrl, privacy: schema.publications.privacy, aiDisclosure: schema.publications.aiDisclosure, error: schema.publications.error, analyticsJson: schema.publications.analyticsJson, renderId: schema.publications.renderId, createdByName: schema.user.name })
+      .from(schema.publications)
+      .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
+      .where(eq(schema.publications.projectId, id))
+      .orderBy(desc(schema.publications.createdAt));
+    return { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications };
   });
   if (!data) notFound();
-  const { project, article, scripts, timelines, renders, reviews, openComments } = data;
+  const { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications } = data;
   const selectedTimeline = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   const timelineJson = selectedTimeline ? (selectedTimeline.json as unknown as Timeline) : null;
   const sign = async (key: string | null | undefined, ttl = 900) => {
@@ -113,6 +125,40 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const renderLinks = new Map<string, { video: string | null; cover: string | null }>();
   for (const r of renders.slice(0, 10)) renderLinks.set(r.id, { video: r.status === "done" ? await sign(r.outputPath, 3600) : null, cover: await sign(r.coverPath) });
   const [renderLimit, renderUsed] = writer ? await Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0];
+  // Publishing (phase 5): the approved version's finished render, granted channels, defaults from the script's per-platform metadata.
+  const approvedRender = project.approvedTimelineId ? (renders.find((r) => r.timelineId === project.approvedTimelineId && r.status === "done") ?? null) : null;
+  const publisher = writer && canApprove(ws);
+  const publishFlags = publisher ? await flagsEnabled(["publish_youtube", "publish_facebook", "publish_instagram", "publish_tiktok", "scheduling"]) : {};
+  const [publishLimit, publishUsed] = publisher ? await Promise.all([dailyLimit(ws.userId, "publishes"), usedToday(ws.userId, "publishes")]) : [0, 0];
+  const approvedScript = scripts.find((s) => s.id === timelines.find((t) => t.id === project.approvedTimelineId)?.scriptId) ?? scripts[0] ?? null;
+  const scriptMeta = (approvedScript?.scenesJson as unknown as StoredScript | null)?.metadata ?? null;
+  const publishChannels: PublishChannel[] = channels.map((c) => ({
+    id: c.id,
+    platform: c.platform,
+    name: c.name,
+    granted: ws.isAdmin || grants.some((g) => g.channelId === c.id),
+    enabled: c.enabled && Boolean(c.vaultRef),
+    healthy: c.healthy,
+    flagOn: Boolean(publishFlags[PLATFORM_SPEC[c.platform].flag]),
+    defaults: buildMetadata({ platform: c.platform, meta: scriptMeta?.[PLATFORM_SPEC[c.platform].metadataKey] ?? null, fallbackTitle: project.title ?? project.url, language: project.language, source: { siteName: article?.siteName ?? null, url: article?.canonicalUrl ?? project.url }, aiDisclosure: project.aiDisclosure }),
+  }));
+  const publicationViews: PublicationView[] = publications.map((x) => ({
+    id: x.id,
+    platform: x.platform,
+    channelName: channels.find((c) => c.id === x.channelId)?.name ?? "?",
+    status: x.status,
+    attempts: x.attempts,
+    scheduledAt: x.scheduledAt?.toISOString() ?? null,
+    publishedAt: x.publishedAt?.toISOString() ?? null,
+    platformUrl: x.platformUrl,
+    privacy: x.privacy,
+    aiDisclosure: x.aiDisclosure,
+    error: x.error,
+    analytics: x.analyticsJson ? (({ views, likes, comments, shares, pulledAt }) => ({ views, likes, comments, shares, pulledAt }))(x.analyticsJson as unknown as Analytics) : null,
+    renderVersion: renders.find((r) => r.id === x.renderId)?.timelineVersion ?? null,
+    createdByName: x.createdByName,
+  }));
+  const publishingBusy = publications.some((x) => x.status === "publishing" || x.status === "processing");
   const busy = Boolean(busyStep(project));
   const stale = busyIsStale(project);
   const selected = scripts.find((s) => String(s.version) === sp.v) ?? scripts[0] ?? null;
@@ -134,7 +180,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <AutoRefresh active={busy} />
+      <AutoRefresh active={busy || publishingBusy} everyMs={publishingBusy && !busy ? 15000 : undefined} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">
@@ -398,6 +444,30 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
               })()}
               sensitiveTopic={project.sensitiveTopic}
               reviews={reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ---------------- Publish (phase 5) ---------------- */}
+      {timelines.length && (project.approvedTimelineId || publications.length) ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Đăng</CardTitle>
+            <CardDescription>
+              YouTube Shorts, Facebook / Instagram Reels, TikTok. Chỉ đăng bản kết xuất của phiên bản đã duyệt; mỗi lượt có khoá idempotency riêng, trạng thái xử lý được kiểm tra định kỳ, số liệu kéo về hằng ngày.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <PublishPanel
+              projectId={project.id}
+              render={approvedRender ? { id: approvedRender.id, version: approvedRender.timelineVersion, durationSec: approvedRender.durationSec ? Number(approvedRender.durationSec) : null } : null}
+              canPublish={publisher}
+              schedulingOn={Boolean(publishFlags.scheduling)}
+              aiDisclosure={project.aiDisclosure}
+              channels={publishChannels}
+              publications={publicationViews}
+              quota={{ used: publishUsed, limit: publishLimit }}
             />
           </CardContent>
         </Card>

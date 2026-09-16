@@ -18,7 +18,7 @@ import { createProject } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-const STATE_LABEL: Record<string, string> = { created: "đang tải", fetched: "chờ xác nhận", scripted: "có kịch bản", failed: "lỗi" };
+const STATE_LABEL: Record<string, string> = { created: "đang tải", fetched: "chờ xác nhận", scripted: "có kịch bản", composed: "đã dựng", in_review: "chờ duyệt", approved: "đã duyệt", rendered: "đã kết xuất", published: "đã đăng", failed: "lỗi" };
 
 export default async function AppHome() {
   const ws = await requireWorkspace();

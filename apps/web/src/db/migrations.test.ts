@@ -97,6 +97,15 @@ describe("migrations", () => {
     expect(rows.length).toBe(6);
   });
 
+  it("add the phase 5 publishing columns and the cancelled status", async () => {
+    const { rows } = await pg.query<{ table_name: string; column_name: string }>(
+      "select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='channels' and column_name in ('meta','enabled','last_error','last_checked_at')) or (table_name='publications' and column_name in ('platform','attempts','platform_url','privacy','ai_disclosure','cancelled_at','last_checked_at')))",
+    );
+    expect(rows.length).toBe(11);
+    const { rows: labels } = await pg.query<{ l: string }>("select enumlabel as l from pg_enum where enumtypid = 'publication_status'::regtype");
+    expect(labels.map((r) => r.l)).toContain("cancelled");
+  });
+
   it("bump lock_version on project updates", async () => {
     await pg.exec(`insert into "user"(id,name,email) values ('u1','U','u@suzu.group');
       insert into organization(id,name,slug) values ('o1','O','o1');

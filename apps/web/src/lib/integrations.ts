@@ -10,6 +10,8 @@ export const INTEGRATIONS = [
   { provider: "resend", label: "Resend (email)", secretLabel: "API key", hasSpendCap: false, hasCredits: false },
   { provider: "slack_webhook", label: "Slack webhook", secretLabel: "Webhook URL", hasSpendCap: false, hasCredits: false },
   { provider: "langfuse", label: "Langfuse", secretLabel: "Secret key", hasSpendCap: false, hasCredits: false },
+  { provider: "meta_app", label: "Meta app (Facebook + Instagram Reels)", secretLabel: "APP_ID:APP_SECRET", hasSpendCap: false, hasCredits: false },
+  { provider: "tiktok_app", label: "TikTok app (Content Posting API)", secretLabel: "CLIENT_KEY:CLIENT_SECRET", hasSpendCap: false, hasCredits: false },
 ] as const;
 
 export type IntegrationProvider = (typeof INTEGRATIONS)[number]["provider"];
@@ -20,10 +22,10 @@ export const FEATURE_FLAGS = [
   { key: "web_video_downloader", label: "Web-video downloader (yt-dlp)", description: "Allow trimming clips from web videos as B-roll." },
   { key: "ai_media", label: "AI media (Veo / Imagen)", description: "Allow AI-generated B-roll, subject to per-project cap." },
   { key: "scheduling", label: "Scheduled publishing", description: "Allow publish-at-time via delayed events." },
-  { key: "publish_youtube", label: "Publish: YouTube Shorts", description: "" },
-  { key: "publish_facebook", label: "Publish: Facebook Reels", description: "" },
-  { key: "publish_instagram", label: "Publish: Instagram Reels", description: "" },
-  { key: "publish_tiktok", label: "Publish: TikTok", description: "" },
+  { key: "publish_youtube", label: "Publish: YouTube Shorts", description: "Uploads via the Internal Google OAuth client (youtube.upload scope)." },
+  { key: "publish_facebook", label: "Publish: Facebook Reels", description: "Needs the Meta app with publish_video approved (or app-role testers)." },
+  { key: "publish_instagram", label: "Publish: Instagram Reels", description: "Needs instagram_content_publish on the Meta app." },
+  { key: "publish_tiktok", label: "Publish: TikTok", description: "Unaudited TikTok apps can only post SELF_ONLY (private)." },
 ] as const;
 
 export const PROMPT_PURPOSES = ["script", "faithfulness", "metadata", "rank_broll", "language_detect", "sensitive_topic"] as const;

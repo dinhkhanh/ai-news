@@ -77,5 +77,18 @@ Nothing new to provision if phase 1 passed; phase 2 reuses the Cloudflare token 
    waits for `composed`, prints the timeline (per-scene visual, timing method, music, mix loudness), then renders and prints the QA checks, cost and activity. `--assets-only` / `--render-only` / `--skip-stock` split the run.
    In the browser: project page → **Dựng video** → timeline summary with audio preview → **Kết xuất** → render row with cover, QA badges and MP4 link; **Ghim** keeps a render forever.
 
-## 10. Observability (create accounts now, wire later)
+## 10. Phase 5: publishing
+1. `pnpm db:migrate` applies `0006_phase5_publishing` (channel meta/enabled/health columns, publication platform/attempts/privacy/disclosure/url columns, `cancelled` status).
+2. Google Cloud → the existing Internal OAuth client: add the redirect URI `{APP_URL}/api/channels/oauth/youtube/callback` (local: `http://localhost:3000/...`), enable **YouTube Data API v3**. No verification is needed for `youtube.upload` because the consent screen is Internal. File the quota increase (docs/REQUESTS.md) — the default 10,000 units/day covers 6 uploads.
+3. Meta: in the Meta app (docs/REQUESTS.md) add *Facebook Login for Business*, set Valid OAuth Redirect URI `{APP_URL}/api/channels/oauth/meta/callback`, then save `APP_ID:APP_SECRET` in `/admin/integrations` → **Meta app** and enable it. Until App Review passes only users with a role on the app can connect and post.
+4. TikTok: in the TikTok developer app add Login Kit + Content Posting API, redirect URI `{APP_URL}/api/channels/oauth/tiktok/callback`, then save `CLIENT_KEY:CLIENT_SECRET` in `/admin/integrations` → **TikTok app** and enable it. Unaudited apps post as **SELF_ONLY** only; the publish step downgrades and records it.
+5. `/admin/integrations`: turn on the feature flags **Publish: YouTube Shorts** (and Facebook / Instagram / TikTok as reviews clear) and **Scheduled publishing** if wanted.
+6. `/admin/channels`: pick the workspace → **+ YouTube** (sign in with the channel owner's Google account; the app needs a refresh token, so re-consent is forced) → grant the channel to the publishers who may post. **Check token** proves the Vault round-trip; **Pull analytics** runs the daily pull immediately.
+7. Inngest crons register with the app sync: `poll-processing-publications` (*/10 min), `pull-publication-analytics` (19:30 UTC = 02:30 VN), `refresh-channel-tokens` (every 6 h at :15).
+8. Acceptance test (local, needs a project in state `rendered` and a connected channel):
+   `INNGEST_DEV=1 pnpm --filter web exec tsx --env-file=.env.local scripts/send-test-publish.ts <projectId> <channelId> [--privacy private] [--schedule 2m] [--analytics]`
+   inserts the publication row from the script's metadata, sends `publication/requested`, follows the row to `published`, prints the post URL, activity, YouTube quota units and (optionally) pulls analytics.
+   In the browser: project page → **Đăng** → choose the channel → edit title / description / hashtags / privacy / schedule / AI label → **Đăng ngay**. `/app/publications` lists every attempt with analytics; `/admin/analytics` shows produced vs published and the YouTube quota used today.
+
+## 11. Observability (create accounts now, wire later)
 Sentry project (Next.js), Vercel log drain, PostHog project, Langfuse project, Resend domain, Slack incoming webhook. Keys go to `/admin/integrations` where listed, otherwise to Vercel env.
