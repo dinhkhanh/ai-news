@@ -77,6 +77,11 @@ export async function startRender(opts: {
         privacy: "no-acl",
         maxRetries: 2,
         framesPerLambda: 60,
+        // Initial-render deadline for every delayRender() handle. Remotion's default is 30 s, which
+        // <OffthreadVideo> blows through while its in-Lambda frame server (http://localhost:3000/proxy —
+        // not our app) pulls the first frame of a presigned R2 clip. Must exceed the 90 s
+        // delayRenderTimeoutInMilliseconds set in packages/video/src/compositions/News.tsx.
+        timeoutInMilliseconds: 120_000,
         downloadBehavior: { type: "play-in-browser" },
         outName: {
           key: opts.outKey,
