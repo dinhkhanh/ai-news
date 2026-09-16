@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { inngest } from "../client";
 import { projectAssetsRequested } from "../events";
+import { autoAfterAssets } from "../auto-pipeline";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -220,6 +221,9 @@ export const prepareAssetsFn = inngest.createFunction(
       return { ...row, durationSec };
     });
 
-    return { timelineId: stored.id, version: stored.version, durationSec: stored.durationSec };
+    const next = await step.run("auto-continue", () => autoAfterAssets(ctx, projectId, stored.id, stored.durationSec));
+    if (next) await step.sendEvent("auto-render", next);
+
+    return { timelineId: stored.id, version: stored.version, durationSec: stored.durationSec, auto: Boolean(next) };
   },
 );

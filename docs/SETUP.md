@@ -92,3 +92,7 @@ Nothing new to provision if phase 1 passed; phase 2 reuses the Cloudflare token 
 
 ## 11. Observability (create accounts now, wire later)
 Sentry project (Next.js), Vercel log drain, PostHog project, Langfuse project, Resend domain, Slack incoming webhook. Keys go to `/admin/integrations` where listed, otherwise to Vercel env.
+
+## Auto mode (2026-09-16)
+
+Auto mode: `pnpm db:migrate` applies `0007_auto_pipeline` (`projects.auto_pipeline`). Ticking «tự động tới video» on the URL form chains fetch → script → build → render without clicks (`apps/web/src/inngest/auto-pipeline.ts`); it auto-confirms the article (≥40 words), checks script/render quotas, and pauses with `last_error` + an `auto.paused` activity when something needs a human. Approval and publishing are never automated.

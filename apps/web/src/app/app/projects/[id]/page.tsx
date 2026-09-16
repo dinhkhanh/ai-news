@@ -192,6 +192,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           <h1 className="truncate text-xl font-semibold tracking-tight">{project.title ?? project.url}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
             <Badge variant={project.state === "failed" ? "destructive" : project.state === "scripted" ? "default" : "secondary"}>{STATE_LABEL[project.state] ?? project.state}</Badge>
+            {project.autoPipeline ? <Badge variant="default">tự động</Badge> : null}
             {busy ? <Badge variant="outline">đang chạy: {project.busyStep}…</Badge> : null}
             {stale ? <Badge variant="destructive">bước {project.busyStep} không phản hồi, có thể chạy lại</Badge> : null}
             <Badge variant="outline">{project.language === "vi" ? "Tiếng Việt" : "English"}</Badge>

@@ -2,6 +2,7 @@ import { NonRetriableError } from "inngest";
 import { desc, eq } from "drizzle-orm";
 import { inngest } from "../client";
 import { projectScriptRequested } from "../events";
+import { autoAfterScript } from "../auto-pipeline";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -142,6 +143,9 @@ export const generateScriptFn = inngest.createFunction(
       });
     });
 
-    return { scriptId: scriptRow.id, version: scriptRow.version, faithfulness: faithfulness?.counts ?? null };
+    const next = await step.run("auto-continue", () => autoAfterScript(ctx, projectId, scriptRow.id));
+    if (next) await step.sendEvent("auto-assets", next);
+
+    return { scriptId: scriptRow.id, version: scriptRow.version, faithfulness: faithfulness?.counts ?? null, auto: Boolean(next) };
   },
 );

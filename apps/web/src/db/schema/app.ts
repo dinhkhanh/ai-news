@@ -228,6 +228,8 @@ export const projects = pgTable(
     /** Script presets (docs/PLAN.md §4.2): target length and tone. */
     durationSec: integer("duration_sec").notNull().default(60),
     tone: text("tone").notNull().default("news"),
+    /** Auto mode: after each pipeline step the next one starts without a human click (fetch → script → assets → render). */
+    autoPipeline: boolean("auto_pipeline").notNull().default(false),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
     /** Approval flow (docs/PLAN.md §4.8): the timeline version a publisher approved; cleared by any later edit. */

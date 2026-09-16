@@ -2,6 +2,7 @@ import { NonRetriableError } from "inngest";
 import { eq } from "drizzle-orm";
 import { inngest } from "../client";
 import { projectFetchRequested } from "../events";
+import { autoAfterFetch } from "../auto-pipeline";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -146,6 +147,9 @@ export const fetchArticleFn = inngest.createFunction(
       });
     });
 
-    return { projectId, method: fetched.method, words: fetched.extracted.wordCount, language: classification.language };
+    const next = await step.run("auto-continue", () => autoAfterFetch(ctx, projectId));
+    if (next) await step.sendEvent("auto-script", next);
+
+    return { projectId, method: fetched.method, words: fetched.extracted.wordCount, language: classification.language, auto: Boolean(next) };
   },
 );

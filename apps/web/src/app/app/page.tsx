@@ -34,6 +34,7 @@ export default async function AppHome() {
           busyStep: schema.projects.busyStep,
           language: schema.projects.language,
           sensitiveTopic: schema.projects.sensitiveTopic,
+          autoPipeline: schema.projects.autoPipeline,
           createdAt: schema.projects.createdAt,
           ownerName: schema.user.name,
         })
@@ -63,7 +64,9 @@ export default async function AppHome() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Dự án mới từ bài báo</CardTitle>
-            <CardDescription>Dán link bài. Hệ thống lấy nội dung, nhận diện ngôn ngữ, rồi chờ bạn xác nhận văn bản trước khi viết kịch bản.</CardDescription>
+            <CardDescription>
+              Dán link bài. Hệ thống lấy nội dung, nhận diện ngôn ngữ, rồi chờ bạn xác nhận văn bản trước khi viết kịch bản — hoặc bật «tự động» để chạy thẳng tới video.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ActionForm action={createProject} className="space-y-3">
@@ -92,6 +95,9 @@ export default async function AppHome() {
                     ))}
                   </select>
                 </div>
+                <label className="flex items-center gap-2 pb-2 text-sm" title="Bỏ qua các bước xác nhận: lấy bài → kịch bản → dựng → kết xuất chạy liên tiếp. Duyệt và đăng vẫn cần người.">
+                  <input type="checkbox" name="auto" className="size-4" /> tự động tới video
+                </label>
                 <label className="flex items-center gap-2 pb-2 text-sm">
                   <input type="checkbox" name="force" className="size-4" /> tạo dù đã có dự án cùng bài
                 </label>
@@ -136,6 +142,7 @@ export default async function AppHome() {
                 <Badge variant={p.state === "failed" ? "destructive" : p.state === "scripted" ? "default" : "secondary"}>
                   {p.busyStep ? `${p.busyStep}…` : (STATE_LABEL[p.state] ?? p.state)}
                 </Badge>
+                {p.autoPipeline ? <Badge variant="outline" className="ml-1">tự động</Badge> : null}
                 {p.sensitiveTopic ? <Badge variant="outline" className="ml-1">nhạy cảm</Badge> : null}
               </TableCell>
               <TableCell className="text-xs">{p.language}</TableCell>

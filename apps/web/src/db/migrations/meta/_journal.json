@@ -50,6 +50,13 @@
       "when": 1789514258285,
       "tag": "0006_phase5_publishing",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789520347083,
+      "tag": "0007_auto_pipeline",
+      "breakpoints": true
     }
   ]
 }
