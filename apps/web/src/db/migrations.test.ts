@@ -117,6 +117,31 @@ describe("migrations", () => {
     expect(rows[0].lock_version).toBe(1);
   });
 
+  it("isolate workspaces once the transaction switches to ai_news_app (migration 0011)", async () => {
+    await pg.exec(`insert into "user"(id,name,email) values ('u2','U2','u2@suzu.group');
+      insert into organization(id,name,slug) values ('o2','O2','o2');
+      insert into projects(id,organization_id,owner_id,url) values ('00000000-0000-0000-0000-000000000002','o2','u2','https://example.org');`);
+    // Owner login (postgres) bypasses RLS: sees both workspaces.
+    const all = await pg.query<{ n: number }>("select count(*)::int as n from projects");
+    expect(all.rows[0].n).toBe(2);
+    // The same statements src/db/context.ts runs: role switch + org context, transaction-local.
+    const scoped = await pg.transaction(async (tx) => {
+      await tx.query("select set_config('role','ai_news_app',true), set_config('app.user_id','u1',true), set_config('app.org_id','o1',true), set_config('app.role','user',true)");
+      const who = await tx.query<{ u: string }>("select current_user as u");
+      const rows = await tx.query<{ organization_id: string }>("select organization_id from projects");
+      return { user: who.rows[0].u, orgs: rows.rows.map((r) => r.organization_id) };
+    });
+    expect(scoped).toEqual({ user: "ai_news_app", orgs: ["o1"] });
+    const service = await pg.transaction(async (tx) => {
+      await tx.query("select set_config('role','ai_news_app',true), set_config('app.user_id','',true), set_config('app.org_id','',true), set_config('app.role','service',true)");
+      return (await tx.query<{ n: number }>("select count(*)::int as n from projects")).rows[0].n;
+    });
+    expect(service).toBe(2);
+    // Role switch is transaction-local: back to the owner afterwards.
+    const after = await pg.query<{ u: string }>("select current_user as u");
+    expect(after.rows[0].u).toBe("postgres");
+  });
+
   it("aggregate the admin overview in one call (migration 0010)", async () => {
     await pg.exec(`insert into usage_costs(provider, units, unit_type, cost_usd, organization_id) values
         ('anthropic', 1, 'tokens', 0.25, 'o1'), ('anthropic', 1, 'tokens', 0.50, 'o1'), ('pexels', 1, 'calls', 0.10, 'o1'),
@@ -126,7 +151,7 @@ describe("migrations", () => {
       update activity_events set created_at = now() - interval '40 days' where id = (select max(id) from activity_events);`);
     const { rows } = await pg.query<{ s: Record<string, unknown> }>("select admin_overview_stats(now() - interval '30 days') as s");
     expect(rows[0].s).toEqual({
-      users: 1, orgs: 1, projects: 1, renders: 0, events: 1, spendUsd: 0.85,
+      users: 2, orgs: 2, projects: 2, renders: 0, events: 1, spendUsd: 0.85,
       byProvider: [{ provider: "anthropic", usd: 0.75 }, { provider: "pexels", usd: 0.1 }],
     });
     const { rows: empty } = await pg.query<{ s: Record<string, unknown> }>("select admin_overview_stats(now() + interval '1 day') as s");

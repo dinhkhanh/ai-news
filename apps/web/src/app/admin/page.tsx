@@ -16,8 +16,9 @@ type Stats = {
 
 /** One round-trip: `admin_overview_stats()` (migration 0010) aggregates every tile server-side. */
 async function loadStats(): Promise<Stats> {
-  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-  const rows = await db.execute<{ stats: Stats }>(sql`select admin_overview_stats(${since}) as stats`);
+  // Raw `sql` params skip Drizzle's column mappers, so a Date must be sent as text and cast.
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const rows = await db.execute<{ stats: Stats }>(sql`select admin_overview_stats(${since}::timestamptz) as stats`);
   return rows[0].stats;
 }
 

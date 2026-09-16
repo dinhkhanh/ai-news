@@ -7,6 +7,14 @@ import { db, schema } from "./index";
 export type Tx = PgTransaction<PostgresJsQueryResultHKT, typeof schema, ExtractTablesWithRelations<typeof schema>>;
 
 /**
+ * Both helpers first switch the transaction to the `ai_news_app` role
+ * (`set_config('role', …, true)` = SET LOCAL ROLE). RLS policies are written for
+ * that role, so this keeps workspace isolation even if DATABASE_URL uses the
+ * `postgres` owner login, which would otherwise bypass RLS. Migration 0011 grants
+ * the membership; a login without it fails loudly here instead of leaking rows.
+ */
+
+/**
  * Run `fn` inside a transaction with the RLS context set:
  *   app.user_id  – acting user
  *   app.org_id   – active workspace
@@ -18,7 +26,7 @@ export async function withOrgContext<T>(
 ): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`select set_config('app.user_id', ${ctx.userId}, true), set_config('app.org_id', ${ctx.organizationId}, true), set_config('app.role', 'user', true)`,
+      sql`select set_config('role', 'ai_news_app', true), set_config('app.user_id', ${ctx.userId}, true), set_config('app.org_id', ${ctx.organizationId}, true), set_config('app.role', 'user', true)`,
     );
     return fn(tx as unknown as Tx);
   });
@@ -31,7 +39,7 @@ export async function withOrgContext<T>(
 export async function withServiceContext<T>(fn: (tx: Tx) => Promise<T>, actingUserId?: string): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`select set_config('app.user_id', ${actingUserId ?? ""}, true), set_config('app.org_id', '', true), set_config('app.role', 'service', true)`,
+      sql`select set_config('role', 'ai_news_app', true), set_config('app.user_id', ${actingUserId ?? ""}, true), set_config('app.org_id', '', true), set_config('app.role', 'service', true)`,
     );
     return fn(tx as unknown as Tx);
   });
