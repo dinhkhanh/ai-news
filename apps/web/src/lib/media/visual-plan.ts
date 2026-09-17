@@ -71,6 +71,32 @@ export function allocate(
 }
 
 /**
+ * `allocate` with a veto: `accept(index, sceneId)` is the face guard's verdict
+ * for that picture in that scene (`framing.ts`). A vetoed item leaves the pool
+ * for the whole video and the placement is redone, so another candidate – or
+ * a later tier – takes the shot. Converges because every round removes items.
+ */
+export function allocateChecked(
+  wanting: Array<{ id: string; want: number }>,
+  poolSize: number,
+  picks: Record<string, number[]>,
+  capacity: number[],
+  accept: (index: number, sceneId: string) => boolean,
+): { perScene: Record<string, Placement[]>; used: number; rejected: Array<{ index: number; sceneId: string }> } {
+  const cap = Array.from({ length: poolSize }, (_, i) => capacity[i] ?? 1);
+  const rejected: Array<{ index: number; sceneId: string }> = [];
+  for (;;) {
+    const a = allocate(wanting, poolSize, picks, cap);
+    const bad = Object.entries(a.perScene).flatMap(([sceneId, list]) => list.filter((p) => cap[p.index] > 0 && !accept(p.index, sceneId)).map((p) => ({ index: p.index, sceneId })));
+    if (bad.length === 0) return { ...a, rejected };
+    for (const b of bad) {
+      if (cap[b.index] > 0) rejected.push(b);
+      cap[b.index] = 0;
+    }
+  }
+}
+
+/**
  * Split a shared budget (e.g. the user's remaining AI-image quota) across
  * scenes in order, each scene taking at most what it still needs.
  */

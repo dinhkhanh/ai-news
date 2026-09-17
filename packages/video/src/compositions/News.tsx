@@ -25,9 +25,18 @@ const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Bra
     const zoomOut = variant % 2 === 1;
     const scale = visual.kenBurns ? interpolate(frame, [0, durationFrames], zoomOut ? [1.18, 1.06] : [1.04, 1.16], { extrapolateRight: "clamp" }) : 1;
     const tx = visual.kenBurns ? interpolate(frame, [0, durationFrames], [0, zoomOut ? 24 : -24], { extrapolateRight: "clamp" }) : 0;
+    // Face guard: anchor the cover crop on the faces and zoom around them. The box is `zoom` times the frame,
+    // shifted by the same share as `object-position`, which equals a cover fit of the enlarged picture.
+    const f = visual.focus ?? { x: 0.5, y: 0.5, zoom: 1, originX: 0.5, originY: 0.5 };
+    const pct = (n: number) => `${n * 100}%`;
     return (
       <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
-        <Img src={visual.src} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${scale}) translateX(${tx}px)` }} />
+        <AbsoluteFill style={{ transform: `scale(${scale}) translateX(${tx}px)`, transformOrigin: `${pct(f.originX)} ${pct(f.originY)}` }}>
+          <Img
+            src={visual.src}
+            style={{ position: "absolute", width: pct(f.zoom), height: pct(f.zoom), left: pct(-(f.zoom - 1) * f.x), top: pct(-(f.zoom - 1) * f.y), objectFit: "cover", objectPosition: `${pct(f.x)} ${pct(f.y)}` }}
+          />
+        </AbsoluteFill>
       </AbsoluteFill>
     );
   }

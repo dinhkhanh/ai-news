@@ -111,7 +111,7 @@ export const regenerateSceneFn = inngest.createFunction(
         throw new NonRetriableError(`Không tìm được clip mới cho ${scene.id}${res.errors[0] ? `: ${res.errors[0]}` : " (chưa có key Pexels/Pixabay?)"}${generated?.errors[0] ? ` · AI: ${generated.errors[0]}` : ""}`);
       }
       const clips = res.selected ? [res.selected, ...res.alternates].slice(0, keep).map((c) => ({ kind: "video" as const, key: c.key, clipDurationSec: c.durationSec ?? 5, trimStartSec: 0, credit: c.credit, assetId: c.assetId, thumbnailUrl: c.thumbnailUrl }))
-        : (generated?.assets ?? []).map((a) => ({ kind: "image" as const, key: a.key, kenBurns: true, credit: a.credit, assetId: a.assetId, thumbnailUrl: a.thumbnailUrl }));
+        : (generated?.assets ?? []).map((a) => ({ kind: "image" as const, key: a.key, kenBurns: true, focus: null, credit: a.credit, assetId: a.assetId, thumbnailUrl: a.thumbnailUrl }));
       // New visuals take the first shots; keep the scene's remaining stills so the ≤ 5 s cadence holds.
       const keepStills = [scene.visual, ...scene.shots].filter((v) => v.kind === "image").slice(0, Math.max(0, keep - clips.length));
       const all = [...clips, ...keepStills];

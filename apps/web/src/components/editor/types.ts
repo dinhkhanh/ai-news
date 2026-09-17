@@ -1,5 +1,6 @@
 import type { EditorDoc } from "@/lib/media/editor";
 import type { SceneVerdict } from "@/lib/llm/schemas";
+import type { FrameFaces } from "@/lib/media/framing";
 import type { PendingCapture } from "@/lib/media/visual-plan";
 
 /** A visual the editor can swap into a scene (every stock clip / article image fetched for the project). */
@@ -14,6 +15,8 @@ export type VisualOption = {
   sceneId: string | null;
   searchTerm: string | null;
   rankScore: number | null;
+  /** Picture size + faces from the face guard (`assets.meta.frame`); null = never analysed. */
+  frame: FrameFaces | null;
 };
 
 export type MusicOption = { id: string; title: string; key: string; moodTags: string[]; durationSec: number | null; licence: string };

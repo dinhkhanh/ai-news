@@ -9,6 +9,7 @@ import type { EditorProps, VisualOption } from "@/components/editor/types";
 import { Badge } from "@/components/ui/badge";
 import { docKeys } from "@/lib/media/editor";
 import { presignMap } from "@/lib/media/timeline-resolve";
+import { storedFrame } from "@/lib/media/framing";
 import type { PendingCapture } from "@/lib/media/visual-plan";
 import { busyStep } from "@/lib/project-state";
 import { loadProjectStatus } from "@/lib/project-status";
@@ -87,6 +88,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
       sceneId: a.sceneId,
       searchTerm: a.searchTerm,
       rankScore: a.rankScore ? Number(a.rankScore) : null,
+      frame: storedFrame(a.meta),
     }));
   // YouTube picks the build could not download, minus the ones already recorded from a browser.
   const captured = new Set(assets.filter((a) => a.provider === "yt-capture").map((a) => (a.providerId ?? "").split("@")[0]));

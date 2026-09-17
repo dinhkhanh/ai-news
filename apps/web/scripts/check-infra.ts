@@ -155,6 +155,23 @@ const checks: Check[] = [
     },
   },
   {
+    name: "Google Cloud Vision (face guard: FACE_DETECTION on stills)",
+    run: async () => {
+      const sa = JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS_JSON ?? "{}") as { client_email?: string; project_id?: string; private_key?: string };
+      const auth = new GoogleAuth({ credentials: sa, scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+      const token = await auth.getAccessToken();
+      // A 1×1 PNG: one billable unit ($0.0015, inside the 1 000 free units / month). 403 = the Cloud Vision API is not enabled on the project.
+      const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+      const res = await fetch("https://vision.googleapis.com/v1/images:annotate", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ requests: [{ image: { content: png }, features: [{ type: "FACE_DETECTION", maxResults: 1 }] }] }),
+      });
+      if (!res.ok) throw new Error(`images:annotate HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
+      return `images:annotate reachable in project ${sa.project_id} (turn on the flag face_guard)`;
+    },
+  },
+  {
     name: "Stock providers (Pexels / Pixabay keys in Vault)",
     run: async () => {
       const sql = postgres(env.DATABASE_URL!, { prepare: false, max: 1 });

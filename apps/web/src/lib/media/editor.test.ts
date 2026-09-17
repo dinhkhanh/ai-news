@@ -17,7 +17,7 @@ const doc: EditorDoc = editorDocSchema.parse({
   brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {} }),
   scenes: [
     { id: "s1", kind: "hook", onScreenText: "Metro kéo dài", voiceover: "Sáng nay thành phố công bố kế hoạch.", brollTerms: ["metro"], durationSec: 3, voice: { key: "media/o/p/vo/b1-s1.wav", durationMs: 3000, words: words("Sáng nay thành phố công bố kế hoạch.", 3000) }, visual: { kind: "video", key: "media/o/p/broll/b1-s1.mp4", clipDurationSec: 8, trimStartSec: 0, credit: "Video: Pexels", assetId: null, thumbnailUrl: null }, holdMs: 0, captions: null },
-    { id: "s2", kind: "body", onScreenText: "Khởi công 2027", voiceover: "Tuyến mới dài mười hai ki lô mét.", brollTerms: [], durationSec: 2.5, voice: { key: "media/o/p/vo/b1-s2.wav", durationMs: 2500, words: words("Tuyến mới dài mười hai ki lô mét.", 2500) }, visual: { kind: "image", key: "media/o/p/aroll/b1-0.jpg", kenBurns: true, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null }, holdMs: 0, captions: null },
+    { id: "s2", kind: "body", onScreenText: "Khởi công 2027", voiceover: "Tuyến mới dài mười hai ki lô mét.", brollTerms: [], durationSec: 2.5, voice: { key: "media/o/p/vo/b1-s2.wav", durationMs: 2500, words: words("Tuyến mới dài mười hai ki lô mét.", 2500) }, visual: { kind: "image", key: "media/o/p/aroll/b1-0.jpg", kenBurns: true, focus: null, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null }, holdMs: 0, captions: null },
     { id: "s3", kind: "cta", onScreenText: "", voiceover: "Theo dõi để cập nhật.", brollTerms: [], durationSec: 1.5, voice: { key: "media/o/p/vo/b1-s3.wav", durationMs: 1500, words: words("Theo dõi để cập nhật.", 1500) }, visual: { kind: "solid" }, holdMs: 0, captions: null },
   ],
   music: { key: "media/o/p/music/b1.mp3", gainDb: -12, attribution: "Nhạc: Mubert", title: "Mubert abc", source: "mubert", licence: "Mubert" },
@@ -48,7 +48,7 @@ describe("buildFromDoc", () => {
 });
 
 describe("shots", () => {
-  const img = (n: number): EditorVisual => ({ kind: "image", key: `media/o/p/aroll/b1-${n}.jpg`, kenBurns: true, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null });
+  const img = (n: number): EditorVisual => ({ kind: "image", key: `media/o/p/aroll/b1-${n}.jpg`, kenBurns: true, focus: null, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null });
   it("needs one shot per 5 s", () => {
     expect(shotsNeeded(3000)).toBe(1);
     expect(shotsNeeded(5000)).toBe(1);
@@ -163,7 +163,7 @@ describe("describeChanges + docKeys", () => {
   });
 
 describe("replaceTailShots", () => {
-  const img = (key: string): EditorVisual => ({ kind: "image", key, kenBurns: true, credit: null, assetId: null, thumbnailUrl: null });
+  const img = (key: string): EditorVisual => ({ kind: "image", key, kenBurns: true, focus: null, credit: null, assetId: null, thumbnailUrl: null });
   const clip = (n: number): EditorVisual => ({ kind: "video", key: "cap.mp4", clipDurationSec: 5, trimStartSec: n * 5, credit: "Video: x / YouTube", assetId: "a", thumbnailUrl: null });
   const scene = { ...doc.scenes[0], visual: img("article.jpg"), shots: [img("stock1.jpg"), img("ai1.png")] };
 

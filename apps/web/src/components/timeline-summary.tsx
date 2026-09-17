@@ -11,6 +11,7 @@ export type BuildJson = {
   /** Visual priority (article → related = web video → stock → AI) and what each tier gave per scene. */
   visuals?: { order: string[]; need: Record<string, number>; perScene: Record<string, TierCounts> };
   ai?: { enabled: boolean; reason: string | null; assets: unknown[]; errors: string[] };
+  framing?: { enabled: boolean; reason: string | null; checked: number; withFaces: number; reframed: number; rejected: unknown[]; forced: unknown[]; errors: string[] };
   webVideo?: { enabled: boolean; reason: string | null; searched: number; assets: unknown[]; errors: string[] };
   music?: { source: string; title: string; licence: string } | null;
   musicError?: string | null;
@@ -44,6 +45,12 @@ export function TimelineSummary({ timeline, build, imageUrls, mixUrl }: { timeli
         {build.stockEnabled === false ? <Badge variant="outline">stock tắt / chưa có key Pexels·Pixabay</Badge> : null}
         {build.webVideo && !build.webVideo.enabled && build.webVideo.reason !== "đủ ảnh" ? <Badge variant="outline">video web: {build.webVideo.reason}</Badge> : null}
         {build.webVideo?.enabled ? <span>· video web: {build.webVideo.assets.length} clip / {build.webVideo.searched} tìm thấy</span> : null}
+        {build.framing?.enabled ? (
+          <span>
+            · khuôn mặt: {build.framing.withFaces}/{build.framing.checked} ảnh có mặt, căn lại {build.framing.reframed}, loại {build.framing.rejected.length}
+          </span>
+        ) : null}
+        {build.framing?.forced.length ? <Badge variant="destructive">{build.framing.forced.length} ảnh không đạt kiểm tra khuôn mặt vẫn phải dùng</Badge> : null}
         {build.ai?.reason ? <Badge variant="outline">AI: {build.ai.reason}</Badge> : null}
         {build.mix?.integratedLufs != null ? <span>· mix {build.mix.integratedLufs.toFixed(1)} LUFS</span> : null}
       </div>

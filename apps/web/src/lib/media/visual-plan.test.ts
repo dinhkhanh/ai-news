@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocate, orderByTier, shortfall, splitBudget, TIER_RANK, total, videoSegments, VISUAL_TIERS, youtubeId } from "./visual-plan";
+import { allocate, allocateChecked, orderByTier, shortfall, splitBudget, TIER_RANK, total, videoSegments, VISUAL_TIERS, youtubeId } from "./visual-plan";
 
 describe("visual sourcing priority", () => {
   it("is article → (related = web video) → stock → AI", () => {
@@ -95,5 +95,24 @@ describe("youtubeId", () => {
     expect(youtubeId("https://www.tiktok.com/@x/video/7")).toBeNull();
     expect(youtubeId("https://www.youtube.com/watch?v=short")).toBeNull();
     expect(youtubeId("not a url")).toBeNull();
+  });
+});
+
+describe("allocateChecked", () => {
+  it("drops a vetoed picture for the whole video and lets the next candidate take the shot", () => {
+    const r = allocateChecked([{ id: "s1", want: 1 }, { id: "s2", want: 1 }], 3, { s1: [0], s2: [1] }, [], (index) => index !== 0);
+    expect(r.perScene).toEqual({ s1: [{ index: 2, segment: 0 }], s2: [{ index: 1, segment: 0 }] });
+    expect(r.rejected).toEqual([{ index: 0, sceneId: "s1" }]);
+  });
+
+  it("checks replacements too and leaves the shot open when nothing passes", () => {
+    const r = allocateChecked([{ id: "s1", want: 2 }], 3, {}, [], (index) => index === 1);
+    expect(r.perScene.s1).toEqual([{ index: 1, segment: 0 }]);
+    expect(r.rejected.map((x) => x.index).sort()).toEqual([0, 2]);
+  });
+
+  it("equals allocate when everything is accepted, capacities included", () => {
+    const wanting = [{ id: "s1", want: 3 }, { id: "s2", want: 1 }];
+    expect(allocateChecked(wanting, 2, { s1: [1] }, [1, 2], () => true)).toEqual({ ...allocate(wanting, 2, { s1: [1] }, [1, 2]), rejected: [] });
   });
 });

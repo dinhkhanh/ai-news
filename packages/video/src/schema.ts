@@ -55,6 +55,23 @@ export type Brand = z.infer<typeof brandSchema>;
  * before rendering (see apps/web/src/lib/media/timeline.ts). The composition
  * only ever sees URLs.
  */
+/**
+ * Where a cover-fitted still is anchored, from the face guard
+ * (apps/web/src/lib/media/framing.ts): `x` / `y` are the share of the overflow
+ * hidden on the left / top (CSS `object-position`, 0–1), `zoom` enlarges the
+ * cover fit so a landscape picture can also be moved vertically, and
+ * `originX` / `originY` are where the faces end up in the frame (0–1) – the
+ * Ken Burns move scales around that point so it never pushes a face out.
+ */
+export const focusSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  zoom: z.number().min(1).max(1.5).default(1),
+  originX: z.number().min(0).max(1).default(0.5),
+  originY: z.number().min(0).max(1).default(0.5),
+});
+export type Focus = z.infer<typeof focusSchema>;
+
 export const visualSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("video"),
@@ -70,6 +87,8 @@ export const visualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("image"),
     src: z.string(),
     kenBurns: z.boolean().default(true),
+    /** Null = centred cover fit (no faces found, or never checked). */
+    focus: focusSchema.nullable().default(null),
   }),
   z.object({ kind: z.literal("solid") }),
 ]);

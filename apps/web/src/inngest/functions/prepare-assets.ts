@@ -12,6 +12,8 @@ import type { StoredScript } from "@/lib/llm/schemas";
 import { loadBrand } from "@/lib/media/brand";
 import { fetchSceneBroll, type ChosenAsset, type SceneStock } from "@/lib/media/broll";
 import { audioSignature, buildFromDoc, editorDocSchema, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
+import { frameStill, overlayZones, type FrameFaces, type Framing } from "@/lib/media/framing";
 import { aiImagesAvailable, generateSceneImages } from "@/lib/media/generate";
 import { pickMusic } from "@/lib/media/music";
 import { assignImages } from "@/lib/media/rank";
@@ -20,7 +22,7 @@ import { mixDocAudio } from "@/lib/media/remix";
 import { downloadToR2, stockProvidersAvailable } from "@/lib/media/stock";
 import { sceneTimings, shotsNeeded } from "@/lib/media/timeline";
 import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice } from "@/lib/media/tts";
-import { allocate, orderByTier, SHOT_SEC, shortfall, splitBudget, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type VisualTier } from "@/lib/media/visual-plan";
+import { allocateChecked, orderByTier, SHOT_SEC, shortfall, splitBudget, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type VisualTier } from "@/lib/media/visual-plan";
 import { findWebVideos, storeWebVideo, webVideoEnabled, webVideoHint, type WebVideoCandidate } from "@/lib/media/webvideo";
 import { deleteObject, r2Key } from "@/lib/r2";
 
@@ -45,6 +47,12 @@ const MAX_AI_PER_BUILD = 8;
  * outlets covering the same story together with same-story footage from video
  * sites (yt-dlp, flag) → free stock clips (Pexels / Pixabay, Haiku-ranked) →
  * AI-generated stills (Gemini on Vertex, flag + quota).
+ *
+ * Stills from the article and other outlets pass the face guard (`framing.ts`,
+ * flag `face_guard`) before they are placed: faces not cropped by the 9:16
+ * frame, not under text overlays or platform UI, centred on the upper-third
+ * line. A still that fails in its scene leaves the pool, so another candidate
+ * or a later tier takes the shot; it only comes back when nothing else could.
  */
 export const prepareAssetsFn = inngest.createFunction(
   {
@@ -180,6 +188,48 @@ export const prepareAssetsFn = inngest.createFunction(
     ];
     const wanting = input.scenes.map((sc) => ({ id: sc.id, voiceover: sc.voiceover, onScreenText: sc.onScreenText, want: need[sc.id] }));
 
+    /* ---- face guard, part 1: find the faces in every still of the pool (Cloud Vision, once per picture) ---- */
+    const faceScan = await step.run("face-guard", async () => {
+      const stills = pool.flatMap((it, index) => (it.asset?.kind === "image" ? [{ index, asset: it.asset }] : []));
+      const a = await faceGuardAvailable();
+      if (!a.enabled || stills.length === 0) return { enabled: a.enabled, reason: a.reason, frames: {} as Record<string, FrameFaces>, errors: [] as string[], costUsd: 0 };
+      await reportProgress(pctx, { label: `Kiểm tra khuôn mặt trong ${stills.length} ảnh (không cắt, không bị chữ che, đúng đường 1/3 trên)`, pct: 40 });
+      const frames: Record<string, FrameFaces> = {};
+      const errors: string[] = [];
+      let costUsd = 0;
+      for (let i = 0; i < stills.length; i += 4) {
+        const batch = await Promise.all(stills.slice(i, i + 4).map(async (s) => ({ index: s.index, r: await analyseAsset(s.asset, pctx) })));
+        for (const { index, r } of batch) {
+          if (r.frame) frames[index] = r.frame;
+          if (r.error) errors.push(r.error);
+          costUsd += r.costUsd;
+        }
+      }
+      return { enabled: true, reason: null as string | null, frames, errors, costUsd };
+    });
+    /* ---- face guard, part 2 (pure): the crop of pool item `index` under the overlays of scene `sc` ---- */
+    const framings = new Map<string, Framing>();
+    const framingFor = (index: number, sceneId: string): Framing => {
+      const k = `${index}:${sceneId}`;
+      let f = framings.get(k);
+      if (!f) {
+        const sc = input.scenes.find((s) => s.id === sceneId);
+        const zones = overlayZones({
+          kind: sc?.kind ?? "body",
+          headline: sc?.onScreenText ?? "",
+          captionPosition: brand.brand.caption.position,
+          captionFontSize: brand.brand.caption.fontSize,
+          hasCaptions: Boolean(sc?.voiceover.trim()),
+          showSource: brand.brand.showSource && Boolean(input.source.name),
+          hasLogo: Boolean(brand.brand.logoSrc),
+        });
+        f = frameStill(faceScan.frames[index] ?? null, zones);
+        framings.set(k, f);
+      }
+      return f;
+    };
+    const faceOk = (index: number, sceneId: string) => framingFor(index, sceneId).ok;
+
     /* ---- which candidate goes to which scene: Haiku matches subjects by thumbnail; every candidate at most once (videos once per segment) ---- */
     const assignment = await step.run("assign-images", async () => {
       await reportProgress(pctx, { label: `Xếp ${pool.length} hình/video vào cảnh (Haiku)`, pct: 44 });
@@ -200,7 +250,7 @@ export const prepareAssetsFn = inngest.createFunction(
     });
 
     /* ---- download only the web videos the plan uses, and only the section their shots need ---- */
-    const provisional = allocate(wanting, pool.length, assignment.picks, pool.map((it) => it.capacity));
+    const provisional = allocateChecked(wanting, pool.length, assignment.picks, pool.map((it) => it.capacity), faceOk);
     const videoUse = new Map<number, number>();
     for (const list of Object.values(provisional.perScene)) for (const p of list) if (pool[p.index].video) videoUse.set(p.index, Math.max(videoUse.get(p.index) ?? 0, p.segment + 1));
     const downloads = await Promise.all(
@@ -223,7 +273,7 @@ export const prepareAssetsFn = inngest.createFunction(
       if (!d.asset) pool[d.index].capacity = 0;
     }
     // Final placement: same picks, but a video whose download failed is out of the pool.
-    const placed = allocate(wanting, pool.length, assignment.picks, pool.map((it) => (it.video && !it.asset ? 0 : it.capacity)));
+    const placed = allocateChecked(wanting, pool.length, assignment.picks, pool.map((it) => (it.video && !it.asset ? 0 : it.capacity)), faceOk);
     const placedCount: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, placed.perScene[sc.id]?.length ?? 0]));
     const afterStills = shortfall(need, placedCount);
     const webVideoAssets = downloads.flatMap((d) => (d.asset ? [d.asset] : []));
@@ -303,6 +353,16 @@ export const prepareAssetsFn = inngest.createFunction(
       for (const [id, r] of results) ai[id] = r;
     }
 
+    /* ---- stills the face guard turned down come back, last in their scene, only where no tier could fill the shot ---- */
+    const forced: Record<string, number[]> = {};
+    {
+      const spare = placed.rejected.map((r) => r.index);
+      for (const sc of input.scenes) {
+        const have = placedCount[sc.id] + Math.min(stockCount[sc.id], afterStills[sc.id]) + (ai[sc.id]?.assets.length ?? 0);
+        forced[sc.id] = spare.splice(0, Math.max(0, need[sc.id] - have));
+      }
+    }
+
     /* ---- music ---- */
     const preTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })) });
     const music = await step.run("music", async () => {
@@ -314,7 +374,7 @@ export const prepareAssetsFn = inngest.createFunction(
     const doc: EditorDoc = await step.run("compose-doc", async () => {
       await reportProgress(pctx, { label: "Ghép cảnh, chia shot ≤ 5 giây", pct: 82 });
       const clip = (st: ChosenAsset): EditorScene["visual"] => ({ kind: "video", key: st.key, clipDurationSec: st.durationSec ?? 5, trimStartSec: 0, credit: st.credit, assetId: st.assetId, thumbnailUrl: st.thumbnailUrl });
-      const still = (im: ChosenAsset): EditorScene["visual"] => ({ kind: "image", key: im.key, kenBurns: true, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl });
+      const still = (im: ChosenAsset, f?: Framing): EditorScene["visual"] => ({ kind: "image", key: im.key, kenBurns: f?.kenBurns ?? true, focus: f?.focus ?? null, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl });
       const scenes: EditorScene[] = input.scenes.map((sc) => {
         const v = voices.find((x) => x.sceneId === sc.id) ?? null;
         const s = stock[sc.id];
@@ -322,13 +382,14 @@ export const prepareAssetsFn = inngest.createFunction(
         const shots: Array<{ tier: VisualTier; visual: EditorScene["visual"] }> = [
           ...(placed.perScene[sc.id] ?? []).flatMap((p) => {
             const it = pool[p.index];
-            return it.asset ? [{ tier: it.tier, visual: it.video ? segment(it.asset, p.segment) : still(it.asset) }] : [];
+            return it.asset ? [{ tier: it.tier, visual: it.video ? segment(it.asset, p.segment) : still(it.asset, framingFor(p.index, sc.id)) }] : [];
           }),
           ...(s ? [...(s.selected ? [s.selected] : []), ...s.alternates].slice(0, afterStills[sc.id]).map((c) => ({ tier: "stock" as VisualTier, visual: clip(c) })) : []),
           ...(ai[sc.id]?.assets ?? []).map((a) => ({ tier: "ai" as VisualTier, visual: still(a) })),
         ];
         // The most authentic picture opens the scene; every tier keeps its own order.
-        const all = orderByTier(shots).map((x) => x.visual).slice(0, need[sc.id]);
+        const lastResort = (forced[sc.id] ?? []).flatMap((index) => (pool[index].asset ? [still(pool[index].asset!, framingFor(index, sc.id))] : []));
+        const all = [...orderByTier(shots).map((x) => x.visual), ...lastResort].slice(0, need[sc.id]);
         const visual: EditorScene["visual"] = all[0] ?? { kind: "solid" };
         return {
           id: sc.id,
@@ -390,6 +451,18 @@ export const prepareAssetsFn = inngest.createFunction(
         related: { assets: related.assets.map((a) => ({ assetId: a.assetId, key: a.key })), pages: related.pages, found: related.found, shortfall: related.shortfall, errors: related.errors },
         webVideo: { enabled: webSearch.enabled, reason: webSearch.reason, searched: webSearch.searched, candidates: webSearch.candidates.map((c) => ({ url: c.url, title: c.title, site: c.site, durationSec: c.durationSec })), assets: webVideoAssets.map((a) => ({ assetId: a.assetId, key: a.key, durationSec: a.durationSec })), pending: pendingCaptures, errors: [...webSearch.errors, ...downloads.flatMap((d) => (d.error ? [d.error] : []))] },
         ai: { enabled: aiPlan.enabled, reason: aiPlan.reason, assets: aiAssets.map((a) => ({ assetId: a.assetId, key: a.key })), errors: Object.values(ai).flatMap((r) => r.errors), costUsd: aiCostUsd },
+        /** Face guard: what was scanned, which stills were turned down for which scene and why, and which had to be used anyway. */
+        framing: {
+          enabled: faceScan.enabled,
+          reason: faceScan.reason,
+          checked: Object.keys(faceScan.frames).length,
+          withFaces: Object.values(faceScan.frames).filter((f) => f.faces.length > 0).length,
+          reframed: doc.scenes.reduce((a, s) => a + [s.visual, ...s.shots].filter((v) => v.kind === "image" && v.focus).length, 0),
+          rejected: placed.rejected.map((r) => ({ assetId: pool[r.index].asset?.assetId ?? null, key: pool[r.index].asset?.key ?? null, sceneId: r.sceneId, issues: framingFor(r.index, r.sceneId).issues })),
+          forced: Object.entries(forced).flatMap(([sceneId, list]) => list.map((index) => ({ assetId: pool[index].asset?.assetId ?? null, sceneId, issues: framingFor(index, sceneId).issues }))),
+          errors: faceScan.errors,
+          costUsd: faceScan.costUsd,
+        },
         shots: { need, assign: assignment.method, unusedCandidates: pool.length - placed.used, assignCostUsd: assignment.costUsd },
         music: music.pick ? { source: music.pick.source, title: music.pick.title, licence: music.pick.licence, key: music.pick.key } : null,
         musicError: music.error,
@@ -412,10 +485,10 @@ export const prepareAssetsFn = inngest.createFunction(
           .where(eq(schema.projects.id, projectId));
         return t;
       });
-      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + aiCostUsd + mix.costUsd;
+      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + faceScan.costUsd + aiCostUsd + mix.costUsd;
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: "timeline.built",
-        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, need[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, aiImages: aiAssets.length, aiSkipped: aiPlan.reason, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
+        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, need[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
       });
       return { ...row, durationSec };
     });

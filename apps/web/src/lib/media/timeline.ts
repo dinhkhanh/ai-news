@@ -4,14 +4,14 @@
  * R2 keys in every `src`. Unit-testable; URL resolution happens in
  * timeline-resolve.ts right before a render.
  */
-import { MAX_SHOT_SEC, timelineSchema, type Brand, type Shot, type Timeline, type Visual } from "@ai-news/video/schema";
+import { MAX_SHOT_SEC, timelineSchema, type Brand, type Focus, type Shot, type Timeline, type Visual } from "@ai-news/video/schema";
 import type { TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
 
 export type SceneVoiceInput = { key: string; durationMs: number; words: TimedWord[] };
 export type SceneVisualInput =
   | { kind: "video"; key: string; clipDurationSec: number; trimStartSec?: number; credit: string | null }
-  | { kind: "image"; key: string; kenBurns?: boolean; credit: string | null }
+  | { kind: "image"; key: string; kenBurns?: boolean; focus?: Focus | null; credit: string | null }
   | null;
 
 /** Shots a scene of this length needs so no picture stays longer than MAX_SHOT_SEC. */
@@ -59,7 +59,7 @@ export const TAIL_MS = 700;
 
 function toVisual(v: NonNullable<SceneVisualInput>): Visual {
   if (v.kind === "video") return { kind: "video", src: v.key, trimStartSec: Math.max(0, v.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, v.clipDurationSec), fit: "cover", muted: true };
-  return { kind: "image", src: v.key, kenBurns: v.kenBurns ?? true };
+  return { kind: "image", src: v.key, kenBurns: v.kenBurns ?? true, focus: v.focus ?? null };
 }
 
 /** Split `durationFrames` equally between the shots (a solid fill when the scene has none). */

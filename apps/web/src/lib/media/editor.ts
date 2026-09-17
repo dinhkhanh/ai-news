@@ -7,7 +7,7 @@
  * before phase 4 are reconstructed from their JSON (`docFromTimeline`).
  * Pure module (client + server + tests): R2 keys only, never URLs.
  */
-import { brandSchema, type Timeline } from "@ai-news/video/schema";
+import { brandSchema, focusSchema, type Timeline } from "@ai-news/video/schema";
 import { z } from "zod";
 import { proportionalTimings, type TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
@@ -30,6 +30,8 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("image"),
     key: z.string().min(1),
     kenBurns: z.boolean().default(true),
+    /** Crop anchor from the face guard (`framing.ts`); null = centred. */
+    focus: focusSchema.nullable().default(null),
     credit: z.string().nullable().default(null),
     assetId: z.string().nullable().default(null),
     thumbnailUrl: z.string().nullable().default(null),
@@ -139,7 +141,7 @@ export function setCaptionText(chunk: CaptionChunk, text: string): CaptionChunk 
 
 function toVisualInput(v: EditorVisual): SceneVisualInput {
   if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit };
-  if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, credit: v.credit };
+  if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, focus: v.focus, credit: v.credit };
   return null;
 }
 
@@ -250,7 +252,7 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
     const st = b.stock?.[sc.id]?.selected ?? null;
     const fromTimeline = (v: Timeline["scenes"][number]["visual"], credit: string | null): EditorVisual => {
       if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null };
-      if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, credit, assetId: null, thumbnailUrl: null };
+      if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, focus: v.focus ?? null, credit, assetId: null, thumbnailUrl: null };
       return { kind: "solid" };
     };
     const visual = fromTimeline(sc.visual, sc.credit);

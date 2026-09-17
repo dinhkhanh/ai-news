@@ -1,0 +1,137 @@
+import { describe, expect, it } from "vitest";
+import { frameStill, overlayZones, significantFaces, storedFrame, TARGET, TOLERANCE, type FaceBox, type FrameFaces } from "./framing";
+
+const face = (x: number, y: number, w: number, h: number, confidence = 0.95): FaceBox => ({ x, y, w, h, confidence });
+const landscape = (faces: FaceBox[]): FrameFaces => ({ width: 1200, height: 800, faces });
+const portrait = (faces: FaceBox[]): FrameFaces => ({ width: 1080, height: 1920, faces });
+const body = (headline = "Giá xăng tăng mạnh") => overlayZones({ kind: "body", headline, captionPosition: "bottom", captionFontSize: 64, hasCaptions: true, showSource: true, hasLogo: false });
+
+/** Where the faces' box ends up in the 1080×1920 frame for a focus (same maths as News.tsx). */
+function placed(frame: FrameFaces, f: FaceBox, focus: { x: number; y: number; zoom: number }) {
+  const s = Math.max(1080 / frame.width, 1920 / frame.height) * focus.zoom;
+  const left = -focus.x * (frame.width * s - 1080);
+  const top = -focus.y * (frame.height * s - 1920);
+  return { x0: left + f.x * frame.width * s, y0: top + f.y * frame.height * s, x1: left + (f.x + f.w) * frame.width * s, y1: top + (f.y + f.h) * frame.height * s };
+}
+
+describe("overlayZones", () => {
+  it("mirrors the News layout: headline under the top safe zone, captions above the bottom one", () => {
+    const z = Object.fromEntries(body().map((r) => [r.name, r]));
+    expect(z.headline.y0).toBe(244);
+    expect(z.headline.y1).toBeLessThan(400); // one line
+    expect(z.captions.y1).toBe(1470);
+    expect(z.captions.y0).toBeGreaterThan(1920 * 0.6);
+    expect(z.platform_bottom.y0).toBe(1500);
+    expect(z.outro).toBeUndefined();
+  });
+
+  it("grows the headline with its text and is bigger on the hook", () => {
+    const long = "Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa trên cả nước";
+    const b = body(long).find((r) => r.name === "headline")!;
+    const h = overlayZones({ kind: "hook", headline: long, captionPosition: "bottom", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: false }).find((r) => r.name === "headline")!;
+    expect(b.y1).toBeGreaterThan(body().find((r) => r.name === "headline")!.y1);
+    expect(h.y1).toBeGreaterThan(b.y1);
+  });
+
+  it("has no headline or caption zone without text, and puts middle captions mid-frame", () => {
+    const none = overlayZones({ kind: "body", headline: " ", captionPosition: "bottom", captionFontSize: 64, hasCaptions: false, showSource: false, hasLogo: false });
+    expect(none.map((r) => r.name)).toEqual(["platform_bottom", "platform_right"]);
+    const mid = overlayZones({ kind: "cta", headline: "", captionPosition: "middle", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: true });
+    expect(mid.find((r) => r.name === "captions")!.y0).toBe(900);
+    expect(mid.map((r) => r.name)).toContain("outro");
+    expect(mid.map((r) => r.name)).toContain("logo");
+  });
+});
+
+describe("significantFaces", () => {
+  it("drops low-confidence and background faces, and whole crowds", () => {
+    expect(significantFaces(landscape([face(0.4, 0.2, 0.2, 0.3), face(0.8, 0.3, 0.04, 0.06), face(0.1, 0.2, 0.2, 0.3, 0.2)]))).toHaveLength(1);
+    expect(significantFaces(landscape([face(0.1, 0.4, 0.02, 0.03), face(0.5, 0.4, 0.02, 0.03)]))).toHaveLength(0);
+  });
+});
+
+describe("frameStill", () => {
+  it("leaves pictures without faces (or never analysed) centred", () => {
+    expect(frameStill(null, body())).toMatchObject({ ok: true, focus: null, faces: 0, kenBurns: true });
+    expect(frameStill(landscape([]), body())).toMatchObject({ ok: true, focus: null });
+  });
+
+  it("pans a landscape picture so an off-centre face is centred instead of cropped", () => {
+    // Face at the right edge: a centred 9:16 crop (the middle 37.5 %) would cut it off entirely.
+    const f = face(0.78, 0.25, 0.1, 0.18);
+    const frame = landscape([f]);
+    const r = frameStill(frame, body());
+    expect(r.ok).toBe(true);
+    const b = placed(frame, f, r.focus!);
+    expect(b.x0).toBeGreaterThanOrEqual(0);
+    expect(b.x1).toBeLessThanOrEqual(1080);
+    expect(Math.abs((b.x0 + b.x1) / 2 - TARGET.x)).toBeLessThanOrEqual(TOLERANCE.x);
+    expect(Math.abs((b.y0 + b.y1) / 2 - TARGET.y)).toBeLessThanOrEqual(TOLERANCE.y);
+    expect(r.focus!.originX).toBeCloseTo((b.x0 + b.x1) / 2 / 1080, 2);
+  });
+
+  it("zooms in only as much as needed to lift a low face to the upper-third line", () => {
+    const high = frameStill(landscape([face(0.45, 0.24, 0.1, 0.18)]), body());
+    expect(high.focus!.zoom).toBe(1);
+    const f = face(0.45, 0.42, 0.1, 0.16);
+    const frame = landscape([f]);
+    const low = frameStill(frame, body());
+    expect(low.ok).toBe(true);
+    expect(low.focus!.zoom).toBeGreaterThan(1);
+    expect(low.focus!.zoom).toBeLessThanOrEqual(1.3);
+    const b = placed(frame, f, low.focus!);
+    expect((b.y0 + b.y1) / 2).toBeLessThanOrEqual(TARGET.y + TOLERANCE.y);
+    // A face in the lower part of a landscape picture is out of reach even at the largest zoom.
+    expect(frameStill(landscape([face(0.45, 0.55, 0.1, 0.16)]), body())).toMatchObject({ ok: false, issues: ["face_off_centre"] });
+  });
+
+  it("keeps faces clear of the headline and the captions", () => {
+    const zones = body("Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa trên cả nước");
+    const headline = zones.find((z) => z.name === "headline")!;
+    const captions = zones.find((z) => z.name === "captions")!;
+    const f = face(0.4, 0.3, 0.1, 0.14);
+    const frame = landscape([f]);
+    const r = frameStill(frame, zones);
+    expect(r.ok).toBe(true);
+    const b = placed(frame, f, r.focus!);
+    expect(b.y0).toBeGreaterThanOrEqual(headline.y1);
+    expect(b.y1).toBeLessThanOrEqual(captions.y0);
+    // The same headline over a big face right below the top edge: nothing can move it out.
+    expect(frameStill(landscape([face(0.4, 0.2, 0.14, 0.22)]), zones)).toMatchObject({ ok: false, issues: ["face_under_text"] });
+  });
+
+  it("fails a picture whose faces are wider apart than the vertical frame", () => {
+    const r = frameStill(landscape([face(0.08, 0.25, 0.12, 0.2), face(0.8, 0.25, 0.12, 0.2)]), body());
+    expect(r.ok).toBe(false);
+    expect(r.issues).toContain("face_cropped");
+    expect(r.focus).not.toBeNull(); // best effort for a last-resort use
+  });
+
+  it("fails a face that cannot leave the caption area", () => {
+    const r = frameStill(portrait([face(0.35, 0.7, 0.3, 0.17)]), body());
+    expect(r.ok).toBe(false);
+    expect(r.issues).toEqual(expect.arrayContaining(["face_under_text", "face_off_centre"]));
+  });
+
+  it("turns Ken Burns off when only the slow zoom would push a big face into the overlays", () => {
+    const zones = body();
+    const headline = zones.find((z) => z.name === "headline")!;
+    const captions = zones.find((z) => z.name === "captions")!;
+    const band = captions.y0 - headline.y1;
+    // With head-room the face fills ~88 % of the clear band: fits at rest (× 1.06 punch-in), not at × 1.25.
+    const h = (band * 0.88) / 1.24 / 1920;
+    const f = face(0.3, (headline.y1 + band / 2) / 1920 - h / 2, 0.4, h);
+    const r = frameStill(portrait([f]), zones);
+    expect(r.ok).toBe(true);
+    expect(r.kenBurns).toBe(false);
+  });
+});
+
+describe("storedFrame", () => {
+  it("reads assets.meta.frame and ignores anything else", () => {
+    expect(storedFrame({ frame: { width: 10, height: 20, faces: [] } })).toEqual({ width: 10, height: 20, faces: [] });
+    expect(storedFrame({ frame: { width: "10" } })).toBeNull();
+    expect(storedFrame({})).toBeNull();
+    expect(storedFrame(null)).toBeNull();
+  });
+});

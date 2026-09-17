@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, type EditorScene, type EditorVisual } from "@/lib/media/editor";
+import { FRAMING_ISSUE_LABEL, frameStill, overlayZones } from "@/lib/media/framing";
 import { cn } from "@/lib/utils";
 import type { VisualOption } from "./types";
 
@@ -18,6 +19,8 @@ type Props = {
   index: number;
   total: number;
   options: VisualOption[];
+  /** Brand overlays the face guard has to keep faces clear of. */
+  overlay: { captionPosition: "bottom" | "middle"; captionFontSize: number; showSource: boolean; hasLogo: boolean };
   urls: Record<string, string>;
   /** R2 key → where else in the video it is used ("s3", "s3 #2"); a picture should appear once. */
   usedKeys: Record<string, string[]>;
@@ -61,7 +64,7 @@ function probeMedia(src: string, kind: "image" | "video"): Promise<{ width: numb
 const fromOption = (o: VisualOption, durationSec?: number | null): EditorVisual =>
   o.kind === "video"
     ? { kind: "video", key: o.key, clipDurationSec: durationSec ?? o.durationSec ?? 5, trimStartSec: 0, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl }
-    : { kind: "image", key: o.key, kenBurns: true, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl };
+    : { kind: "image", key: o.key, kenBurns: true, focus: null, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl };
 
 function Thumb({ src, video, className }: { src: string | null; video: boolean; className?: string }) {
   if (!src) return null;
@@ -91,7 +94,7 @@ function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; ur
 }
 
 /** Everything editable on one scene: headline, shots (swap/upload/link/trim/hold), captions, voice and B-roll regeneration, faithfulness. */
-export function SceneInspector({ projectId, scene, index, total, options, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded }: Props) {
+export function SceneInspector({ projectId, scene, index, total, options, overlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded }: Props) {
   const [voiceText, setVoiceText] = useState(scene.voiceover);
   const [terms, setTerms] = useState(scene.brollTerms.join(", "));
   const [showAll, setShowAll] = useState(false);
@@ -114,8 +117,24 @@ export function SceneInspector({ projectId, scene, index, total, options, urls, 
   const currentKey = shot.kind === "solid" ? null : shot.key;
   const dupHere = currentKey ? usedElsewhere(currentKey) : [];
 
+  // Face guard (lib/media/framing.ts): pictures analysed by the build or on upload are re-cropped for this scene's overlays.
+  const zonesOf = (s: EditorScene) => overlayZones({ kind: s.kind, headline: s.onScreenText, hasCaptions: Boolean(s.voice), ...overlay });
+  const frameOf = (key: string) => options.find((o) => o.key === key)?.frame ?? null;
+  const reframe = (s: EditorScene): EditorScene => {
+    const zones = zonesOf(s);
+    const fix = (v: EditorVisual): EditorVisual => {
+      const frame = v.kind === "image" ? frameOf(v.key) : null;
+      if (v.kind !== "image" || !frame) return v;
+      const f = frameStill(frame, zones);
+      return { ...v, focus: f.focus, kenBurns: f.focus ? v.kenBurns && f.kenBurns : v.kenBurns };
+    };
+    return { ...s, visual: fix(s.visual), shots: s.shots.map(fix) };
+  };
+  const shotFrame = shot.kind === "image" ? frameOf(shot.key) : null;
+  const guard = shotFrame ? frameStill(shotFrame, zonesOf(scene)) : null;
+
   const setActive = (visual: EditorVisual) => onChange(setShot(scene, active, visual));
-  const pick = (o: VisualOption) => setActive(fromOption(o));
+  const pick = (o: VisualOption) => onChange(reframe(setShot(scene, active, fromOption(o))));
   const addShot = () => {
     onChange({ ...scene, shots: [...scene.shots, { kind: "solid" }] });
     setShotIdx(shots.length);
@@ -133,7 +152,10 @@ export function SceneInspector({ projectId, scene, index, total, options, urls, 
       option = { ...option, durationSec: p.durationSec };
     }
     onOptionAdded(option, res.url);
-    setActive(fromOption(option));
+    const added = fromOption(option);
+    // The new option is not in `options` yet, so frame it from the faces the server just returned.
+    const f = added.kind === "image" && option.frame ? frameStill(option.frame, zonesOf(scene)) : null;
+    setActive(added.kind === "image" && f ? { ...added, focus: f.focus, kenBurns: f.kenBurns } : added);
     toast.success(res.message);
   };
 
@@ -200,7 +222,7 @@ export function SceneInspector({ projectId, scene, index, total, options, urls, 
 
       <div className="space-y-1">
         <Label htmlFor="headline">Chữ trên màn hình</Label>
-        <Input id="headline" value={scene.onScreenText} maxLength={120} disabled={disabled} onChange={(e) => onChange({ ...scene, onScreenText: e.target.value })} />
+        <Input id="headline" value={scene.onScreenText} maxLength={120} disabled={disabled} onChange={(e) => onChange(reframe({ ...scene, onScreenText: e.target.value }))} />
       </div>
 
       {/* ---- shots ---- */}
@@ -235,6 +257,11 @@ export function SceneInspector({ projectId, scene, index, total, options, urls, 
         {missing > 0 ? (
           <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
             Cảnh dài {(voiceMs / 1000).toFixed(1)} s nhưng chỉ có {shots.length} hình ({perShotSec.toFixed(1)} s/hình). Thêm {missing} hình nữa để đổi hình mỗi ≤ 5 s.
+          </p>
+        ) : null}
+        {guard && !guard.ok ? (
+          <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+            Kiểm tra khuôn mặt: {guard.issues.map((i) => FRAMING_ISSUE_LABEL[i]).join(", ")}. Khung 9:16 không giữ trọn khuôn mặt ở 2/3 trên màn hình; nên đổi ảnh khác hoặc rút gọn chữ trên màn hình.
           </p>
         ) : null}
         {dupHere.length ? <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">Hình này cũng dùng ở {dupHere.join(", ")}. Mỗi hình chỉ nên xuất hiện một lần trong video.</p> : null}

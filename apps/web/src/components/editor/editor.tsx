@@ -290,6 +290,7 @@ export function Editor(props: EditorProps) {
               index={selectedIndex}
               total={doc.scenes.length}
               options={options}
+              overlay={{ captionPosition: doc.brand.caption.position, captionFontSize: doc.brand.caption.fontSize, showSource: doc.brand.showSource && Boolean(doc.source.name), hasLogo: Boolean(doc.brand.logoSrc) }}
               urls={urls}
               usedKeys={usedKeys}
               verdict={props.verdicts?.[selected.id] ?? null}
