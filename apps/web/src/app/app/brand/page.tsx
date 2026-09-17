@@ -12,10 +12,23 @@ import { cn } from "@/lib/utils";
 import { presignGet } from "@/lib/r2";
 import { requireWorkspace } from "@/lib/workspace";
 import { deleteBrandKit, duplicateBrandKit, saveBrandKit, setDefaultBrandKit } from "./actions";
+import { BrandPreviewLoader } from "./brand-preview-loader";
 import { ColourField } from "./colour-field";
 import { OverlayUploader } from "./overlay-uploader";
 
 export const dynamic = "force-dynamic";
+
+const FORM_ID = "brand-kit-form";
+
+function Px({ name, label, value, min, max, placeholder, hint }: { name: string; label: string; value: number | null; min: number; max: number; placeholder?: string; hint?: string }) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={name}>{label}</Label>
+      <Input id={name} name={name} type="number" inputMode="numeric" step={1} min={min} max={max} defaultValue={value ?? ""} placeholder={placeholder} className="tabular-nums" />
+      {hint ? <p className="text-[11px] text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
 
 function F({ name, label, value }: { name: string; label: string; value: string }) {
   return (
@@ -52,7 +65,7 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
   const autoKits = kits.filter((k) => k.autoMatch && !k.isDefault).length;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Bộ nhận diện</h1>
         <p className="text-sm text-muted-foreground">
@@ -88,13 +101,15 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
       </div>
       {kits.length > 1 && autoKits === 0 ? <p className="text-xs text-amber-700 dark:text-amber-400">Chưa bộ nào bật “tự chọn theo nội dung”, nên mọi dự án dùng bộ mặc định trừ khi chọn tay.</p> : null}
 
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">{row ? row.name : kits.length ? "Bộ nhận diện mới" : "Chưa có bộ nhận diện riêng (đang dùng mặc định của hệ thống)"}</CardTitle>
           <CardDescription>Vùng an toàn cố định cho 1080×1920: trên 220 px, dưới 420 px, trái 60 px, phải 180 px.</CardDescription>
         </CardHeader>
         <CardContent>
-          <ActionForm key={row?.id ?? "new"} action={saveBrandKit} className="space-y-4">
+          <ActionForm key={row?.id ?? "new"} id={FORM_ID} action={saveBrandKit} className="space-y-4">
             <input type="hidden" name="id" value={row?.id ?? ""} />
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
@@ -134,24 +149,39 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
               <F name="fontBody" label="Font nội dung" value={brand.fonts.body} />
               <F name="fontCaption" label="Font phụ đề" value={brand.fonts.caption} />
             </div>
-            <div className="grid gap-3 md:grid-cols-4">
-              <div className="space-y-1">
-                <Label htmlFor="captionPosition">Vị trí phụ đề</Label>
-                <select id="captionPosition" name="captionPosition" defaultValue={brand.caption.position} className="h-9 rounded-md border bg-background px-2 text-sm">
-                  <option value="bottom">dưới (trên vùng an toàn)</option>
-                  <option value="middle">giữa</option>
-                </select>
+            <div className="space-y-3 rounded-md border p-3">
+              <div>
+                <div className="text-sm font-medium">Chữ trên video</div>
+                <p className="text-[11px] text-muted-foreground">
+                  Khung hình 1080×1920 px, gốc toạ độ ở góc trên trái. Để trống X / Y = tự động: phụ đề nằm trên vùng an toàn dưới, tiêu đề nằm ngay trên phụ đề (khoảng 1/3 từ dưới lên) để không che mặt
+                  người. Xem kết quả ngay ở khung “Xem trước”.
+                </p>
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="captionFontSize">Cỡ phụ đề (36–96)</Label>
-                <Input id="captionFontSize" name="captionFontSize" type="number" min={36} max={96} defaultValue={brand.caption.fontSize} />
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Px name="headlineFontSize" label="Cỡ tiêu đề (28–120)" min={28} max={120} value={brand.headline.fontSize} hint="Tiêu đề mở đầu tự lớn hơn 22%." />
+                <Px name="headlineX" label="Tiêu đề: X mép trái" min={0} max={1080} value={brand.headline.x} placeholder="tự động (60)" />
+                <Px name="headlineY" label="Tiêu đề: Y mép dưới" min={0} max={1920} value={brand.headline.y} placeholder="tự động" hint="Tiêu đề dài mọc lên phía trên mốc này." />
               </div>
-              <label className="flex items-center gap-2 pt-6 text-sm">
-                <input type="checkbox" name="captionUppercase" defaultChecked={brand.caption.uppercase} /> IN HOA
-              </label>
-              <label className="flex items-center gap-2 pt-6 text-sm">
-                <input type="checkbox" name="captionHighlightWords" defaultChecked={brand.caption.highlightWords} /> tô từ đang đọc
-              </label>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Px name="captionFontSize" label="Cỡ phụ đề (36–96)" min={36} max={96} value={brand.caption.fontSize} />
+                <Px name="captionX" label="Phụ đề: X tâm khối" min={0} max={1080} value={brand.caption.x} placeholder="tự động (480)" />
+                <Px name="captionY" label="Phụ đề: Y mép dưới" min={0} max={1920} value={brand.caption.y} placeholder="tự động" hint="Có giá trị thì bỏ qua “vị trí” bên dưới." />
+              </div>
+              <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+                <div className="space-y-1">
+                  <Label htmlFor="captionPosition">Vị trí phụ đề tự động</Label>
+                  <select id="captionPosition" name="captionPosition" defaultValue={brand.caption.position} className="h-9 rounded-md border bg-background px-2 text-sm">
+                    <option value="bottom">dưới (trên vùng an toàn)</option>
+                    <option value="middle">giữa</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 pb-2 text-sm">
+                  <input type="checkbox" name="captionUppercase" defaultChecked={brand.caption.uppercase} /> IN HOA
+                </label>
+                <label className="flex items-center gap-2 pb-2 text-sm">
+                  <input type="checkbox" name="captionHighlightWords" defaultChecked={brand.caption.highlightWords} /> tô từ đang đọc
+                </label>
+              </div>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
@@ -207,14 +237,9 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
           </CardHeader>
           <CardContent>
             <OverlayUploader
-              key={`${row.id}-${row.overlayPath ?? ""}-${brand.overlayLayer}`}
+              key={`${row.id}-${row.overlayPath ?? ""}`}
               kitId={row.id}
               overlayUrl={overlayUrl}
-              logoUrl={logoUrl}
-              layer={brand.overlayLayer}
-              colours={brand.colours}
-              captionPosition={brand.caption.position}
-              captionFontSize={brand.caption.fontSize}
               canEdit={canEdit}
             />
           </CardContent>
@@ -254,6 +279,14 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
           ) : null}
         </div>
       ) : null}
+        </div>
+        <aside className="order-first space-y-2 lg:sticky lg:top-4 lg:order-none">
+          <h2 className="text-sm font-semibold">Xem trước</h2>
+          <div className="mx-auto max-w-[300px]">
+            <BrandPreviewLoader key={`${row?.id ?? "new"}-${row?.updatedAt?.getTime() ?? 0}`} formId={FORM_ID} brand={brand} logoUrl={logoUrl} overlayUrl={overlayUrl} />
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

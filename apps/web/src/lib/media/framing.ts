@@ -14,7 +14,7 @@
  * guard may enlarge it (≤ `MAX_ZOOM`) to gain vertical travel, and turns Ken
  * Burns off when the zoom alone would push a face out.
  */
-import { captionBlockHeight, headlineBottom, OUTPUT, OUTRO_HEIGHT, outroBottom, SAFE_ZONES, type Focus } from "@ai-news/video/schema";
+import { HEADLINE_BAR, headlinePadding, OUTPUT, SAFE_ZONES, textLayout, type Focus, type TextLayoutInput } from "@ai-news/video/schema";
 
 /** Face box normalised to the source picture (0–1, origin top-left). */
 export type FaceBox = { x: number; y: number; w: number; h: number; confidence: number };
@@ -86,8 +86,9 @@ const CHAR_EM = 0.56;
 export function overlayZones(scene: {
   kind: "hook" | "body" | "cta";
   headline: string;
-  captionPosition: "bottom" | "middle";
-  captionFontSize: number;
+  /** The kit's caption and headline settings (size, manual position); see `textLayout`. */
+  caption: TextLayoutInput["caption"];
+  headlineStyle?: TextLayoutInput["headline"];
   hasCaptions: boolean;
   showSource: boolean;
   hasLogo: boolean;
@@ -95,27 +96,18 @@ export function overlayZones(scene: {
   const zones: Zone[] = [];
   const left = SAFE_ZONES.left;
   const right = W - SAFE_ZONES.right;
+  const at = textLayout({ caption: scene.caption, headline: scene.headlineStyle }, scene.kind);
   if (scene.headline.trim()) {
-    const big = scene.kind === "hook";
-    const font = big ? 66 : 54;
-    const padX = big ? 30 : 26;
-    const padY = big ? 22 : 16;
-    const textWidth = right - left - 14 - 2 * padX;
-    const { lines, longest } = wrapLines(scene.headline, Math.floor(textWidth / (font * CHAR_EM)));
-    // Bottom-anchored above the captions (lower third); a longer headline grows upwards.
-    const y1 = H - headlineBottom({ position: scene.captionPosition, fontSize: scene.captionFontSize }, scene.kind);
-    zones.push({ name: "headline", x0: left, y0: y1 - (lines * font * 1.18 + 2 * padY), x1: Math.min(right, left + 14 + 2 * padX + longest * font * CHAR_EM), y1 });
+    const font = at.headline.fontSize;
+    const pad = headlinePadding(font);
+    const textWidth = at.headline.maxX - at.headline.x - HEADLINE_BAR - 2 * pad.x;
+    const { lines, longest } = wrapLines(scene.headline, Math.max(4, Math.floor(textWidth / (font * CHAR_EM))));
+    // Anchored by its bottom edge; a longer headline grows upwards.
+    zones.push({ name: "headline", x0: at.headline.x, y0: at.headline.y1 - (lines * font * 1.18 + 2 * pad.y), x1: Math.min(at.headline.maxX, at.headline.x + HEADLINE_BAR + 2 * pad.x + longest * font * CHAR_EM), y1: at.headline.y1 });
   }
-  if (scene.hasCaptions) {
-    // Chunks hold up to 26 characters, which wrap to two lines at the default size.
-    const h = captionBlockHeight(scene.captionFontSize);
-    const y0 = scene.captionPosition === "middle" ? H / 2 - 60 : H - (SAFE_ZONES.bottom + 30) - h;
-    zones.push({ name: "captions", x0: left, y0, x1: right, y1: y0 + h });
-  }
-  if (scene.kind === "cta") {
-    const y1 = H - outroBottom({ position: scene.captionPosition, fontSize: scene.captionFontSize });
-    zones.push({ name: "outro", x0: left, y0: y1 - OUTRO_HEIGHT, x1: right, y1 });
-  }
+  // Chunks hold up to 26 characters, which wrap to two lines at the default size.
+  if (scene.hasCaptions) zones.push({ name: "captions", x0: at.captions.x0, y0: at.captions.y0, x1: at.captions.x1, y1: at.captions.y1 });
+  if (scene.kind === "cta") zones.push({ name: "outro", x0: left, y0: at.outro.y0, x1: right, y1: at.outro.y1 });
   if (scene.showSource) zones.push({ name: "source", x0: left, y0: H - (SAFE_ZONES.bottom - 60) - 56, x1: left + 500, y1: H - (SAFE_ZONES.bottom - 60) });
   if (scene.hasLogo) zones.push({ name: "logo", x0: W - (SAFE_ZONES.right - 60) - 300, y0: SAFE_ZONES.top - 120, x1: W - (SAFE_ZONES.right - 60), y1: SAFE_ZONES.top - 30 });
   zones.push({ name: "platform_bottom", x0: 0, y0: H - SAFE_ZONES.bottom, x1: W, y1: H });

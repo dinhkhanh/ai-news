@@ -563,6 +563,8 @@ export const brandKits = pgTable(
     fonts: jsonb("fonts").$type<{ heading: string; body: string; caption: string }>().notNull(),
     colours: jsonb("colours").$type<Record<string, string>>().notNull(),
     captionStyle: jsonb("caption_style").$type<Record<string, unknown>>().notNull(),
+    /** Headline card: `{ fontSize, x, y }` (x / y in frame px, null = automatic; see `textLayout`). */
+    headlineStyle: jsonb("headline_style").$type<Record<string, unknown>>().notNull().default({}),
     introPath: text("intro_path"),
     outroPath: text("outro_path"),
     lowerThird: jsonb("lower_third").$type<Record<string, unknown>>(),

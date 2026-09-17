@@ -343,7 +343,7 @@ export function Editor(props: EditorProps) {
               index={selectedIndex}
               total={doc.scenes.length}
               options={options}
-              overlay={{ captionPosition: doc.brand.caption.position, captionFontSize: doc.brand.caption.fontSize, showSource: doc.brand.showSource && Boolean(doc.source.name), hasLogo: Boolean(doc.brand.logoSrc) }}
+              overlay={{ caption: doc.brand.caption, headlineStyle: doc.brand.headline, showSource: doc.brand.showSource && Boolean(doc.source.name), hasLogo: Boolean(doc.brand.logoSrc) }}
               hasOverlay={Boolean(doc.brand.overlaySrc)}
               urls={urls}
               usedKeys={usedKeys}

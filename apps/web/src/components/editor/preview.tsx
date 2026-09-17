@@ -10,7 +10,7 @@ import { forwardRef } from "react";
  * audio layout differs from the stored mix, `audio.mixSrc` is null and the
  * composition plays per-scene voice files instead.
  */
-export const Preview = forwardRef<PlayerRef, { timeline: Timeline; width?: number }>(function Preview({ timeline, width = 340 }, ref) {
+export const Preview = forwardRef<PlayerRef, { timeline: Timeline; width?: number | string }>(function Preview({ timeline, width = 340 }, ref) {
   return (
     <Player
       ref={ref}

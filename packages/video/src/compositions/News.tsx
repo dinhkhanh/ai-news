@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { headlineBottom, LOGO_MOTION_PERIOD_SEC, outroBottom, SAFE_ZONES, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -87,15 +87,16 @@ const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Bra
   const { fps } = useVideoConfig();
   if (!text) return null;
   const enter = spring({ frame, fps, config: { damping: 200, stiffness: 120 } });
-  const big = kind === "hook";
+  const at = textLayout(brand, kind).headline;
+  const pad = headlinePadding(at.fontSize);
   return (
     <div
       style={{
         position: "absolute",
-        // Lower third, right above the captions; anchored by its bottom edge so a long headline grows upwards.
-        bottom: headlineBottom(brand.caption, kind),
-        left: SAFE_ZONES.left,
-        right: SAFE_ZONES.right,
+        // Lower third, right above the captions (or where the kit puts it); anchored by its bottom edge so a long headline grows upwards.
+        bottom: OUTPUT.height - at.y1,
+        left: at.x,
+        width: at.maxX - at.x,
         opacity: enter,
         transform: `translateY(${(1 - enter) * 30}px)`,
         fontFamily: fontFamily(brand.fonts.heading),
@@ -106,9 +107,9 @@ const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Bra
           display: "inline-block",
           background: brand.colours.primary,
           color: brand.colours.text,
-          padding: big ? "22px 30px" : "16px 26px",
-          borderLeft: `14px solid ${brand.colours.accent}`,
-          fontSize: big ? 66 : 54,
+          padding: `${pad.y}px ${pad.x}px`,
+          borderLeft: `${HEADLINE_BAR}px solid ${brand.colours.accent}`,
+          fontSize: at.fontSize,
           fontWeight: 800,
           lineHeight: 1.18,
           maxWidth: "100%",
@@ -207,10 +208,12 @@ const Captions: React.FC<{ captions: Caption[]; brand: Brand }> = ({ captions, b
   const family = fontFamily(brand.fonts.caption);
   const text = brand.caption.uppercase ? current.text.toUpperCase() : current.text;
   const words = current.words.length ? current.words : [{ w: current.text, s: current.startMs, e: current.endMs }];
-  const top = brand.caption.position === "middle" ? height / 2 - 60 : undefined;
-  const bottom = brand.caption.position === "bottom" ? SAFE_ZONES.bottom + 30 : undefined;
+  const at = textLayout(brand, "body").captions;
+  // Bottom-anchored blocks keep their lower edge while one / two lines alternate; mid-frame ones keep their upper edge.
+  const top = at.anchor === "top" ? at.y0 : undefined;
+  const bottom = at.anchor === "bottom" ? height - at.y1 : undefined;
   return (
-    <div style={{ position: "absolute", left: SAFE_ZONES.left, right: SAFE_ZONES.right, top, bottom, display: "flex", justifyContent: "center" }}>
+    <div style={{ position: "absolute", left: at.x0, width: at.x1 - at.x0, top, bottom, display: "flex", justifyContent: "center" }}>
       <div
         style={{
           fontFamily: family,
@@ -245,7 +248,7 @@ const Outro: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   const enter = spring({ frame, fps, config: { damping: 200 } });
   const { brand } = timeline;
   return (
-    <div style={{ position: "absolute", left: SAFE_ZONES.left, right: SAFE_ZONES.right, bottom: outroBottom(brand.caption), opacity: enter, fontFamily: fontFamily(brand.fonts.body), color: brand.colours.text }}>
+    <div style={{ position: "absolute", left: SAFE_ZONES.left, right: SAFE_ZONES.right, bottom: OUTPUT.height - textLayout(brand, "cta").outro.y1, opacity: enter, fontFamily: fontFamily(brand.fonts.body), color: brand.colours.text }}>
       {brand.outroText ? <div style={{ fontSize: 44, fontWeight: 700 }}>{brand.outroText}</div> : null}
       {timeline.attribution.length ? <div style={{ fontSize: 26, opacity: 0.8, marginTop: 12, lineHeight: 1.4 }}>{timeline.attribution.join(" · ")}</div> : null}
     </div>

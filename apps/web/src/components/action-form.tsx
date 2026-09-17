@@ -9,11 +9,13 @@ type Props = {
   action: (prev: ActionState, fd: FormData) => Promise<ActionState>;
   children: React.ReactNode;
   className?: string;
+  /** DOM id, for a sibling component that reads the form's live values (brand kit preview). */
+  id?: string;
   /** Reset the form after a successful submit. */
   resetOnSuccess?: boolean;
 };
 
-export function ActionForm({ action, children, className, resetOnSuccess }: Props) {
+export function ActionForm({ action, children, className, id, resetOnSuccess }: Props) {
   const [state, formAction, pending] = useActionState(action, { ok: false });
   useEffect(() => {
     if (state.message) (state.ok ? toast.success : toast.error)(state.message);
@@ -27,6 +29,7 @@ export function ActionForm({ action, children, className, resetOnSuccess }: Prop
     // (an event React did not intercept, e.g. right after a soft navigation or refresh), the user gets
     // that error. Without the prop the worst case is a plain GET reload of the page.
     <form
+      id={id}
       className={cn(className, pending && "cursor-progress opacity-70")}
       aria-busy={pending || undefined}
       data-pending={pending || undefined}

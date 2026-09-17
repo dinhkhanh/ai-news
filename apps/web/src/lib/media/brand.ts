@@ -21,6 +21,7 @@ export function brandFromRow(row: BrandKitRow | null | undefined): { brand: Bran
     colours: { ...DEFAULT_BRAND.colours, ...row.colours },
     fonts: { ...DEFAULT_BRAND.fonts, ...row.fonts },
     caption: { ...DEFAULT_BRAND.caption, ...cs },
+    headline: { ...DEFAULT_BRAND.headline, ...(row.headlineStyle as Partial<Brand["headline"]>) },
     logoSrc: row.logoPath,
     logoMotion: (LOGO_MOTIONS as readonly string[]).includes(row.logoMotion) ? row.logoMotion : "flip",
     overlaySrc: row.overlayPath,

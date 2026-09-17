@@ -1,0 +1,1 @@
+ALTER TABLE "brand_kits" ADD COLUMN "headline_style" jsonb DEFAULT '{}'::jsonb NOT NULL;

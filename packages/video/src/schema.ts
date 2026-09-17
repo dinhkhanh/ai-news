@@ -9,24 +9,65 @@ export const SAFE_ZONES = { top: 220, bottom: 420, left: 60, right: 180 } as con
 /** Room kept for the caption block: a chunk wraps to two lines at most (line height 1.35 + padding). */
 export const captionBlockHeight = (fontSize: number) => 2 * fontSize * 1.35 + 28;
 
-/**
- * Distance in px from the bottom of the frame to the bottom edge of the
- * headline card. The headline lives in the lower third, right above the
- * captions and growing upwards, because the top of a picture is where faces
- * and the important part of the shot usually are. With captions mid-frame it
- * takes the slot bottom captions would have; on a CTA scene it clears the outro.
- * Shared by `News.tsx` and the face guard's `overlayZones` (apps/web framing.ts).
- */
-type CaptionLayout = { position: "bottom" | "middle"; fontSize: number };
-const aboveCaptions = (caption: CaptionLayout) => SAFE_ZONES.bottom + 30 + (caption.position === "bottom" ? captionBlockHeight(caption.fontSize) + 24 : 0);
-
 /** Room kept for the outro (channel line + credits) of the closing scene. */
 export const OUTRO_HEIGHT = 160;
-/** Bottom edge of the outro, from the bottom of the frame: above bottom captions, never underneath them. */
-export const outroBottom = (caption: CaptionLayout) => Math.max(aboveCaptions(caption), SAFE_ZONES.bottom + 140);
+/** The hook's headline is this much bigger than the kit's headline size. */
+export const HOOK_HEADLINE_SCALE = 66 / 54;
+export const DEFAULT_HEADLINE_FONT_SIZE = 54;
+const TEXT_GAP = 24;
 
-export function headlineBottom(caption: CaptionLayout, kind: "hook" | "body" | "cta") {
-  return kind === "cta" ? outroBottom(caption) + OUTRO_HEIGHT + 24 : aboveCaptions(caption);
+/** Padding of the headline card, proportional to its font size (16/26 px at the default 54). */
+export const headlinePadding = (fontSize: number) => ({ x: Math.round(fontSize * 0.48), y: Math.round(fontSize * 0.3) });
+/** Accent bar on the left of the headline card. */
+export const HEADLINE_BAR = 14;
+
+/** What the text layout needs of a brand; every field may be missing in timelines stored before it existed. */
+export type TextLayoutInput = {
+  caption: { position: "bottom" | "middle"; fontSize: number; x?: number | null; y?: number | null };
+  headline?: { fontSize?: number; x?: number | null; y?: number | null } | null;
+};
+
+/**
+ * Where the text sits, in px of the 1080×1920 frame (origin top-left). One
+ * definition for `News.tsx`, the face guard's `overlayZones` and the brand page.
+ *
+ * Automatic (no manual position): captions sit above the bottom safe zone, or
+ * mid-frame; the headline lives in the lower third right above the captions
+ * and grows upwards (the top of a picture is where faces are), or takes the
+ * bottom-caption slot when the captions are in the upper half; on the closing
+ * scene the outro sits above the captions and the headline above the outro.
+ *
+ * Manual: `caption.x` = horizontal centre of the caption block, `caption.y` =
+ * its bottom edge; `headline.x` = left edge of the card, `headline.y` = its
+ * bottom edge (so a longer headline still grows upwards). A manual caption
+ * moves the automatic headline with it.
+ */
+export function textLayout(brand: TextLayoutInput, kind: "hook" | "body" | "cta") {
+  const c = brand.caption;
+  const h = captionBlockHeight(c.fontSize);
+  const captions =
+    c.y != null ? { y0: c.y - h, y1: c.y, anchor: "bottom" as const } : c.position === "middle" ? { y0: OUTPUT.height / 2 - 60, y1: OUTPUT.height / 2 - 60 + h, anchor: "top" as const } : { y0: OUTPUT.height - (SAFE_ZONES.bottom + 30) - h, y1: OUTPUT.height - (SAFE_ZONES.bottom + 30), anchor: "bottom" as const };
+  const autoCentre = (SAFE_ZONES.left + OUTPUT.width - SAFE_ZONES.right) / 2;
+  // Free slot for headline / outro: right above captions that sit in the lower half, else the bottom-caption slot.
+  const slot = captions.y0 > OUTPUT.height / 2 ? captions.y0 - TEXT_GAP : OUTPUT.height - (SAFE_ZONES.bottom + 30);
+  const outroY1 = Math.min(slot, OUTPUT.height - (SAFE_ZONES.bottom + 140));
+  const base = brand.headline?.fontSize ?? DEFAULT_HEADLINE_FONT_SIZE;
+  return {
+    captions: (() => {
+      const centreX = c.x ?? autoCentre;
+      // As wide as the safe zones allow, narrower when the block is pushed towards an edge (always centred on `centreX`).
+      const half = Math.max(150, Math.min((OUTPUT.width - SAFE_ZONES.left - SAFE_ZONES.right) / 2, centreX - 20, OUTPUT.width - 20 - centreX));
+      return { ...captions, centreX, x0: centreX - half, x1: centreX + half };
+    })(),
+    outro: { y0: outroY1 - OUTRO_HEIGHT, y1: outroY1 },
+    headline: {
+      x: brand.headline?.x ?? SAFE_ZONES.left,
+      /** Right limit of the card: the platform's right rail, but never less than 300 px of room. */
+      maxX: Math.max(OUTPUT.width - SAFE_ZONES.right, Math.min(OUTPUT.width, (brand.headline?.x ?? SAFE_ZONES.left) + 300)),
+      y1: brand.headline?.y ?? (kind === "cta" ? outroY1 - OUTRO_HEIGHT - TEXT_GAP : slot),
+      fontSize: kind === "hook" ? Math.round(base * HOOK_HEADLINE_SCALE) : base,
+    },
+  };
 }
 
 export const testCardSchema = z.object({
@@ -77,7 +118,18 @@ export const brandSchema = z.object({
     fontSize: z.number().int().min(36).max(96).default(64),
     uppercase: z.boolean().default(false),
     highlightWords: z.boolean().default(true),
+    /** Manual position in frame px (see `textLayout`): centre of the block / its bottom edge; null = automatic. */
+    x: z.number().int().min(0).max(OUTPUT.width).nullable().default(null),
+    y: z.number().int().min(0).max(OUTPUT.height).nullable().default(null),
   }),
+  /** Headline card: size of body headlines (the hook is `HOOK_HEADLINE_SCALE` bigger); `x` = left edge, `y` = bottom edge, null = automatic. */
+  headline: z
+    .object({
+      fontSize: z.number().int().min(28).max(120).default(DEFAULT_HEADLINE_FONT_SIZE),
+      x: z.number().int().min(0).max(OUTPUT.width).nullable().default(null),
+      y: z.number().int().min(0).max(OUTPUT.height).nullable().default(null),
+    })
+    .prefault({}),
   /** Absolute URL at render time (resolved from an R2 key by the app). */
   logoSrc: z.string().nullable().default(null),
   logoMotion: z.enum(LOGO_MOTIONS).default("flip"),

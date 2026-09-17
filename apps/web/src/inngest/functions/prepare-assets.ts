@@ -218,8 +218,8 @@ export const prepareAssetsFn = inngest.createFunction(
         const zones = overlayZones({
           kind: sc?.kind ?? "body",
           headline: sc?.onScreenText ?? "",
-          captionPosition: brand.brand.caption.position,
-          captionFontSize: brand.brand.caption.fontSize,
+          caption: brand.brand.caption,
+          headlineStyle: brand.brand.headline,
           hasCaptions: Boolean(sc?.voiceover.trim()),
           showSource: brand.brand.showSource && Boolean(input.source.name),
           hasLogo: Boolean(brand.brand.logoSrc),

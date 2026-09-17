@@ -4,7 +4,7 @@ import { frameStill, overlayZones, significantFaces, storedFrame, TARGET, TOLERA
 const face = (x: number, y: number, w: number, h: number, confidence = 0.95): FaceBox => ({ x, y, w, h, confidence });
 const landscape = (faces: FaceBox[]): FrameFaces => ({ width: 1200, height: 800, faces });
 const portrait = (faces: FaceBox[]): FrameFaces => ({ width: 1080, height: 1920, faces });
-const body = (headline = "Giá xăng tăng mạnh") => overlayZones({ kind: "body", headline, captionPosition: "bottom", captionFontSize: 64, hasCaptions: true, showSource: true, hasLogo: false });
+const body = (headline = "Giá xăng tăng mạnh") => overlayZones({ kind: "body", headline, caption: { position: "bottom", fontSize: 64 }, hasCaptions: true, showSource: true, hasLogo: false });
 
 /** Where the faces' box ends up in the 1080×1920 frame for a focus (same maths as News.tsx). */
 function placed(frame: FrameFaces, f: FaceBox, focus: { x: number; y: number; zoom: number }) {
@@ -29,24 +29,47 @@ describe("overlayZones", () => {
   it("grows the headline upwards with its text, bigger on the hook, and keeps it off the outro and off middle captions", () => {
     const long = "Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa trên cả nước";
     const b = body(long).find((r) => r.name === "headline")!;
-    const h = overlayZones({ kind: "hook", headline: long, captionPosition: "bottom", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: false }).find((r) => r.name === "headline")!;
+    const h = overlayZones({ kind: "hook", headline: long, caption: { position: "bottom", fontSize: 64 }, hasCaptions: true, showSource: false, hasLogo: false }).find((r) => r.name === "headline")!;
     const short = body().find((r) => r.name === "headline")!;
     expect(b.y1).toBe(short.y1);
     expect(b.y0).toBeLessThan(short.y0);
     expect(h.y0).toBeLessThan(b.y0);
-    const cta = Object.fromEntries(overlayZones({ kind: "cta", headline: long, captionPosition: "bottom", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: false }).map((r) => [r.name, r]));
+    const cta = Object.fromEntries(overlayZones({ kind: "cta", headline: long, caption: { position: "bottom", fontSize: 64 }, hasCaptions: true, showSource: false, hasLogo: false }).map((r) => [r.name, r]));
     expect(cta.headline.y1).toBeLessThanOrEqual(cta.outro.y0 - 24);
     expect(cta.outro.y1).toBeLessThanOrEqual(cta.captions.y0 - 24); // the outro never sits under the captions
     // Captions mid-frame: the headline takes the slot bottom captions would have had, below them.
-    const mid = Object.fromEntries(overlayZones({ kind: "body", headline: long, captionPosition: "middle", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: false }).map((r) => [r.name, r]));
+    const mid = Object.fromEntries(overlayZones({ kind: "body", headline: long, caption: { position: "middle", fontSize: 64 }, hasCaptions: true, showSource: false, hasLogo: false }).map((r) => [r.name, r]));
     expect(mid.headline.y0).toBeGreaterThan(mid.captions.y1);
     expect(mid.headline.y1).toBe(1920 - 450);
   });
 
+  it("follows a kit's manual text position and sizes, and moves the automatic headline with manual captions", () => {
+    const zones = (caption: object, headlineStyle?: object, kind: "hook" | "body" = "body") =>
+      Object.fromEntries(overlayZones({ kind, headline: "Giá xăng tăng mạnh", caption: { position: "bottom", fontSize: 64, ...caption }, headlineStyle, hasCaptions: true, showSource: false, hasLogo: false }).map((r) => [r.name, r]));
+    // Captions lifted to y = 1200: bottom edge exactly there, and the automatic headline still sits 24 px above them.
+    const lifted = zones({ y: 1200 });
+    expect(lifted.captions.y1).toBe(1200);
+    expect(lifted.headline.y1).toBeCloseTo(lifted.captions.y0 - 24, 5);
+    // Captions moved into the upper half: the headline takes the bottom-caption slot instead of climbing over faces.
+    expect(zones({ y: 500 }).headline.y1).toBe(1470);
+    // Manual headline: left edge and bottom edge in px; a bigger font makes a taller card that grows upwards.
+    const manual = zones({}, { fontSize: 54, x: 120, y: 400 });
+    expect(manual.headline).toMatchObject({ x0: 120, y1: 400 });
+    const bigger = zones({}, { fontSize: 90, x: 120, y: 400 });
+    expect(bigger.headline.y1).toBe(400);
+    expect(bigger.headline.y0).toBeLessThan(manual.headline.y0);
+    // Caption centre: the block stays centred on x and narrows near an edge instead of leaving the frame.
+    const right = zones({ x: 900 });
+    expect((right.captions.x0 + right.captions.x1) / 2).toBe(900);
+    expect(right.captions.x1).toBeLessThanOrEqual(1080);
+    // The hook keeps its size advantage over the kit's headline size.
+    expect(zones({}, { fontSize: 40 }, "hook").headline.y0).toBeLessThan(zones({}, { fontSize: 40 }).headline.y0);
+  });
+
   it("has no headline or caption zone without text, and puts middle captions mid-frame", () => {
-    const none = overlayZones({ kind: "body", headline: " ", captionPosition: "bottom", captionFontSize: 64, hasCaptions: false, showSource: false, hasLogo: false });
+    const none = overlayZones({ kind: "body", headline: " ", caption: { position: "bottom", fontSize: 64 }, hasCaptions: false, showSource: false, hasLogo: false });
     expect(none.map((r) => r.name)).toEqual(["platform_bottom", "platform_right"]);
-    const mid = overlayZones({ kind: "cta", headline: "", captionPosition: "middle", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: true });
+    const mid = overlayZones({ kind: "cta", headline: "", caption: { position: "middle", fontSize: 64 }, hasCaptions: true, showSource: false, hasLogo: true });
     expect(mid.find((r) => r.name === "captions")!.y0).toBe(900);
     expect(mid.map((r) => r.name)).toContain("outro");
     expect(mid.map((r) => r.name)).toContain("logo");

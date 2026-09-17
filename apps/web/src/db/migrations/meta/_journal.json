@@ -113,6 +113,13 @@
       "when": 1789630602010,
       "tag": "0015_brand_kit_logo_motion",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789631902008,
+      "tag": "0016_brand_kit_headline_style",
+      "breakpoints": true
     }
   ]
 }

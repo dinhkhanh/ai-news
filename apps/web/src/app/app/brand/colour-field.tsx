@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatColour, parseColour, type Rgba } from "@/lib/colour";
@@ -15,11 +15,14 @@ export function ColourField({ name, label, value, hint }: { name: string; label:
     setText(formatColour(next));
   };
   const css = formatColour(colour);
+  // A hidden input changed by React fires no event; tell the form so the live preview re-reads it.
+  const hidden = useRef<HTMLInputElement>(null);
+  useEffect(() => void hidden.current?.dispatchEvent(new Event("input", { bubbles: true })), [css]);
   const pct = Math.round(colour.alpha * 100);
   return (
     <div className="space-y-1">
       <Label htmlFor={`${name}-text`}>{label}</Label>
-      <input type="hidden" name={name} value={css} />
+      <input ref={hidden} type="hidden" name={name} value={css} />
       <div className="flex items-center gap-2">
         {/* The swatch is the native picker: the input covers it, invisible; the checkerboard shows through a translucent colour. */}
         <label className="relative h-9 w-9 shrink-0 cursor-pointer overflow-hidden rounded border" style={{ background: CHECKER }} title="Chọn màu">

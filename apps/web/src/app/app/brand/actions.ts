@@ -28,6 +28,15 @@ const font = (fd: FormData, key: string) => {
   return v as (typeof BRAND_FONTS)[number];
 };
 
+/** Whole px inside [min, max]; empty = null (automatic). */
+const px = (fd: FormData, key: string, min: number, max: number) => {
+  const v = str(fd, key);
+  if (!v) return null;
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n < min || n > max) throw new Error(`${key}: a number from ${min} to ${max}, or empty for automatic`);
+  return n;
+};
+
 const OVERLAY_MAX_BYTES = 12 * 1024 * 1024;
 const overlayPrefix = (org: string, kitId: string) => r2Key.library(`brand/${org}/overlay-${kitId}-`);
 
@@ -87,7 +96,10 @@ export async function saveBrandKit(_: ActionState, fd: FormData): Promise<Action
         fontSize: Math.min(96, Math.max(36, Number(str(fd, "captionFontSize") || 64))),
         uppercase: fd.get("captionUppercase") === "on",
         highlightWords: fd.get("captionHighlightWords") === "on",
+        x: px(fd, "captionX", 0, OUTPUT.width),
+        y: px(fd, "captionY", 0, OUTPUT.height),
       },
+      headlineStyle: { fontSize: px(fd, "headlineFontSize", 28, 120) ?? DEFAULT_BRAND.headline.fontSize, x: px(fd, "headlineX", 0, OUTPUT.width), y: px(fd, "headlineY", 0, OUTPUT.height) },
       lowerThird: { showSource: fd.get("showSource") === "on", outroText: str(fd, "outroText") || null },
       safeZones: { top: 220, bottom: 420, left: 60, right: 180 },
     };

@@ -167,6 +167,9 @@ describe("describeChanges + docKeys", () => {
     expect(docKeys(next)).toContain("library/brand/o/overlay-k1.png");
     expect(describeChanges(branded, next)).toEqual(["Tắt lớp phủ: s3"]);
     expect(describeChanges(doc, branded)).toEqual(["Đổi bộ nhận diện: Thể thao"]);
+    // A kit stored before headline settings existed gets the defaults (automatic position, 54 px).
+    expect(doc.brand.headline).toEqual({ fontSize: 54, x: null, y: null });
+    expect(doc.brand.caption).toMatchObject({ x: null, y: null });
     // Documents and timelines saved before the overlay existed default to "on" / no overlay.
     expect(doc.scenes.every((s) => s.overlay)).toBe(true);
     expect(buildFromDoc(doc, null).timeline.brand.overlaySrc).toBeNull();

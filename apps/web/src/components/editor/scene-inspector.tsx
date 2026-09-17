@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import type { TextLayoutInput } from "@ai-news/video/schema";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 import { FRAMING_ISSUE_LABEL, frameStill, overlayZones } from "@/lib/media/framing";
@@ -20,7 +21,7 @@ type Props = {
   total: number;
   options: VisualOption[];
   /** Brand overlays the face guard has to keep faces clear of. */
-  overlay: { captionPosition: "bottom" | "middle"; captionFontSize: number; showSource: boolean; hasLogo: boolean };
+  overlay: { caption: TextLayoutInput["caption"]; headlineStyle: TextLayoutInput["headline"]; showSource: boolean; hasLogo: boolean };
   /** The document's brand kit has an overlay PNG (else the per-scene switch is pointless). */
   hasOverlay: boolean;
   urls: Record<string, string>;
