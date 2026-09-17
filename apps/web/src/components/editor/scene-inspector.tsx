@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { createUploadUrl, importVisualFromUrl, registerUpload } from "@/app/app/projects/[id]/edit/actions";
+import { analyseVisual, createUploadUrl, importVisualFromUrl, registerUpload } from "@/app/app/projects/[id]/edit/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { TextLayoutInput } from "@ai-news/video/schema";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, type EditorScene, type EditorVisual } from "@/lib/media/editor";
-import { FRAMING_ISSUE_LABEL, frameStill, overlayZones } from "@/lib/media/framing";
+import { FRAMING_ISSUE_LABEL, frameStill, overlayZones, type FrameFaces } from "@/lib/media/framing";
 import { cn } from "@/lib/utils";
 import type { VisualOption } from "./types";
 
@@ -38,6 +38,8 @@ type Props = {
   onSeek: () => void;
   /** An uploaded / linked file became a swap option (with its presigned URL for the preview). */
   onOptionAdded: (option: VisualOption, url: string) => void;
+  /** Faces of a picture were just detected on request; the parent keeps them on the option. */
+  onOptionFramed: (assetId: string, frame: FrameFaces) => void;
 };
 
 const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm";
@@ -97,7 +99,7 @@ function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; ur
 }
 
 /** Everything editable on one scene: headline, shots (swap/upload/link/trim/hold), captions, voice and B-roll regeneration, faithfulness. */
-export function SceneInspector({ projectId, scene, index, total, options, overlay, hasOverlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded }: Props) {
+export function SceneInspector({ projectId, scene, index, total, options, overlay, hasOverlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded, onOptionFramed }: Props) {
   const [voiceText, setVoiceText] = useState(scene.voiceover);
   const [terms, setTerms] = useState(scene.brollTerms.join(", "));
   const [showAll, setShowAll] = useState(false);
@@ -160,6 +162,31 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
     const f = added.kind === "image" && option.frame ? frameStill(option.frame, zonesOf(scene)) : null;
     setActive(added.kind === "image" && f ? { ...added, focus: f.focus, kenBurns: f.kenBurns } : added);
     toast.success(res.message);
+  };
+
+  // Manual auto-align of the active picture: detect faces if nobody has yet (uploads added while the guard was off, stock, AI stills), then crop for this scene's overlays.
+  const autoAlign = async () => {
+    if (shot.kind !== "image") return;
+    const option = options.find((o) => (shot.assetId ? o.assetId === shot.assetId : o.key === shot.key)) ?? null;
+    let frame = option?.frame ?? null;
+    let found = "";
+    if (!frame) {
+      if (!option) return void toast.error("Hình này không còn trong kho của dự án nên không phân tích được");
+      setBusy("Đang nhận diện khuôn mặt…");
+      try {
+        const res = await analyseVisual({ projectId, assetId: option.assetId });
+        if (!res.ok) return void toast.error(res.message);
+        frame = res.frame;
+        found = `${res.message}. `;
+        onOptionFramed(option.assetId, res.frame);
+      } finally {
+        setBusy(null);
+      }
+    }
+    const f = frameStill(frame, zonesOf(scene));
+    setActive({ ...shot, focus: f.focus, kenBurns: f.focus ? shot.kenBurns && f.kenBurns : shot.kenBurns });
+    if (!f.ok) toast.warning(`${found}Đã căn gần nhất có thể, nhưng vẫn còn: ${f.issues.map((i) => FRAMING_ISSUE_LABEL[i]).join(", ")}.`);
+    else toast.success(f.faces ? `${found}Đã căn khung theo ${f.faces} khuôn mặt. Bấm Lưu để giữ.` : "Không thấy khuôn mặt cần giữ: khung ở giữa.");
   };
 
   const upload = async (file: File) => {
@@ -269,8 +296,18 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
         ) : null}
         {dupHere.length ? <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">Hình này cũng dùng ở {dupHere.join(", ")}. Mỗi hình chỉ nên xuất hiện một lần trong video.</p> : null}
 
-        <div className="text-xs text-muted-foreground">
-          Cảnh quay {active + 1}: {shot.kind === "video" ? `clip ${shot.clipDurationSec.toFixed(0)} s · ${shot.credit ?? ""}` : shot.kind === "image" ? `ảnh · ${shot.credit ?? ""}` : "nền màu"}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            Cảnh quay {active + 1}: {shot.kind === "video" ? `clip ${shot.clipDurationSec.toFixed(0)} s · ${shot.credit ?? ""}` : shot.kind === "image" ? `ảnh · ${shot.credit ?? ""}` : "nền màu"}
+          </span>
+          {shot.kind === "image" && !disabled ? (
+            <>
+              <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={Boolean(busy)} onClick={() => void autoAlign()} title="Nhận diện khuôn mặt trong ảnh này rồi tự chọn khung 9:16: không cắt mặt, không để mặt dưới chữ / giao diện nền tảng, mặt nằm ở 1/3 trên.">
+                Tự căn khuôn mặt
+              </Button>
+              <span>{shot.focus ? "đang căn theo khuôn mặt" : shotFrame ? "khung giữa" : "chưa nhận diện"}</span>
+            </>
+          ) : null}
         </div>
 
         {/* swap options for the active shot */}

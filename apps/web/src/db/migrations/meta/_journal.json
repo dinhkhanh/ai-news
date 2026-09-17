@@ -127,6 +127,13 @@
       "when": 1789633198627,
       "tag": "0017_channel_logos",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789637131578,
+      "tag": "0018_face_guard_default_on",
+      "breakpoints": true
     }
   ]
 }

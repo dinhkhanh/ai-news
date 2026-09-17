@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { loadAdminIntegrations } from "@/lib/admin-data";
-import { FEATURE_FLAGS, INTEGRATIONS } from "@/lib/integrations";
+import { FEATURE_FLAGS, flagDefault, INTEGRATIONS } from "@/lib/integrations";
 import { clearIntegrationSecret, saveIntegration, setFeatureFlag } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -95,7 +95,7 @@ export default async function IntegrationsPage() {
         <h2 className="text-lg font-semibold">Feature flags</h2>
         <div className="mt-3 divide-y rounded-md border">
           {FEATURE_FLAGS.map((f) => {
-            const on = flags[f.key] ?? false;
+            const on = flags[f.key] ?? flagDefault(f.key);
             return (
               <ActionForm key={f.key} action={setFeatureFlag} className="flex items-center justify-between gap-4 px-4 py-3">
                 <input type="hidden" name="key" value={f.key} />

@@ -10,6 +10,7 @@ import { projectSceneRegenerateRequested } from "@/inngest/events";
 import { recordUsageCost } from "@/lib/activity";
 import { invokeMediaLambda } from "@/lib/media-lambda";
 import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
+import { storedFrame, type FrameFaces } from "@/lib/media/framing";
 import { downloadToR2 } from "@/lib/media/stock";
 import { youtubeId } from "@/lib/media/visual-plan";
 import { busyStep, startProgress } from "@/lib/project-state";
@@ -100,6 +101,32 @@ async function guardFrame(asset: { assetId: string; key: string }, ctx: { userId
   if (!(await faceGuardAvailable()).enabled) return null;
   return (await analyseAsset(asset, ctx)).frame;
 }
+
+export type FrameResult = { ok: true; frame: FrameFaces; message: string } | { ok: false; message: string };
+
+/**
+ * Manual "auto-align" of one picture (uploads, stock and AI stills are not scanned by the build): detect its faces
+ * once (kept in `assets.meta.frame`, so a second click is free) and hand them to the inspector, which runs the pure guard.
+ */
+export async function analyseVisual(input: { projectId: string; assetId: string }): Promise<FrameResult> {
+  try {
+    const { ws, log } = await assertWorkspaceWriter();
+    const asset = await withOrgContext(ws, (tx) => tx.query.assets.findFirst({ where: and(eq(schema.assets.projectId, input.projectId), eq(schema.assets.id, input.assetId)) }));
+    if (!asset) throw new Error("Không tìm thấy hình này trong dự án");
+    if (!((asset.mime ?? "").startsWith("image/") || asset.origin === "article")) throw new Error("Chỉ căn được ảnh tĩnh");
+    const known = storedFrame(asset.meta);
+    if (known) return { ok: true, frame: known, message: facesMessage(known.faces.length) };
+    const guard = await faceGuardAvailable();
+    if (!guard.enabled) throw new Error(`Nhận diện khuôn mặt chưa dùng được: ${guard.reason}`);
+    const res = await analyseAsset({ assetId: asset.id, key: asset.r2Path }, { userId: ws.userId, organizationId: ws.organizationId, projectId: input.projectId });
+    if (!res.frame) throw new Error(`Không phân tích được ảnh: ${res.error ?? "lỗi không rõ"}`);
+    await log("asset.faces_analysed", { assetId: asset.id, faces: res.frame.faces.length, manual: true }, input.projectId);
+    return { ok: true, frame: res.frame, message: facesMessage(res.frame.faces.length) };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+const facesMessage = (n: number) => (n ? `Đã nhận diện ${n} khuôn mặt` : "Không thấy khuôn mặt nào: giữ khung ở giữa");
 
 /** Presigned PUT for a browser upload straight to R2 (bucket CORS must allow the app origin: infra/r2/cors.json). */
 export async function createUploadUrl(input: { projectId: string; filename: string; contentType: string; sizeBytes: number }): Promise<UploadTicket> {

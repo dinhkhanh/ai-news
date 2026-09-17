@@ -418,6 +418,7 @@ export function Editor(props: EditorProps) {
               onRegenerate={(what, payload) => regenerate(what, { sceneId: selected.id, ...payload })}
               onSeek={() => seekToScene(selected.id)}
               onOptionAdded={addOption}
+              onOptionFramed={(assetId, frame) => setOptions((list) => list.map((o) => (o.assetId === assetId ? { ...o, frame } : o)))}
             />
           ) : (
             <p className="text-sm text-muted-foreground">Chọn một cảnh.</p>
