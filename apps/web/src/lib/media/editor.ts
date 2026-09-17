@@ -54,6 +54,8 @@ export const editorSceneSchema = z.object({
   /** Further shots; the scene's time is split equally between `visual` and these so the picture changes every ≤ 5 s. */
   shots: z.array(editorVisualSchema).max(12).default([]),
   holdMs: z.number().min(0).max(5000).default(0),
+  /** Show the brand kit's overlay PNG on this scene (no effect when the kit has none). */
+  overlay: z.boolean().default(true),
   /** Caption chunks relative to the scene's voice start; null = automatic chunking of voice.words. */
   captions: z.array(captionChunkSchema).nullable().default(null),
 });
@@ -165,6 +167,7 @@ export function buildFromDoc(doc: EditorDoc, audio: { mixKey: string; voiceKey: 
       visual: toVisualInput(s.visual),
       shots: s.shots.map(toVisualInput),
       holdMs: s.holdMs,
+      overlay: s.overlay,
       captions: s.captions ?? undefined,
     })),
     music: doc.music ? { key: doc.music.key, gainDb: doc.music.gainDb, attribution: doc.music.attribution } : null,
@@ -201,6 +204,7 @@ export function docKeys(doc: EditorDoc): string[] {
   }
   if (doc.music) keys.add(doc.music.key);
   if (doc.brand.logoSrc) keys.add(doc.brand.logoSrc);
+  if (doc.brand.overlaySrc) keys.add(doc.brand.overlaySrc);
   return [...keys];
 }
 
@@ -268,6 +272,7 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
       visual,
       shots,
       holdMs: 0,
+      overlay: sc.overlay ?? true,
       captions: null,
     };
   });
@@ -289,6 +294,7 @@ export function describeChanges(prev: EditorDoc, next: EditorDoc): string[] {
     if (added.length) out.push(`Thêm cảnh ${added.join(", ")}`);
     if (!removed.length && !added.length) out.push("Đổi thứ tự cảnh");
   }
+  const overlayChanged: EditorScene[] = [];
   for (const n of next.scenes) {
     const p = prev.scenes.find((s) => s.id === n.id);
     if (!p) continue;
@@ -303,7 +309,15 @@ export function describeChanges(prev: EditorDoc, next: EditorDoc): string[] {
     if (p.voice?.key !== n.voice?.key) out.push(`${n.id}: giọng đọc mới`);
     else if (JSON.stringify(sceneCaptions(p)) !== JSON.stringify(sceneCaptions(n))) out.push(`${n.id}: sửa phụ đề`);
     if (p.holdMs !== n.holdMs) out.push(`${n.id}: giữ thêm ${n.holdMs} ms`);
+    if (p.overlay !== n.overlay) overlayChanged.push(n);
   }
+  if (overlayChanged.length) {
+    const on = overlayChanged.filter((s) => s.overlay).map((s) => s.id);
+    const off = overlayChanged.filter((s) => !s.overlay).map((s) => s.id);
+    if (on.length) out.push(`Bật lớp phủ: ${on.join(", ")}`);
+    if (off.length) out.push(`Tắt lớp phủ: ${off.join(", ")}`);
+  }
+  if (JSON.stringify(prev.brand) !== JSON.stringify(next.brand)) out.push(prev.brand.name !== next.brand.name ? `Đổi bộ nhận diện: ${next.brand.name}` : "Cập nhật bộ nhận diện");
   if ((prev.music?.key ?? null) !== (next.music?.key ?? null)) out.push(next.music ? `Đổi nhạc: ${next.music.title}` : "Bỏ nhạc nền");
   else if (prev.music && next.music && prev.music.gainDb !== next.music.gainDb) out.push(`Nhạc ${next.music.gainDb} dB`);
   if ((prev.coverAtSec ?? null) !== (next.coverAtSec ?? null)) out.push(next.coverAtSec == null ? "Ảnh bìa tự động" : `Ảnh bìa tại ${next.coverAtSec.toFixed(1)} s`);

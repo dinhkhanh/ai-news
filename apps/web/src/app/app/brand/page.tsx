@@ -1,30 +1,21 @@
-import { and, eq } from "drizzle-orm";
+import Link from "next/link";
 import { BRAND_FONTS } from "@ai-news/video/schema";
-import { schema } from "@/db";
-import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { brandFromRow } from "@/lib/media/brand";
+import { Textarea } from "@/components/ui/textarea";
+import { brandFromRow, listBrandKits } from "@/lib/media/brand";
+import { cn } from "@/lib/utils";
 import { presignGet } from "@/lib/r2";
 import { requireWorkspace } from "@/lib/workspace";
-import { saveBrandKit } from "./actions";
+import { deleteBrandKit, duplicateBrandKit, saveBrandKit, setDefaultBrandKit } from "./actions";
+import { ColourField } from "./colour-field";
+import { OverlayUploader } from "./overlay-uploader";
 
 export const dynamic = "force-dynamic";
-
-function C({ name, label, value }: { name: string; label: string; value: string }) {
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={name}>{label}</Label>
-      <div className="flex items-center gap-2">
-        <span className="h-9 w-9 shrink-0 rounded border" style={{ background: value }} aria-hidden />
-        <Input id={name} name={name} defaultValue={value} className="w-32 font-mono" />
-      </div>
-    </div>
-  );
-}
 
 function F({ name, label, value }: { name: string; label: string; value: string }) {
   return (
@@ -41,48 +32,102 @@ function F({ name, label, value }: { name: string; label: string; value: string 
   );
 }
 
-export default async function BrandPage() {
+export default async function BrandPage({ searchParams }: { searchParams: Promise<{ kit?: string }> }) {
   const ws = await requireWorkspace();
-  const row = await withOrgContext(ws, (tx) => tx.query.brandKits.findFirst({ where: and(eq(schema.brandKits.organizationId, ws.organizationId), eq(schema.brandKits.isDefault, true)) }));
-  const { brand } = brandFromRow(row);
+  const sp = await searchParams;
+  const kits = await listBrandKits(ws);
   const canEdit = ws.isAdmin || ["admin", "owner", "publisher"].includes(ws.role);
-  let logoUrl: string | null = null;
-  if (row?.logoPath) {
+  const creating = sp.kit === "new" || kits.length === 0;
+  const row = creating ? null : (kits.find((k) => k.id === sp.kit) ?? kits[0]);
+  const { brand } = brandFromRow(row);
+  const sign = async (key: string | null | undefined) => {
+    if (!key) return null;
     try {
-      logoUrl = await presignGet(row.logoPath, 600);
+      return await presignGet(key, 600);
     } catch {
-      logoUrl = null;
+      return null;
     }
-  }
+  };
+  const [logoUrl, overlayUrl, thumbs] = await Promise.all([sign(row?.logoPath), sign(row?.overlayPath), Promise.all(kits.map((k) => sign(k.overlayPath)))]);
+  const autoKits = kits.filter((k) => k.autoMatch && !k.isDefault).length;
+
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Bộ nhận diện</h1>
-        <p className="text-sm text-muted-foreground">Workspace {ws.name}. Áp dụng cho các lần dựng timeline tiếp theo: màu, font (hỗ trợ tiếng Việt), logo, kiểu phụ đề, dòng nguồn.</p>
+        <p className="text-sm text-muted-foreground">
+          Workspace {ws.name}. Mỗi bộ là một “diện mạo” cho một loại tin: màu, font (hỗ trợ tiếng Việt), logo, lớp phủ PNG, kiểu phụ đề. Khi tạo dự án, hệ thống tự chọn bộ khớp nội dung bài
+          (theo mô tả + từ khoá) hoặc bạn chọn tay; không bộ nào khớp thì dùng bộ mặc định. Thay đổi áp dụng cho các lần dựng timeline tiếp theo.
+        </p>
       </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {kits.map((k, i) => (
+          <Link key={k.id} href={`/app/brand?kit=${k.id}`} className={cn("flex gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50", row?.id === k.id && "border-primary ring-1 ring-primary")}>
+            <div className="relative aspect-[9/16] w-12 shrink-0 overflow-hidden rounded border" style={{ background: `linear-gradient(160deg, ${k.colours.primary ?? "#0f172a"}, ${k.colours.background ?? "#0b1220"})` }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {thumbs[i] ? <img src={thumbs[i]} alt="" className="absolute inset-0 h-full w-full" loading="lazy" /> : null}
+              <span className="absolute bottom-1 left-1 h-1.5 w-5 rounded-full" style={{ background: k.colours.accent ?? "#f59e0b" }} />
+            </div>
+            <div className="min-w-0 space-y-1">
+              <div className="truncate text-sm font-medium">{k.name}</div>
+              <div className="flex flex-wrap gap-1">
+                {k.isDefault ? <Badge>mặc định</Badge> : null}
+                {k.overlayPath ? <Badge variant="outline">lớp phủ</Badge> : null}
+                {!k.isDefault ? <Badge variant="secondary">{k.autoMatch ? "tự chọn" : "chỉ chọn tay"}</Badge> : null}
+              </div>
+              <p className="line-clamp-2 text-xs text-muted-foreground">{k.description || (k.isDefault ? "Dùng khi không bộ nào khớp." : "Chưa có mô tả: bộ chọn tự động sẽ khó khớp.")}</p>
+            </div>
+          </Link>
+        ))}
+        {canEdit ? (
+          <Link href="/app/brand?kit=new" className={cn("grid min-h-24 place-items-center rounded-lg border border-dashed p-3 text-sm text-muted-foreground transition-colors hover:bg-muted/50", creating && kits.length > 0 && "border-primary text-foreground")}>
+            + Bộ nhận diện mới
+          </Link>
+        ) : null}
+      </div>
+      {kits.length > 1 && autoKits === 0 ? <p className="text-xs text-amber-700 dark:text-amber-400">Chưa bộ nào bật “tự chọn theo nội dung”, nên mọi dự án dùng bộ mặc định trừ khi chọn tay.</p> : null}
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">{row ? row.name : "Chưa có bộ nhận diện riêng (đang dùng mặc định)"}</CardTitle>
+          <CardTitle className="text-base">{row ? row.name : kits.length ? "Bộ nhận diện mới" : "Chưa có bộ nhận diện riêng (đang dùng mặc định của hệ thống)"}</CardTitle>
           <CardDescription>Vùng an toàn cố định cho 1080×1920: trên 220 px, dưới 420 px, trái 60 px, phải 180 px.</CardDescription>
         </CardHeader>
         <CardContent>
-          <ActionForm action={saveBrandKit} className="space-y-4">
+          <ActionForm key={row?.id ?? "new"} action={saveBrandKit} className="space-y-4">
+            <input type="hidden" name="id" value={row?.id ?? ""} />
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
-                <Label htmlFor="name">Tên</Label>
-                <Input id="name" name="name" defaultValue={row?.name ?? "Brand kit"} />
+                <Label htmlFor="name">Tên (nói rõ dùng cho gì)</Label>
+                <Input id="name" name="name" required minLength={2} maxLength={60} defaultValue={row?.name ?? ""} placeholder="Thể thao · Kinh tế · Công nghệ · Tin nóng…" />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="outroText">Dòng kết (outro)</Label>
                 <Input id="outroText" name="outroText" defaultValue={brand.outroText ?? ""} placeholder="Theo dõi để cập nhật tin mới" />
               </div>
             </div>
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="text-sm font-medium">Tự chọn theo nội dung bài</div>
+              <div className="space-y-1">
+                <Label htmlFor="description">Bộ này dành cho loại tin nào?</Label>
+                <Textarea id="description" name="description" rows={2} maxLength={400} defaultValue={row?.description ?? ""} placeholder="Tin thể thao: bóng đá trong nước và quốc tế, SEA Games, Olympic, chuyển nhượng cầu thủ…" className="text-sm" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="matchKeywords">Từ khoá (phân cách bằng dấu phẩy, tối đa 30)</Label>
+                <Input id="matchKeywords" name="matchKeywords" defaultValue={(row?.matchKeywords ?? []).join(", ")} placeholder="bóng đá, V-League, HLV, đội tuyển, huy chương" />
+                <p className="text-[11px] text-muted-foreground">Haiku đọc mô tả + từ khoá để chọn bộ; nếu mô hình không sẵn sàng thì đếm từ khoá (không phân biệt dấu). Bộ mặc định thắng khi không bộ nào khớp rõ.</p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="autoMatch" defaultChecked={row?.autoMatch ?? true} /> cho phép tự chọn bộ này (bỏ chọn cho bộ theo mùa / tài trợ chỉ chọn tay)
+              </label>
+            </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <C name="primary" label="Màu chính (nền tiêu đề)" value={brand.colours.primary} />
-              <C name="accent" label="Màu nhấn" value={brand.colours.accent} />
-              <C name="background" label="Màu nền" value={brand.colours.background} />
-              <C name="text" label="Màu chữ" value={brand.colours.text} />
-              <C name="captionHighlight" label="Màu từ đang đọc" value={brand.colours.captionHighlight} />
+              <ColourField name="primary" label="Màu chính (nền tiêu đề)" value={brand.colours.primary} hint="Giảm độ đậm để nhìn xuyên qua thẻ tiêu đề." />
+              <ColourField name="accent" label="Màu nhấn (vạch tiêu đề, thanh tiến độ)" value={brand.colours.accent} />
+              <ColourField name="background" label="Màu nền (sau hình, giữa các cảnh)" value={brand.colours.background} hint="Nên để 100%: phía sau nền là màu đen." />
+              <ColourField name="text" label="Màu chữ" value={brand.colours.text} />
+              <ColourField name="captionBg" label="Nền phụ đề" value={brand.colours.captionBg} hint="0% = phụ đề không có nền." />
+              <ColourField name="captionHighlight" label="Màu từ đang đọc" value={brand.colours.captionHighlight} />
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               <F name="fontHeading" label="Font tiêu đề" value={brand.fonts.heading} />
@@ -112,6 +157,17 @@ export default async function BrandPage() {
               <div className="space-y-1">
                 <Label htmlFor="logo">Logo (PNG/SVG/WebP, ≤ 2 MB)</Label>
                 <Input id="logo" name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
+                <div className="space-y-1 pt-2">
+                  <Label htmlFor="logoMotion">Chuyển động logo trong video</Label>
+                  <select id="logoMotion" name="logoMotion" defaultValue={brand.logoMotion} className="h-9 rounded-md border bg-background px-2 text-sm">
+                    <option value="flip">lật 3D như đồng xu (mỗi 6 giây)</option>
+                    <option value="tilt">trôi nổi: nghiêng nhẹ liên tục</option>
+                    <option value="spin">xoay tròn một vòng (hợp logo tròn)</option>
+                    <option value="pulse">nhịp đập (phóng nhẹ)</option>
+                    <option value="none">đứng yên</option>
+                  </select>
+                  <p className="text-[11px] text-muted-foreground">Mọi kiểu đều có màn xuất hiện: logo xoay ra từ cạnh khi video bắt đầu.</p>
+                </div>
                 {logoUrl ? (
                   <div className="flex items-center gap-3 pt-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -122,17 +178,82 @@ export default async function BrandPage() {
                   </div>
                 ) : null}
               </div>
-              <label className="flex items-center gap-2 pt-6 text-sm">
-                <input type="checkbox" name="showSource" defaultChecked={brand.showSource} /> hiện dòng “Nguồn: …”
-              </label>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="overlayLayer">Lớp phủ PNG nằm ở</Label>
+                  <select id="overlayLayer" name="overlayLayer" defaultValue={brand.overlayLayer} className="h-9 rounded-md border bg-background px-2 text-sm">
+                    <option value="under_text">trên hình, dưới tiêu đề / phụ đề / logo</option>
+                    <option value="top">trên cùng (che cả chữ)</option>
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" name="showSource" defaultChecked={brand.showSource} /> hiện dòng “Nguồn: …”
+                </label>
+              </div>
             </div>
             <Button type="submit" disabled={!canEdit}>
-              Lưu bộ nhận diện
+              {row ? "Lưu bộ nhận diện" : "Tạo bộ nhận diện"}
             </Button>
             {!canEdit ? <p className="text-xs text-muted-foreground">Chỉ admin/publisher của workspace mới sửa được.</p> : null}
           </ActionForm>
         </CardContent>
       </Card>
+
+      {row ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Lớp phủ PNG của “{row.name}”</CardTitle>
+            <CardDescription>Khung, dải màu, hoạ tiết… phủ lên toàn bộ video; lưu ngay khi tải lên, không cần bấm Lưu ở trên.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <OverlayUploader
+              key={`${row.id}-${row.overlayPath ?? ""}-${brand.overlayLayer}`}
+              kitId={row.id}
+              overlayUrl={overlayUrl}
+              logoUrl={logoUrl}
+              layer={brand.overlayLayer}
+              colours={brand.colours}
+              captionPosition={brand.caption.position}
+              captionFontSize={brand.caption.fontSize}
+              canEdit={canEdit}
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <p className="text-xs text-muted-foreground">Tạo bộ trước, rồi tải lớp phủ PNG lên ở bước sau.</p>
+      )}
+
+      {row && canEdit ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border p-3">
+          {!row.isDefault ? (
+            <ActionForm action={setDefaultBrandKit}>
+              <input type="hidden" name="id" value={row.id} />
+              <Button type="submit" size="sm" variant="outline">
+                Đặt làm mặc định
+              </Button>
+            </ActionForm>
+          ) : (
+            <span className="text-xs text-muted-foreground">Đây là bộ mặc định: dùng khi không bộ nào khớp bài.</span>
+          )}
+          <ActionForm action={duplicateBrandKit}>
+            <input type="hidden" name="id" value={row.id} />
+            <Button type="submit" size="sm" variant="outline">
+              Nhân bản
+            </Button>
+          </ActionForm>
+          {!row.isDefault ? (
+            <ActionForm action={deleteBrandKit} className="ml-auto flex items-center gap-2">
+              <input type="hidden" name="id" value={row.id} />
+              <label className="flex items-center gap-1 text-xs">
+                <input type="checkbox" name="confirm" /> xác nhận xoá
+              </label>
+              <Button type="submit" size="sm" variant="ghost" className="text-destructive">
+                Xoá bộ này
+              </Button>
+            </ActionForm>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

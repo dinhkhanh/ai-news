@@ -14,7 +14,7 @@
  * guard may enlarge it (≤ `MAX_ZOOM`) to gain vertical travel, and turns Ken
  * Burns off when the zoom alone would push a face out.
  */
-import { OUTPUT, SAFE_ZONES, type Focus } from "@ai-news/video/schema";
+import { captionBlockHeight, headlineBottom, OUTPUT, OUTRO_HEIGHT, outroBottom, SAFE_ZONES, type Focus } from "@ai-news/video/schema";
 
 /** Face box normalised to the source picture (0–1, origin top-left). */
 export type FaceBox = { x: number; y: number; w: number; h: number; confidence: number };
@@ -102,16 +102,20 @@ export function overlayZones(scene: {
     const padY = big ? 22 : 16;
     const textWidth = right - left - 14 - 2 * padX;
     const { lines, longest } = wrapLines(scene.headline, Math.floor(textWidth / (font * CHAR_EM)));
-    const y0 = SAFE_ZONES.top + 24;
-    zones.push({ name: "headline", x0: left, y0, x1: Math.min(right, left + 14 + 2 * padX + longest * font * CHAR_EM), y1: y0 + lines * font * 1.18 + 2 * padY });
+    // Bottom-anchored above the captions (lower third); a longer headline grows upwards.
+    const y1 = H - headlineBottom({ position: scene.captionPosition, fontSize: scene.captionFontSize }, scene.kind);
+    zones.push({ name: "headline", x0: left, y0: y1 - (lines * font * 1.18 + 2 * padY), x1: Math.min(right, left + 14 + 2 * padX + longest * font * CHAR_EM), y1 });
   }
   if (scene.hasCaptions) {
     // Chunks hold up to 26 characters, which wrap to two lines at the default size.
-    const h = 2 * scene.captionFontSize * 1.35 + 28;
+    const h = captionBlockHeight(scene.captionFontSize);
     const y0 = scene.captionPosition === "middle" ? H / 2 - 60 : H - (SAFE_ZONES.bottom + 30) - h;
     zones.push({ name: "captions", x0: left, y0, x1: right, y1: y0 + h });
   }
-  if (scene.kind === "cta") zones.push({ name: "outro", x0: left, y0: H - (SAFE_ZONES.bottom + 140) - 160, x1: right, y1: H - (SAFE_ZONES.bottom + 140) });
+  if (scene.kind === "cta") {
+    const y1 = H - outroBottom({ position: scene.captionPosition, fontSize: scene.captionFontSize });
+    zones.push({ name: "outro", x0: left, y0: y1 - OUTRO_HEIGHT, x1: right, y1 });
+  }
   if (scene.showSource) zones.push({ name: "source", x0: left, y0: H - (SAFE_ZONES.bottom - 60) - 56, x1: left + 500, y1: H - (SAFE_ZONES.bottom - 60) });
   if (scene.hasLogo) zones.push({ name: "logo", x0: W - (SAFE_ZONES.right - 60) - 300, y0: SAFE_ZONES.top - 120, x1: W - (SAFE_ZONES.right - 60), y1: SAFE_ZONES.top - 30 });
   zones.push({ name: "platform_bottom", x0: 0, y0: H - SAFE_ZONES.bottom, x1: W, y1: H });

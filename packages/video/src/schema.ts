@@ -6,6 +6,29 @@ export const OUTPUT = { width: 1080, height: 1920, fps: 30 } as const;
 /** Safe zones in px for 1080x1920 (platform UI overlays: top bar, right rail, bottom caption/CTA). */
 export const SAFE_ZONES = { top: 220, bottom: 420, left: 60, right: 180 } as const;
 
+/** Room kept for the caption block: a chunk wraps to two lines at most (line height 1.35 + padding). */
+export const captionBlockHeight = (fontSize: number) => 2 * fontSize * 1.35 + 28;
+
+/**
+ * Distance in px from the bottom of the frame to the bottom edge of the
+ * headline card. The headline lives in the lower third, right above the
+ * captions and growing upwards, because the top of a picture is where faces
+ * and the important part of the shot usually are. With captions mid-frame it
+ * takes the slot bottom captions would have; on a CTA scene it clears the outro.
+ * Shared by `News.tsx` and the face guard's `overlayZones` (apps/web framing.ts).
+ */
+type CaptionLayout = { position: "bottom" | "middle"; fontSize: number };
+const aboveCaptions = (caption: CaptionLayout) => SAFE_ZONES.bottom + 30 + (caption.position === "bottom" ? captionBlockHeight(caption.fontSize) + 24 : 0);
+
+/** Room kept for the outro (channel line + credits) of the closing scene. */
+export const OUTRO_HEIGHT = 160;
+/** Bottom edge of the outro, from the bottom of the frame: above bottom captions, never underneath them. */
+export const outroBottom = (caption: CaptionLayout) => Math.max(aboveCaptions(caption), SAFE_ZONES.bottom + 140);
+
+export function headlineBottom(caption: CaptionLayout, kind: "hook" | "body" | "cta") {
+  return kind === "cta" ? outroBottom(caption) + OUTRO_HEIGHT + 24 : aboveCaptions(caption);
+}
+
 export const testCardSchema = z.object({
   title: z.string().default("ai-news test render"),
   durationSec: z.number().int().min(3).max(60).default(6),
@@ -15,6 +38,20 @@ export type TestCardProps = z.infer<typeof testCardSchema>;
 
 /** Fonts bundled with the News composition (loaded via @remotion/google-fonts). */
 export const BRAND_FONTS = ["Be Vietnam Pro", "Inter"] as const;
+
+/**
+ * How the logo moves. Every motion starts with the same entrance (the logo turns in from its edge) and then repeats
+ * every `LOGO_MOTION_PERIOD_SEC`: `flip` = a full turn around the vertical axis like a coin, `tilt` = it keeps
+ * floating, pitching and yawing a few degrees, `spin` = a full turn in the plane (round marks), `pulse` = a short
+ * heartbeat; `none` = still.
+ */
+export const LOGO_MOTIONS = ["flip", "tilt", "spin", "pulse", "none"] as const;
+export type LogoMotion = (typeof LOGO_MOTIONS)[number];
+export const LOGO_MOTION_PERIOD_SEC = 6;
+
+/** Where the brand overlay PNG sits in the layer stack. */
+export const OVERLAY_LAYERS = ["under_text", "top"] as const;
+export type OverlayLayer = (typeof OVERLAY_LAYERS)[number];
 
 /**
  * Brand kit as embedded in a timeline so a render is reproducible even if the
@@ -43,6 +80,15 @@ export const brandSchema = z.object({
   }),
   /** Absolute URL at render time (resolved from an R2 key by the app). */
   logoSrc: z.string().nullable().default(null),
+  logoMotion: z.enum(LOGO_MOTIONS).default("flip"),
+  /**
+   * Full-frame 1080×1920 transparent PNG (frame, lower band, corner graphics…)
+   * laid over every scene that has `overlay` on, from the scene's first frame
+   * to its last, without the scene fade. R2 key in storage, URL at render time.
+   */
+  overlaySrc: z.string().nullable().default(null),
+  /** `under_text`: above the pictures, below headline / captions / logo. `top`: above everything. */
+  overlayLayer: z.enum(OVERLAY_LAYERS).default("under_text"),
   showSource: z.boolean().default(true),
   /** Short label shown in the CTA/outro, e.g. the channel name. */
   outroText: z.string().nullable().default(null),
@@ -127,6 +173,8 @@ export const sceneSchema = z.object({
    * Lambda renders always use the mixed track.
    */
   voiceSrc: z.string().nullable().default(null),
+  /** Show the brand overlay PNG (`brand.overlaySrc`) on this scene; switched per scene in the editor. */
+  overlay: z.boolean().default(true),
 });
 export type TimelineScene = z.infer<typeof sceneSchema>;
 

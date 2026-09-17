@@ -109,7 +109,7 @@ export default async function ProjectPage({
     if (!project) return null;
     // One round trip to the pooler is ~60 ms; issue the independent queries together so the
     // connection pipelines them instead of paying that ten times in a row.
-    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications] =
+    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications, kits] =
       await Promise.all([
         tx.query.articles.findFirst({
           where: eq(schema.articles.projectId, id),
@@ -166,11 +166,17 @@ export default async function ProjectPage({
           .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
           .where(eq(schema.publications.projectId, id))
           .orderBy(desc(schema.publications.createdAt)),
+        tx
+          .select({ id: schema.brandKits.id, name: schema.brandKits.name, isDefault: schema.brandKits.isDefault })
+          .from(schema.brandKits)
+          .where(eq(schema.brandKits.organizationId, ws.organizationId))
+          .orderBy(desc(schema.brandKits.isDefault), schema.brandKits.name),
       ]);
-    return { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications };
+    return { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications, kits };
   });
   if (!data) notFound();
-  const { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications } = data;
+  const { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications, kits } = data;
+  const projectKit = kits.find((k) => k.id === project.brandKitId) ?? null;
   const selectedTimeline = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   const timelineJson = selectedTimeline ? (selectedTimeline.json as unknown as Timeline) : null;
   const sign = async (key: string | null | undefined, ttl = 900) => {
@@ -535,6 +541,20 @@ export default async function ProjectPage({
                 <ActionForm action={requestAssets} className="flex flex-wrap items-center gap-3">
                   <input type="hidden" name="projectId" value={project.id} />
                   <input type="hidden" name="scriptId" value={selected?.id ?? ""} />
+                  {kits.length > 1 ? (
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground" title={project.brandKitReason ?? undefined}>
+                      bộ nhận diện
+                      <select name="brandKitId" defaultValue={projectKit?.id ?? ""} className="h-8 max-w-44 rounded-md border bg-background px-2 text-xs text-foreground">
+                        <option value="">mặc định{kits[0]?.isDefault ? ` (${kits[0].name})` : ""}</option>
+                        {kits.map((k) => (
+                          <option key={k.id} value={k.id}>
+                            {k.name}
+                            {k.id === project.brandKitId && project.brandKitSource === "auto" ? " · tự chọn" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <label className="flex items-center gap-1 text-xs text-muted-foreground">
                     <input type="checkbox" name="skipStock" /> bỏ qua stock
                   </label>
@@ -548,6 +568,12 @@ export default async function ProjectPage({
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {kits.length > 1 && project.brandKitSource === "auto" && projectKit ? (
+              <p className="text-xs text-muted-foreground">
+                Bộ nhận diện tự chọn theo nội dung: <b>{projectKit.name}</b>
+                {project.brandKitReason ? ` – ${project.brandKitReason}` : ""}. Đổi ở ô bên trên trước khi dựng, hoặc đổi ngay trong trình chỉnh sửa mà không cần dựng lại.
+              </p>
+            ) : null}
             {timelines.length > 1 ? (
               <div className="flex flex-wrap gap-1 text-xs">
                 {timelines.map((t) => (

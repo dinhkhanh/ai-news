@@ -158,6 +158,19 @@ describe("describeChanges + docKeys", () => {
     expect(describeChanges(doc, doc)).toEqual([]);
     expect(describeChanges(doc, { ...doc, scenes: doc.scenes.slice(0, 2) })).toContain("Bỏ cảnh s3");
   });
+  it("carries the per-scene overlay switch into the timeline and names overlay / kit changes", () => {
+    const branded: EditorDoc = { ...doc, brand: { ...doc.brand, name: "Thể thao", overlaySrc: "library/brand/o/overlay-k1.png", overlayLayer: "top" } };
+    const next: EditorDoc = { ...branded, scenes: branded.scenes.map((s) => (s.id === "s3" ? { ...s, overlay: false } : s)) };
+    const { timeline } = buildFromDoc(next, null);
+    expect(timeline.scenes.map((s) => s.overlay)).toEqual([true, true, false]);
+    expect(timeline.brand.overlaySrc).toBe("library/brand/o/overlay-k1.png");
+    expect(docKeys(next)).toContain("library/brand/o/overlay-k1.png");
+    expect(describeChanges(branded, next)).toEqual(["Tắt lớp phủ: s3"]);
+    expect(describeChanges(doc, branded)).toEqual(["Đổi bộ nhận diện: Thể thao"]);
+    // Documents and timelines saved before the overlay existed default to "on" / no overlay.
+    expect(doc.scenes.every((s) => s.overlay)).toBe(true);
+    expect(buildFromDoc(doc, null).timeline.brand.overlaySrc).toBeNull();
+  });
   it("lists every key once", () => {
     expect(docKeys(doc).sort()).toEqual(["media/o/p/aroll/b1-0.jpg", "media/o/p/broll/b1-s1.mp4", "media/o/p/music/b1.mp3", "media/o/p/vo/b1-s1.wav", "media/o/p/vo/b1-s2.wav", "media/o/p/vo/b1-s3.wav"]);
   });

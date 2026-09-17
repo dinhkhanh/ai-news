@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { SAFE_ZONES, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { headlineBottom, LOGO_MOTION_PERIOD_SEC, outroBottom, SAFE_ZONES, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -92,7 +92,8 @@ const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Bra
     <div
       style={{
         position: "absolute",
-        top: SAFE_ZONES.top + 24,
+        // Lower third, right above the captions; anchored by its bottom edge so a long headline grows upwards.
+        bottom: headlineBottom(brand.caption, kind),
         left: SAFE_ZONES.left,
         right: SAFE_ZONES.right,
         opacity: enter,
@@ -143,10 +144,51 @@ const SourceLine: React.FC<{ name: string | null; brand: Brand }> = ({ name, bra
   );
 };
 
-const Logo: React.FC<{ brand: Brand }> = ({ brand }) =>
-  brand.logoSrc ? (
-    <Img src={brand.logoSrc} style={{ position: "absolute", top: SAFE_ZONES.top - 120, right: SAFE_ZONES.right - 60, height: 90, objectFit: "contain", opacity: 0.95 }} />
-  ) : null;
+/** Ease in and out (cubic), 0 → 1. */
+const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/**
+ * The logo turns in from its edge when the video starts, then moves again every
+ * `LOGO_MOTION_PERIOD_SEC` – short accents, so it draws the eye without competing
+ * with the headline. Pure function of the frame (deterministic on Lambda).
+ * Timelines stored before 0.6.0 have no `logoMotion`; they get the default.
+ */
+function logoTransform(motion: LogoMotion, frame: number, fps: number) {
+  if (motion === "none") return { transform: "none", opacity: 0.95 };
+  const enter = spring({ frame: frame - Math.round(0.3 * fps), fps, config: { damping: 14, stiffness: 90, mass: 0.9 } });
+  const entrance = `rotateY(${(1 - Math.min(1, enter)) * -90}deg) scale(${0.6 + 0.4 * enter})`;
+  const period = LOGO_MOTION_PERIOD_SEC * fps;
+  // The accent takes the first 0.9 s of every period after the first one (the entrance owns the start of the video).
+  const since = frame - period;
+  const p = since < 0 ? 1 : Math.min(1, (since % period) / (0.9 * fps));
+  const t = frame / fps;
+  let accent = "";
+  if (motion === "flip") accent = `rotateY(${easeInOut(p) * 360}deg)`;
+  else if (motion === "spin") accent = `rotate(${easeInOut(p) * 360}deg)`;
+  else if (motion === "pulse") accent = `scale(${1 + 0.16 * Math.abs(Math.sin(2 * Math.PI * p)) * (1 - p)})`; // two beats, the second softer
+  else accent = `rotateX(${Math.sin(t * 1.1) * 14}deg) rotateY(${Math.cos(t * 0.8) * 20}deg)`;
+  return { transform: `${entrance} ${accent}`, opacity: 0.95 * Math.min(1, enter * 1.5) };
+}
+
+const Logo: React.FC<{ brand: Brand }> = ({ brand }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  if (!brand.logoSrc) return null;
+  const { transform, opacity } = logoTransform(brand.logoMotion ?? "flip", frame, fps);
+  return (
+    // Perspective on the parent gives the turns real depth; the box hugs the image so it turns around its own centre.
+    <div style={{ position: "absolute", top: SAFE_ZONES.top - 120, right: SAFE_ZONES.right - 60, height: 90, perspective: 700 }}>
+      <Img src={brand.logoSrc} style={{ display: "block", height: 90, objectFit: "contain", opacity, transform, transformOrigin: "50% 50%", backfaceVisibility: "visible" }} />
+    </div>
+  );
+};
+
+/** Brand overlay PNG: full frame, constant for the whole scene (no fade), so consecutive scenes read as one continuous frame. */
+const BrandOverlay: React.FC<{ src: string }> = ({ src }) => (
+  <AbsoluteFill style={{ pointerEvents: "none" }}>
+    <Img src={src} style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+  </AbsoluteFill>
+);
 
 const Progress: React.FC<{ brand: Brand }> = ({ brand }) => {
   const frame = useCurrentFrame();
@@ -203,7 +245,7 @@ const Outro: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   const enter = spring({ frame, fps, config: { damping: 200 } });
   const { brand } = timeline;
   return (
-    <div style={{ position: "absolute", left: SAFE_ZONES.left, right: SAFE_ZONES.right, bottom: SAFE_ZONES.bottom + 140, opacity: enter, fontFamily: fontFamily(brand.fonts.body), color: brand.colours.text }}>
+    <div style={{ position: "absolute", left: SAFE_ZONES.left, right: SAFE_ZONES.right, bottom: outroBottom(brand.caption), opacity: enter, fontFamily: fontFamily(brand.fonts.body), color: brand.colours.text }}>
       {brand.outroText ? <div style={{ fontSize: 44, fontWeight: 700 }}>{brand.outroText}</div> : null}
       {timeline.attribution.length ? <div style={{ fontSize: 26, opacity: 0.8, marginTop: 12, lineHeight: 1.4 }}>{timeline.attribution.join(" · ")}</div> : null}
     </div>
@@ -252,6 +294,7 @@ export const News: React.FC<Timeline> = (timeline) => {
             <SceneShots scene={scene} brand={brand} />
             <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.55) 100%)" }} />
           </SceneFade>
+          {scene.overlay !== false && brand.overlaySrc && brand.overlayLayer !== "top" ? <BrandOverlay src={brand.overlaySrc} /> : null}
           <Headline text={scene.headline} kind={scene.kind} brand={brand} />
           {scene.kind === "cta" && scene.id === last?.id ? <Outro timeline={timeline} /> : null}
         </Sequence>
@@ -260,6 +303,15 @@ export const News: React.FC<Timeline> = (timeline) => {
       <SourceLine name={timeline.source.name} brand={brand} />
       <Logo brand={brand} />
       <Progress brand={brand} />
+      {brand.overlaySrc && brand.overlayLayer === "top"
+        ? scenes.map((scene) =>
+            scene.overlay !== false ? (
+              <Sequence key={`overlay-${scene.id}`} from={scene.from} durationInFrames={scene.durationFrames} name={`overlay ${scene.id}`}>
+                <BrandOverlay src={brand.overlaySrc!} />
+              </Sequence>
+            ) : null,
+          )
+        : null}
       {audio.mixSrc ? <Audio src={audio.mixSrc} /> : <PreviewAudio timeline={timeline} />}
     </AbsoluteFill>
   );

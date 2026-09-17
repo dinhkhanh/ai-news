@@ -27,7 +27,7 @@ function resolveForPlayer(t: Timeline, urls: Record<string, string>): Timeline {
   const u = (k: string | null) => (k ? (urls[k] ?? null) : null);
   return {
     ...t,
-    brand: { ...t.brand, logoSrc: u(t.brand.logoSrc) },
+    brand: { ...t.brand, logoSrc: u(t.brand.logoSrc), overlaySrc: u(t.brand.overlaySrc) },
     scenes: t.scenes.map((s) => {
       const visual = (v: Timeline["scenes"][number]["visual"]) => {
         const src = v.kind === "solid" ? null : u(v.src);
@@ -156,6 +156,12 @@ export function Editor(props: EditorProps) {
     return { url: urls[s.visual.key] ?? null, video: s.visual.kind === "video" };
   };
 
+  // The document embeds a copy of its kit; "current" = the workspace kit that still equals that copy.
+  const brandJson = JSON.stringify(doc.brand);
+  const currentKit = props.brandKits.find((k) => JSON.stringify(k.brand) === brandJson) ?? null;
+  const overlayOn = doc.scenes.filter((s) => s.overlay).length;
+  const setOverlayAll = (on: boolean) => setDoc((d) => ({ ...d, scenes: d.scenes.map((s) => ({ ...s, overlay: on })) }));
+
   const coverFrame = doc.coverAtSec != null ? Math.round(doc.coverAtSec * FPS) : null;
 
   return (
@@ -200,6 +206,53 @@ export function Editor(props: EditorProps) {
               </>
             ) : null}
           </div>
+        </div>
+
+        <div className="space-y-2 rounded-md border p-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="brand-kit">Bộ nhận diện</Label>
+            <span className="text-xs text-muted-foreground">{doc.brand.overlaySrc ? `lớp phủ ${overlayOn}/${doc.scenes.length} cảnh` : "không có lớp phủ"}</span>
+          </div>
+          {props.brandKits.length ? (
+            <select
+              id="brand-kit"
+              value={currentKit?.id ?? ""}
+              disabled={readOnly}
+              onChange={(e) => {
+                const kit = props.brandKits.find((k) => k.id === e.target.value);
+                if (kit) setDoc((d) => ({ ...d, brand: kit.brand }));
+              }}
+              className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+            >
+              {!currentKit ? <option value="">{doc.brand.name} (bản lưu trong phiên bản này)</option> : null}
+              {props.brandKits.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                  {k.isDefault ? " (mặc định)" : ""}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {!currentKit && props.brandKits.some((k) => k.name === doc.brand.name) ? <p className="text-[11px] text-muted-foreground">Bộ “{doc.brand.name}” đã được sửa sau lần dựng này; chọn lại nó để lấy bản mới.</p> : null}
+          {doc.brand.overlaySrc ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={readOnly || overlayOn === doc.scenes.length} onClick={() => setOverlayAll(true)}>
+                Bật lớp phủ mọi cảnh
+              </Button>
+              <Button type="button" size="sm" variant="ghost" disabled={readOnly || overlayOn === 0} onClick={() => setOverlayAll(false)}>
+                Tắt hết
+              </Button>
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              Bộ này chưa có lớp phủ PNG; tải lên ở{" "}
+              <Link href="/app/brand" className="underline">
+                Bộ nhận diện
+              </Link>
+              .
+            </p>
+          )}
+          <p className="text-[11px] text-muted-foreground">Đổi bộ chỉ đổi diện mạo (màu, font, logo, lớp phủ, phụ đề); lời đọc, hình và nhạc giữ nguyên, không trộn lại âm thanh.</p>
         </div>
 
         <div className="space-y-2 rounded-md border p-3">
@@ -291,6 +344,7 @@ export function Editor(props: EditorProps) {
               total={doc.scenes.length}
               options={options}
               overlay={{ captionPosition: doc.brand.caption.position, captionFontSize: doc.brand.caption.fontSize, showSource: doc.brand.showSource && Boolean(doc.source.name), hasLogo: Boolean(doc.brand.logoSrc) }}
+              hasOverlay={Boolean(doc.brand.overlaySrc)}
               urls={urls}
               usedKeys={usedKeys}
               verdict={props.verdicts?.[selected.id] ?? null}

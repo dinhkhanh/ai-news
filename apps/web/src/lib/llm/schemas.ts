@@ -60,6 +60,14 @@ export const ClassificationSchema = z.object({
 });
 export type Classification = z.infer<typeof ClassificationSchema>;
 
+/** Which of the workspace's brand kits suits an article (`pick-brand-kit.ts`). */
+export const BrandKitPickSchema = z.object({
+  kitId: z.string().nullable().describe("id of the best kit, exactly as listed; null when no kit clearly fits"),
+  confidence: z.number().describe("0-1"),
+  reason: z.string().describe("One short sentence in Vietnamese"),
+});
+export type BrandKitPick = z.infer<typeof BrandKitPickSchema>;
+
 /** What is persisted in scripts.scenes_json. */
 export type StoredScript = Script & {
   generation: {

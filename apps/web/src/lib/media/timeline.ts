@@ -36,6 +36,8 @@ export type BuildInput = {
     shots?: SceneVisualInput[];
     /** Extra hold after the voice-over ends (editor), 0–5000 ms. */
     holdMs?: number;
+    /** Brand overlay PNG on this scene (default on). */
+    overlay?: boolean;
     /** Caption chunks relative to this scene's voice start; default = automatic chunking of `voice.words`. */
     captions?: CaptionChunk[];
   }>;
@@ -101,7 +103,7 @@ export function buildTimeline(input: BuildInput): { timeline: Timeline; duration
     const t = timings[i];
     const shots = layoutShots([s.visual, ...(s.shots ?? [])], t.durationFrames);
     for (const sh of shots) if (sh.credit) credits.add(sh.credit);
-    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual: shots[0].visual, shots, credit: shots[0].credit, voiceSrc: s.voice?.key ?? null };
+    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual: shots[0].visual, shots, credit: shots[0].credit, voiceSrc: s.voice?.key ?? null, overlay: s.overlay ?? true };
   });
   const captions = input.scenes.flatMap((s, i) => {
     if (!s.voice) return [];

@@ -3,8 +3,10 @@
  * organization_id and are protected by RLS (see migrations/*_rls.sql).
  */
 import { sql } from "drizzle-orm";
+import type { LogoMotion } from "@ai-news/video/schema";
 import type { BusyProgress } from "@/lib/project-state";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   index,
@@ -233,6 +235,13 @@ export const projects = pgTable(
     tone: text("tone").notNull().default("news"),
     /** Auto mode: after each pipeline step the next one starts without a human click (fetch → script → assets → render). */
     autoPipeline: boolean("auto_pipeline").notNull().default(false),
+    /**
+     * Brand kit of the next build. `brand_kit_source`: `manual` = picked by a person (never overwritten),
+     * `auto` = matched to the article after the fetch (`brand_kit_reason` says why); null = workspace default.
+     */
+    brandKitId: uuid("brand_kit_id").references((): AnyPgColumn => brandKits.id, { onDelete: "set null" }),
+    brandKitSource: text("brand_kit_source").$type<"manual" | "auto">(),
+    brandKitReason: text("brand_kit_reason"),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
     /** Approval flow (docs/PLAN.md §4.8): the timeline version a publisher approved; cleared by any later edit. */
@@ -539,7 +548,18 @@ export const brandKits = pgTable(
     organizationId: orgId(),
     name: text("name").notNull(),
     isDefault: boolean("is_default").notNull().default(false),
+    /** What the kit is for ("Thể thao: bóng đá, SEA Games…"); shown in pickers and given to the auto-matcher. */
+    description: text("description").notNull().default(""),
+    /** Words that select this kit when they occur in the article (fallback when the Haiku matcher is unavailable, and a hint for it). */
+    matchKeywords: text("match_keywords").array().notNull().default(sql`'{}'::text[]`),
+    /** False = never chosen automatically (seasonal / sponsor kits picked by hand). */
+    autoMatch: boolean("auto_match").notNull().default(true),
     logoPath: text("logo_path"),
+    /** How the logo moves in the video (`LOGO_MOTIONS` of @ai-news/video/schema). */
+    logoMotion: text("logo_motion").$type<LogoMotion>().notNull().default("flip"),
+    /** Full-frame 1080×1920 transparent PNG laid over each scene (R2 key under library/brand/<org>/). */
+    overlayPath: text("overlay_path"),
+    overlayLayer: text("overlay_layer").$type<"under_text" | "top">().notNull().default("under_text"),
     fonts: jsonb("fonts").$type<{ heading: string; body: string; caption: string }>().notNull(),
     colours: jsonb("colours").$type<Record<string, string>>().notNull(),
     captionStyle: jsonb("caption_style").$type<Record<string, unknown>>().notNull(),
@@ -550,7 +570,10 @@ export const brandKits = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("brand_kits_org_idx").on(t.organizationId)],
+  (t) => [
+    index("brand_kits_org_idx").on(t.organizationId),
+    uniqueIndex("brand_kits_one_default_idx").on(t.organizationId).where(sql`${t.isDefault}`),
+  ],
 );
 
 export const voicePresets = pgTable(

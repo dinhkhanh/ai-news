@@ -248,4 +248,21 @@ describe("migrations", () => {
       for (const g of r.grantees) expect(["postgres", "ai_news_app"], `${r.proname} granted to ${g}`).toContain(g);
     }
   });
+  it("allow several brand kits per workspace but one default, and free a project when its kit is deleted (migrations 0014 + 0015)", async () => {
+    await pg.exec(`insert into "user"(id,name,email) values ('u14','U14','u14@suzu.group');
+      insert into organization(id,name,slug) values ('o14','O14','o14');`);
+    const kit = (name: string, isDefault: boolean) =>
+      pg.query<{ id: string; overlay_layer: string; logo_motion: string; auto_match: boolean; match_keywords: string[] }>(
+        `insert into brand_kits(organization_id,name,is_default,fonts,colours,caption_style,safe_zones) values ('o14',$1,$2,'{}','{}','{}','{}') returning id, overlay_layer, logo_motion, auto_match, match_keywords`,
+        [name, isDefault],
+      );
+    await kit("Tin chung", true);
+    const sport = (await kit("Thể thao", false)).rows[0];
+    expect(sport).toMatchObject({ overlay_layer: "under_text", logo_motion: "flip", auto_match: true, match_keywords: [] });
+    await expect(kit("Thứ hai mặc định", true)).rejects.toThrow(/brand_kits_one_default_idx/);
+    await pg.query(`insert into projects(id,organization_id,owner_id,url,brand_kit_id,brand_kit_source) values ('00000000-0000-4000-8000-000000000014','o14','u14','https://example.com/a',$1,'auto')`, [sport.id]);
+    await pg.query("delete from brand_kits where id=$1", [sport.id]);
+    const { rows } = await pg.query<{ brand_kit_id: string | null }>("select brand_kit_id from projects where id='00000000-0000-4000-8000-000000000014'");
+    expect(rows[0].brand_kit_id).toBeNull();
+  });
 });

@@ -32,6 +32,9 @@ export function docOfRow(row: TimelineRow): { doc: EditorDoc; mix: { mixKey: str
  * Anything else is rejected so a crafted save cannot read foreign objects.
  */
 async function assertKeysAllowed(tx: Tx, ctx: { organizationId: string; projectId: string }, keys: string[]) {
+  // Brand files (logo, overlay PNG) sit under library/brand/<org>/; the editor can swap kits, so another workspace's must not pass as "library".
+  const otherBrand = keys.find((k) => k.startsWith("library/brand/") && !k.startsWith(`library/brand/${ctx.organizationId}/`));
+  if (otherBrand) throw new Error(`Tệp không thuộc workspace này: ${otherBrand}`);
   const foreign = keys.filter((k) => !k.startsWith(`media/${ctx.organizationId}/`) && !k.startsWith("library/") && !k.startsWith(`candidates/${ctx.organizationId}/`));
   if (foreign.length === 0) return;
   const rows = await tx.select({ r2Path: schema.assets.r2Path }).from(schema.assets).where(and(eq(schema.assets.organizationId, ctx.organizationId), inArray(schema.assets.r2Path, foreign)));

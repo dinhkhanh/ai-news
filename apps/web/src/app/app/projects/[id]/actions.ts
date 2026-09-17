@@ -121,14 +121,23 @@ export async function requestAssets(_: ActionState, fd: FormData): Promise<Actio
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
-    await loadProject(ws, projectId);
+    const project = await loadProject(ws, projectId);
     const scriptId = str(fd, "scriptId") || undefined;
     const skipStock = fd.get("skipStock") === "on";
     const script = await withOrgContext(ws, (tx) => tx.query.scripts.findFirst({ where: eq(schema.scripts.projectId, projectId), orderBy: desc(schema.scripts.version) }));
     if (!script) throw new Error("Generate a script first");
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
+    // The kit select is only rendered when the workspace has several kits; a changed value is a manual choice from now on.
+    const kitPatch: { brandKitId?: string | null; brandKitSource?: "manual" | null; brandKitReason?: null } = {};
+    if (fd.has("brandKitId")) {
+      const kitId = str(fd, "brandKitId") || null;
+      if (kitId !== project.brandKitId) {
+        if (kitId && !(await withOrgContext(ws, (tx) => tx.query.brandKits.findFirst({ where: and(eq(schema.brandKits.organizationId, ws.organizationId), eq(schema.brandKits.id, kitId)), columns: { id: true } })))) throw new Error("That brand kit no longer exists");
+        Object.assign(kitPatch, { brandKitId: kitId, brandKitSource: kitId ? "manual" : null, brandKitReason: null });
+      }
+    }
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress(), lastError: null, ...kitPatch }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectAssetsRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, scriptId, skipStock }));
-    await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock }, projectId);
+    await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock, ...("brandKitId" in kitPatch ? { brandKitId: kitPatch.brandKitId } : {}) }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
     return "Building voice-over, B-roll and timeline… this takes 2–4 minutes";
   });

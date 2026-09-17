@@ -21,6 +21,8 @@ type Props = {
   options: VisualOption[];
   /** Brand overlays the face guard has to keep faces clear of. */
   overlay: { captionPosition: "bottom" | "middle"; captionFontSize: number; showSource: boolean; hasLogo: boolean };
+  /** The document's brand kit has an overlay PNG (else the per-scene switch is pointless). */
+  hasOverlay: boolean;
   urls: Record<string, string>;
   /** R2 key → where else in the video it is used ("s3", "s3 #2"); a picture should appear once. */
   usedKeys: Record<string, string[]>;
@@ -94,7 +96,7 @@ function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; ur
 }
 
 /** Everything editable on one scene: headline, shots (swap/upload/link/trim/hold), captions, voice and B-roll regeneration, faithfulness. */
-export function SceneInspector({ projectId, scene, index, total, options, overlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded }: Props) {
+export function SceneInspector({ projectId, scene, index, total, options, overlay, hasOverlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded }: Props) {
   const [voiceText, setVoiceText] = useState(scene.voiceover);
   const [terms, setTerms] = useState(scene.brollTerms.join(", "));
   const [showAll, setShowAll] = useState(false);
@@ -340,6 +342,11 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
           <input id="hold" type="range" min={0} max={3000} step={100} value={scene.holdMs} disabled={disabled} onChange={(e) => onChange({ ...scene, holdMs: Number(e.target.value) })} className="flex-1" />
           <span className="w-16 text-right text-xs text-muted-foreground">{scene.holdMs} ms</span>
         </div>
+        {hasOverlay ? (
+          <label className="flex items-center gap-2 text-xs" title="Lớp phủ PNG của bộ nhận diện, phủ suốt cảnh này từ khung hình đầu tới cuối">
+            <input type="checkbox" checked={scene.overlay} disabled={disabled} onChange={(e) => onChange({ ...scene, overlay: e.target.checked })} /> lớp phủ của bộ nhận diện trên cảnh này
+          </label>
+        ) : null}
       </div>
 
       {/* ---- captions ---- */}

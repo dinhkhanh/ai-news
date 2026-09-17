@@ -94,6 +94,7 @@ export const prepareAssetsFn = inngest.createFunction(
         scriptVersion: row.script.version,
         language: row.project.language,
         tone: row.project.tone,
+        brandKitId: row.project.brandKitId,
         title: row.project.title ?? s.title,
         articleTitle: row.article?.title ?? row.project.title ?? s.title,
         source: { name: row.article?.siteName ?? null, url: row.project.canonicalUrl ?? row.project.url },
@@ -103,7 +104,7 @@ export const prepareAssetsFn = inngest.createFunction(
     });
     const media = (name: string) => r2Key.media(organizationId, projectId, name);
 
-    const brand = await step.run("brand", () => loadBrand(ctx));
+    const brand = await step.run("brand", () => loadBrand(ctx, input.brandKitId));
 
     /* ---- voice-over per scene (parallel) ---- */
     const voiceSetup = await step.run("voice-setup", async () => {
@@ -402,6 +403,7 @@ export const prepareAssetsFn = inngest.createFunction(
           visual,
           shots: all.slice(1),
           holdMs: 0,
+          overlay: true,
           captions: null,
         };
       });

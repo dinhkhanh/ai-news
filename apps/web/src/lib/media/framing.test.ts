@@ -15,22 +15,32 @@ function placed(frame: FrameFaces, f: FaceBox, focus: { x: number; y: number; zo
 }
 
 describe("overlayZones", () => {
-  it("mirrors the News layout: headline under the top safe zone, captions above the bottom one", () => {
+  it("mirrors the News layout: headline in the lower third right above the captions, captions above the bottom safe zone", () => {
     const z = Object.fromEntries(body().map((r) => [r.name, r]));
-    expect(z.headline.y0).toBe(244);
-    expect(z.headline.y1).toBeLessThan(400); // one line
+    expect(z.headline.y1).toBeCloseTo(z.captions.y0 - 24, 5);
+    expect(z.headline.y1 - z.headline.y0).toBeLessThan(160); // one line
+    expect(z.headline.y0).toBeGreaterThan(1920 * 0.55); // the upper half stays free for faces
     expect(z.captions.y1).toBe(1470);
     expect(z.captions.y0).toBeGreaterThan(1920 * 0.6);
     expect(z.platform_bottom.y0).toBe(1500);
     expect(z.outro).toBeUndefined();
   });
 
-  it("grows the headline with its text and is bigger on the hook", () => {
+  it("grows the headline upwards with its text, bigger on the hook, and keeps it off the outro and off middle captions", () => {
     const long = "Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa trên cả nước";
     const b = body(long).find((r) => r.name === "headline")!;
     const h = overlayZones({ kind: "hook", headline: long, captionPosition: "bottom", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: false }).find((r) => r.name === "headline")!;
-    expect(b.y1).toBeGreaterThan(body().find((r) => r.name === "headline")!.y1);
-    expect(h.y1).toBeGreaterThan(b.y1);
+    const short = body().find((r) => r.name === "headline")!;
+    expect(b.y1).toBe(short.y1);
+    expect(b.y0).toBeLessThan(short.y0);
+    expect(h.y0).toBeLessThan(b.y0);
+    const cta = Object.fromEntries(overlayZones({ kind: "cta", headline: long, captionPosition: "bottom", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: false }).map((r) => [r.name, r]));
+    expect(cta.headline.y1).toBeLessThanOrEqual(cta.outro.y0 - 24);
+    expect(cta.outro.y1).toBeLessThanOrEqual(cta.captions.y0 - 24); // the outro never sits under the captions
+    // Captions mid-frame: the headline takes the slot bottom captions would have had, below them.
+    const mid = Object.fromEntries(overlayZones({ kind: "body", headline: long, captionPosition: "middle", captionFontSize: 64, hasCaptions: true, showSource: false, hasLogo: false }).map((r) => [r.name, r]));
+    expect(mid.headline.y0).toBeGreaterThan(mid.captions.y1);
+    expect(mid.headline.y1).toBe(1920 - 450);
   });
 
   it("has no headline or caption zone without text, and puts middle captions mid-frame", () => {
@@ -82,7 +92,9 @@ describe("frameStill", () => {
     const b = placed(frame, f, low.focus!);
     expect((b.y0 + b.y1) / 2).toBeLessThanOrEqual(TARGET.y + TOLERANCE.y);
     // A face in the lower part of a landscape picture is out of reach even at the largest zoom.
-    expect(frameStill(landscape([face(0.45, 0.55, 0.1, 0.16)]), body())).toMatchObject({ ok: false, issues: ["face_off_centre"] });
+    const out = frameStill(landscape([face(0.45, 0.55, 0.1, 0.16)]), body());
+    expect(out.ok).toBe(false);
+    expect(out.issues).toContain("face_off_centre");
   });
 
   it("keeps faces clear of the headline and the captions", () => {
@@ -94,10 +106,12 @@ describe("frameStill", () => {
     const r = frameStill(frame, zones);
     expect(r.ok).toBe(true);
     const b = placed(frame, f, r.focus!);
-    expect(b.y0).toBeGreaterThanOrEqual(headline.y1);
-    expect(b.y1).toBeLessThanOrEqual(captions.y0);
-    // The same headline over a big face right below the top edge: nothing can move it out.
-    expect(frameStill(landscape([face(0.4, 0.2, 0.14, 0.22)]), zones)).toMatchObject({ ok: false, issues: ["face_under_text"] });
+    expect(b.y1).toBeLessThanOrEqual(headline.y0);
+    expect(headline.y1).toBeLessThanOrEqual(captions.y0);
+    // A big face right below the top edge used to sit under the headline; the lower-third headline leaves it alone.
+    expect(frameStill(landscape([face(0.4, 0.2, 0.14, 0.22)]), zones).ok).toBe(true);
+    // A face low in a portrait picture cannot be lifted out from under the headline.
+    expect(frameStill(portrait([face(0.3, 0.52, 0.3, 0.12)]), zones)).toMatchObject({ ok: false, issues: expect.arrayContaining(["face_under_text"]) });
   });
 
   it("fails a picture whose faces are wider apart than the vertical frame", () => {
@@ -116,11 +130,11 @@ describe("frameStill", () => {
   it("turns Ken Burns off when only the slow zoom would push a big face into the overlays", () => {
     const zones = body();
     const headline = zones.find((z) => z.name === "headline")!;
-    const captions = zones.find((z) => z.name === "captions")!;
-    const band = captions.y0 - headline.y1;
+    // Everything above the headline is clear now.
+    const band = headline.y0;
     // With head-room the face fills ~88 % of the clear band: fits at rest (× 1.06 punch-in), not at × 1.25.
     const h = (band * 0.88) / 1.24 / 1920;
-    const f = face(0.3, (headline.y1 + band / 2) / 1920 - h / 2, 0.4, h);
+    const f = face(0.3, band / 2 / 1920 - h / 2, 0.4, h);
     const r = frameStill(portrait([f]), zones);
     expect(r.ok).toBe(true);
     expect(r.kenBurns).toBe(false);

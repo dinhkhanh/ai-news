@@ -1,0 +1,1 @@
+ALTER TABLE "brand_kits" ADD COLUMN "logo_motion" text DEFAULT 'flip' NOT NULL;

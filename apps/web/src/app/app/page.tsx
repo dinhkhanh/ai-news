@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { listBrandKits } from "@/lib/media/brand";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { loadProjectStatuses } from "@/lib/project-status";
 import { dailyLimit, usedToday } from "@/lib/quota";
@@ -34,7 +35,8 @@ const STATE_LABEL: Record<string, string> = {
 export default async function AppHome() {
   const ws = await requireWorkspace();
   const writer = canWrite(ws);
-  const [projects, limit, used] = await Promise.all([
+  const [kits, projects, limit, used] = await Promise.all([
+    writer ? listBrandKits(ws) : [],
     withOrgContext(ws, (tx) =>
       tx
         .select({
@@ -125,6 +127,26 @@ export default async function AppHome() {
                     ))}
                   </select>
                 </div>
+                {kits.length > 1 ? (
+                  <div className="space-y-1">
+                    <Label htmlFor="brandKitId">Bộ nhận diện</Label>
+                    <select
+                      id="brandKitId"
+                      name="brandKitId"
+                      defaultValue=""
+                      className="h-9 max-w-56 rounded-md border bg-background px-2 text-sm"
+                      title="Tự chọn: sau khi lấy bài, hệ thống so nội dung với mô tả + từ khoá của từng bộ; không bộ nào khớp thì dùng bộ mặc định."
+                    >
+                      <option value="">Tự chọn theo nội dung bài</option>
+                      {kits.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.name}
+                          {k.isDefault ? " (mặc định)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 <label
                   className="flex items-center gap-2 pb-2 text-sm"
                   title="Bỏ qua các bước xác nhận: lấy bài → kịch bản → dựng → kết xuất chạy liên tiếp. Duyệt và đăng vẫn cần người."

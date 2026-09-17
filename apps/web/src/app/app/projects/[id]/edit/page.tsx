@@ -7,6 +7,7 @@ import { PipelineStatus } from "@/components/pipeline-status";
 import { EditorLoader } from "@/components/editor/editor-loader";
 import type { EditorProps, VisualOption } from "@/components/editor/types";
 import { Badge } from "@/components/ui/badge";
+import { brandFromRow, listBrandKits } from "@/lib/media/brand";
 import { docKeys } from "@/lib/media/editor";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { storedFrame } from "@/lib/media/framing";
@@ -93,7 +94,9 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   // YouTube picks the build could not download, minus the ones already recorded from a browser.
   const captured = new Set(assets.filter((a) => a.provider === "yt-capture").map((a) => (a.providerId ?? "").split("@")[0]));
   const captures = (((selected.buildJson as { webVideo?: { pending?: PendingCapture[] } }).webVideo?.pending ?? []) as PendingCapture[]).filter((c) => c.videoId && !captured.has(`youtube:${c.videoId}`));
-  const keys = new Set<string>([...docKeys(doc), ...options.map((o) => o.key), ...music.map((m) => m.r2Path)]);
+  const brandKits = (await listBrandKits(ws)).map((k) => ({ id: k.id, name: k.name, isDefault: k.isDefault, brand: brandFromRow(k).brand }));
+  const kitKeys = brandKits.flatMap((k) => [k.brand.logoSrc, k.brand.overlaySrc]).filter((k): k is string => Boolean(k));
+  const keys = new Set<string>([...docKeys(doc), ...options.map((o) => o.key), ...music.map((m) => m.r2Path), ...kitKeys]);
   if (mix?.mixKey) keys.add(mix.mixKey);
   // Article images have no remote thumbnail in R2; presign the key itself for the thumbnail grid.
   const urls = await presignMap(keys, 3600);
@@ -119,6 +122,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     options,
     captures: selected.id === timelines[0].id ? captures : [],
     music: music.map((m) => ({ id: m.id, title: m.title, key: m.r2Path, moodTags: m.moodTags, durationSec: m.durationSec ? Number(m.durationSec) : null, licence: m.licence })),
+    brandKits,
     verdicts: verdicts?.verdicts ?? null,
     faithfulnessCounts: verdicts?.counts ?? null,
     comments: comments.map((c) => ({ ...c, createdAt: c.createdAt.toISOString(), resolvedAt: c.resolvedAt?.toISOString() ?? null })),

@@ -1,3 +1,4 @@
+import type { Brand } from "@ai-news/video/schema";
 import type { EditorDoc } from "@/lib/media/editor";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import type { FrameFaces } from "@/lib/media/framing";
@@ -49,6 +50,8 @@ export type EditorProps = {
   /** YouTube picks of this build that the server could not download and nobody has recorded yet. */
   captures: PendingCapture[];
   music: MusicOption[];
+  /** The workspace's brand kits (R2 keys inside), so the look can be swapped without a rebuild. */
+  brandKits: Array<{ id: string; name: string; isDefault: boolean; brand: Brand }>;
   verdicts: Record<string, { verdict: SceneVerdict["verdict"]; note: string | null; evidence: string | null }> | null;
   faithfulnessCounts: { supported: number; partial: number; unsupported: number; unchecked: number } | null;
   comments: CommentRow[];

@@ -10,6 +10,7 @@ import { logActivity } from "@/lib/activity";
 import { heuristicLanguage } from "@/lib/language";
 import { fetchArticle, manualArticle, type FetchAttempt, type FetchMethod } from "@/lib/fetch";
 import { classifyArticle } from "@/lib/llm/classify";
+import { chooseBrandKit } from "@/lib/media/brand";
 import { putObject, r2Key } from "@/lib/r2";
 import { canonicalizeUrl } from "@/lib/url";
 
@@ -45,7 +46,7 @@ export const fetchArticleFn = inngest.createFunction(
       const row = await withOrgContext(ctx, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) }));
       if (!row) throw new NonRetriableError("Project not found in this workspace");
       await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", lastError: null }).where(eq(schema.projects.id, projectId)));
-      return { id: row.id, url: row.url, language: row.language };
+      return { id: row.id, url: row.url, language: row.language, brandKitId: row.brandKitId, brandKitSource: row.brandKitSource };
     });
 
     const fetched = await step.run("extract", async () => {
@@ -85,6 +86,18 @@ export const fetchArticleFn = inngest.createFunction(
         console.warn("[fetch-article] classification failed, using heuristic", e);
         const lang = extracted.lang === "vi" || extracted.lang === "en" ? extracted.lang : heuristicLanguage(extracted.text);
         return { language: lang, sensitiveTopic: false, categories: [] as string[], isNewsArticle: true, reason: "heuristic", model: false };
+      }
+    });
+
+    // A kit picked by hand when the project was created is never overwritten.
+    const kit = await step.run("brand-kit", async () => {
+      if (project.brandKitSource === "manual" && project.brandKitId) return null;
+      await reportProgress(pctx, { label: "Chọn bộ nhận diện theo nội dung", pct: 85 });
+      try {
+        return await chooseBrandKit({ ...ctx, projectId }, { title: fetched.extracted.title, text: fetched.extracted.text });
+      } catch (e) {
+        console.warn("[fetch-article] brand kit choice failed, the default kit is used", e);
+        return null;
       }
     });
 
@@ -130,6 +143,7 @@ export const fetchArticleFn = inngest.createFunction(
             canonicalUrl,
             language: classification.language,
             sensitiveTopic: classification.sensitiveTopic,
+            ...(kit ? { brandKitId: kit.id, brandKitSource: kit.id ? ("auto" as const) : null, brandKitReason: kit.reason } : {}),
             state: "fetched",
             busyStep: null, busyProgress: null,
             lastError: null,
@@ -149,6 +163,7 @@ export const fetchArticleFn = inngest.createFunction(
           language: classification.language,
           sensitiveTopic: classification.sensitiveTopic,
           categories: classification.categories,
+          brandKit: kit ? { id: kit.id, name: kit.name, method: kit.method, reason: kit.reason } : null,
           attempts: fetched.attempts,
         },
       });

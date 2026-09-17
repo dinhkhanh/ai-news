@@ -124,6 +124,7 @@ function SceneCard({
               ? `Ảnh · ${scene.visual.credit ?? ""}`
               : "Nền màu thương hiệu"}
           {scene.holdMs ? ` · giữ +${scene.holdMs} ms` : ""}
+          {scene.overlay ? "" : " · tắt lớp phủ"}
           {scene.captions ? " · phụ đề đã sửa" : ""}
         </div>
       </div>

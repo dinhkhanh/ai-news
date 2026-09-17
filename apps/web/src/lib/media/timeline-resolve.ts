@@ -14,8 +14,8 @@ export async function resolveTimelineSrcs(t: Timeline, expiresIn = 3 * 3600): Pr
       voiceSrc: await r(s.voiceSrc),
     })),
   );
-  const [mixSrc, voiceSrc, musicSrc, logoSrc] = await Promise.all([r(t.audio.mixSrc), r(t.audio.voiceSrc), r(t.audio.musicSrc), r(t.brand.logoSrc)]);
-  return { ...t, scenes, brand: { ...t.brand, logoSrc }, audio: { ...t.audio, mixSrc, voiceSrc, musicSrc } };
+  const [mixSrc, voiceSrc, musicSrc, logoSrc, overlaySrc] = await Promise.all([r(t.audio.mixSrc), r(t.audio.voiceSrc), r(t.audio.musicSrc), r(t.brand.logoSrc), r(t.brand.overlaySrc)]);
+  return { ...t, scenes, brand: { ...t.brand, logoSrc, overlaySrc }, audio: { ...t.audio, mixSrc, voiceSrc, musicSrc } };
 }
 
 /** Presign a set of keys for browser playback (editor preview). Failures are skipped. */
