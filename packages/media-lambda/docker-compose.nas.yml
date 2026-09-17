@@ -8,4 +8,4 @@ services:
     env_file: nas.env
     ports:
       - "8787:8787"
-    mem_limit: 2g
+    mem_limit: 7g
