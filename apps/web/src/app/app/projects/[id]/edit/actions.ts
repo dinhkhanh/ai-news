@@ -14,6 +14,7 @@ import { downloadToR2 } from "@/lib/media/stock";
 import { youtubeId } from "@/lib/media/visual-plan";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { deleteObject, headObject, presignGet, presignPut, r2Key } from "@/lib/r2";
+import { queueRender } from "@/lib/render-request";
 import { saveTimelineVersion } from "@/lib/review";
 import { isPrivateHost } from "@/lib/url";
 import { assertWorkspaceWriter } from "@/lib/workspace";
@@ -35,6 +36,19 @@ export async function saveTimeline(input: { projectId: string; baseVersion: numb
     revalidatePath(`/app/projects/${input.projectId}`);
     revalidatePath(`/app/projects/${input.projectId}/edit`);
     return { ok: true, message: `Đã lưu timeline v${saved.version}${saved.approvalCleared ? " (bản duyệt cũ bị huỷ, cần duyệt lại)" : ""}`, version: saved.version, timelineId: saved.id };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Export from the editor: render one saved version (same rules as the project page's render button). */
+export async function renderTimeline(input: { projectId: string; timelineId: string; logoChannelId?: string | null; skipQa?: boolean }): Promise<EditorActionResult> {
+  try {
+    const { ws, log } = await assertWorkspaceWriter();
+    const r = await queueRender(ws, log, { projectId: input.projectId, timelineId: input.timelineId, logoChoice: input.logoChannelId || undefined, skipQa: input.skipQa === true });
+    revalidatePath(`/app/projects/${input.projectId}`);
+    revalidatePath(`/app/projects/${input.projectId}/edit`);
+    return { ok: true, message: `Đang kết xuất v${r.version}${r.skipQa ? " (bỏ qua QA)" : ""}${r.logoName ? ` với logo ${r.logoName}` : ""} (${r.minutesToday}/${r.minutesLimit} phút hôm nay)…`, version: r.version, timelineId: r.timelineId };
   } catch (e) {
     return fail(e);
   }

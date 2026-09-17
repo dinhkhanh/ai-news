@@ -791,6 +791,7 @@ export default async function ProjectPage({
                       </span>
                       <Badge variant="outline">logo: {logoName(r.logoChannelId)}</Badge>
                       {r.pinned ? <Badge variant="outline">đã ghim</Badge> : null}
+                      {(r.qaJson as { overridden?: boolean } | null)?.overridden ? <Badge variant="destructive">QA bị bỏ qua</Badge> : null}
                       {r.timelineId && r.timelineId === project.approvedTimelineId ? (
                         <Badge>bản duyệt</Badge>
                       ) : (
@@ -811,6 +812,18 @@ export default async function ProjectPage({
                         <a href={links.video} target="_blank" rel="noreferrer" className="underline">
                           tải / xem MP4
                         </a>
+                      ) : null}
+                      {/* Forced render past a failed QA: only on the newest render of that version, so a later good one hides it. */}
+                      {writer && r.status === "qa_failed" && r.timelineId && renders.find((x) => x.timelineId === r.timelineId)?.id === r.id ? (
+                        <ActionForm action={requestRender}>
+                          <input type="hidden" name="projectId" value={project.id} />
+                          <input type="hidden" name="timelineId" value={r.timelineId} />
+                          <input type="hidden" name="logoChannelId" value={r.logoChannelId ?? ""} />
+                          <input type="hidden" name="skipQa" value="1" />
+                          <Button type="submit" size="sm" variant="outline" disabled={busy} title="Kết xuất lại đúng phiên bản và logo này; kết quả QA vẫn được ghi lại nhưng không còn chặn bản kết xuất. Tính phút kết xuất như thường.">
+                            Kết xuất lại, bỏ qua QA
+                          </Button>
+                        </ActionForm>
                       ) : null}
                       {writer && r.status === "done" ? (
                         <ActionForm action={pinRender}>
@@ -839,7 +852,7 @@ function refetchButtons(projectId: string, busy: boolean) {
         <ActionForm key={m} action={refetchArticle}>
           <input type="hidden" name="projectId" value={projectId} />
           <input type="hidden" name="method" value={m} />
-          <Button type="submit" size="sm" variant="outline" disabled={busy}>
+          <Button type="submit" size="sm" variant="outline" disabled={busy} title="Thử cách này trước; nếu bị chặn hoặc lỗi, hệ thống tự chuyển sang các cách còn lại.">
             Lấy lại: {m === "browser_rendering" ? "Browser" : m === "http" ? "HTTP" : "Firecrawl"}
           </Button>
         </ActionForm>

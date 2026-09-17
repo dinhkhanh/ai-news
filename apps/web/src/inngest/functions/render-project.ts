@@ -44,6 +44,7 @@ export const renderProjectFn = inngest.createFunction(
   },
   async ({ event, step }) => {
     const { projectId, organizationId, requestedBy, timelineId, logoChannelId } = event.data;
+    const skipQa = Boolean(event.data.skipQa);
     const ctx = { userId: requestedBy, organizationId };
     const pctx = { ...ctx, projectId };
 
@@ -115,7 +116,7 @@ export const renderProjectFn = inngest.createFunction(
     }
 
     const post = await step.run("post-process", async () => {
-      await reportProgress(pctx, { label: "Chuẩn hoá −14 LUFS, cắt ảnh bìa, QA (media Lambda)", pct: 80 });
+      await reportProgress(pctx, { label: skipQa ? "Chuẩn hoá −14 LUFS, cắt ảnh bìa (bỏ qua QA)" : "Chuẩn hoá −14 LUFS, cắt ảnh bìa, QA (media Lambda)", pct: 80 });
       await withOrgContext(ctx, (tx) => tx.update(schema.renders).set({ status: "post_processing" }).where(eq(schema.renders.id, input.renderId)));
       const t0 = Date.now();
       const norm = await invokeMediaLambda({ action: "loudnorm", input: { key: rawKey }, output: { key: outKey }, targetLufs: -14, truePeak: -1 });
@@ -133,7 +134,11 @@ export const renderProjectFn = inngest.createFunction(
 
     await step.run("finalise", async () => {
       await reportProgress(pctx, { label: "Ghi kết quả", pct: 96 });
-      const passed = post.qa.ok && post.qa.passed;
+      const qaPassed = Boolean(post.qa.ok && post.qa.passed);
+      // A forced render: the probe is kept for the record, the user's override decides.
+      const overridden = skipQa && !qaPassed;
+      const passed = qaPassed || skipQa;
+      const qaError = post.qa.error ?? "QA probe failed: " + Object.entries(post.qa.checks ?? {}).filter(([, c]) => !c.ok).map(([k, c]) => `${k} expected ${String(c.expected)} got ${String(c.actual)}`).join("; ");
       const mediaCost = (post.lambdaMs / 1000) * MEDIA_LAMBDA_USD_PER_SEC;
       const costUsd = remotionCost + mediaCost;
       const renderSeconds = (Date.now() - started.t0) / 1000;
@@ -147,8 +152,8 @@ export const renderProjectFn = inngest.createFunction(
             durationSec: post.qa.probe?.durationSec?.toFixed(2),
             costUsd: costUsd.toFixed(4),
             renderSeconds: renderSeconds.toFixed(2),
-            qaJson: post.qa as unknown as Record<string, unknown>,
-            error: passed ? null : (post.qa.error ?? "QA probe failed: " + Object.entries(post.qa.checks ?? {}).filter(([, c]) => !c.ok).map(([k, c]) => `${k} expected ${String(c.expected)} got ${String(c.actual)}`).join("; ")),
+            qaJson: { ...(post.qa as unknown as Record<string, unknown>), ...(overridden ? { overridden: true, overriddenBy: requestedBy } : {}) },
+            error: passed ? null : qaError,
           })
           .where(eq(schema.renders.id, input.renderId));
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
@@ -159,11 +164,11 @@ export const renderProjectFn = inngest.createFunction(
       await recordUsageCost({ provider: "media_lambda", resource: "loudnorm+cover+probe", units: post.lambdaMs / 1000, unitType: "seconds", costUsd: mediaCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId });
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: passed ? "render.completed" : "render.qa_failed",
-        payload: { renderId: input.renderId, timelineVersion: input.timelineVersion, approved: input.approved, durationSec: post.qa.probe?.durationSec ?? null, lufs: post.qa.probe?.integratedLufs ?? null, costUsd, renderSeconds, checks: post.qa.checks ?? null },
+        payload: { renderId: input.renderId, timelineVersion: input.timelineVersion, approved: input.approved, durationSec: post.qa.probe?.durationSec ?? null, lufs: post.qa.probe?.integratedLufs ?? null, costUsd, renderSeconds, checks: post.qa.checks ?? null, ...(overridden ? { qaOverridden: true, qaError } : {}) },
       });
-      await notifySlack(`${passed ? (input.approved ? ":clapper: Render done" : ":clapper: Preview render done") : ":warning: Render QA failed"} — ${input.title} (${durationSec.toFixed(0)}s, $${costUsd.toFixed(3)}) ${env().APP_URL}/app/projects/${projectId}`);
+      await notifySlack(`${passed ? (input.approved ? ":clapper: Render done" : ":clapper: Preview render done") : ":warning: Render QA failed"}${overridden ? " (QA overridden)" : ""} — ${input.title} (${durationSec.toFixed(0)}s, $${costUsd.toFixed(3)}) ${env().APP_URL}/app/projects/${projectId}`);
     });
 
-    return { renderId: input.renderId, outKey, passed: post.qa.ok && post.qa.passed };
+    return { renderId: input.renderId, outKey, passed: Boolean(post.qa.ok && post.qa.passed) || skipQa, qaSkipped: skipQa };
   },
 );

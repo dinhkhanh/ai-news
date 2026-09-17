@@ -5,7 +5,7 @@ import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import type { PlayerRef } from "@remotion/player";
 import type { Timeline } from "@ai-news/video/schema";
 import { toast } from "sonner";
-import { regenerateScene, saveTimeline } from "@/app/app/projects/[id]/edit/actions";
+import { regenerateScene, renderTimeline, saveTimeline } from "@/app/app/projects/[id]/edit/actions";
 import { ReviewPanel } from "@/components/review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { audioSignature, buildFromDoc, replaceTailShots, sceneShots, shotsMissin
 import { SHOT_SEC, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
 import { CommentsPanel } from "./comments-panel";
+import { ExportPanel } from "./export-panel";
 import { Preview } from "./preview";
 import { SceneInspector } from "./scene-inspector";
 import { SceneList } from "./scene-list";
@@ -125,6 +126,45 @@ export function Editor(props: EditorProps) {
       router.refresh();
     });
   };
+
+  // Export without leaving the editor: unsaved edits become a new version first, and that version is the one rendered.
+  const [exporting, setExporting] = useState(false);
+  const exportVideo = (logoChannelId: string | null) => {
+    if (exporting || saving) return;
+    setExporting(true);
+    startTransition(async () => {
+      let timelineId = props.version.id;
+      let version = props.version.version;
+      if (dirty) {
+        const saved = await saveTimeline({ projectId: props.projectId, baseVersion: props.version.version, doc, note: note || undefined });
+        if (!saved.ok || !saved.timelineId || saved.version == null) {
+          setExporting(false);
+          return void toast.error(saved.message);
+        }
+        toast.success(saved.message);
+        timelineId = saved.timelineId;
+        version = saved.version;
+      }
+      const res = await renderTimeline({ projectId: props.projectId, timelineId, logoChannelId });
+      setExporting(false);
+      if (res.ok) toast.success(res.message);
+      else toast.error(version !== props.version.version ? `Đã lưu v${version} nhưng chưa kết xuất được: ${res.message}` : res.message);
+      // A save made a new version: open it (the editor is keyed by version). Otherwise reload in place for the busy state.
+      if (version !== props.version.version) router.push(`/app/projects/${props.projectId}/edit?t=${version}`);
+      router.refresh();
+    });
+  };
+  const forceRender = (r: EditorProps["exportInfo"]["renders"][number]) => {
+    if (exporting || !r.timelineId) return;
+    setExporting(true);
+    startTransition(async () => {
+      const res = await renderTimeline({ projectId: props.projectId, timelineId: r.timelineId!, logoChannelId: r.logoChannelId ?? "kit", skipQa: true });
+      setExporting(false);
+      (res.ok ? toast.success : toast.error)(res.message);
+      router.refresh();
+    });
+  };
+  const exportHint = !props.canEdit ? "Vai trò của bạn chỉ được xem." : busy ? `Đang chạy bước ${props.busyStep}…` : dirty && !props.version.isLatest ? "Phiên bản cũ chỉ đọc: huỷ thay đổi để kết xuất nguyên bản này." : null;
 
   const restore = () => {
     const latest = props.versions[0];
@@ -254,7 +294,7 @@ export function Editor(props: EditorProps) {
           )}
           <p className="text-[11px] text-muted-foreground">
             {props.previewLogo ? `Logo đang xem: kênh ${props.previewLogo.channelName}. ` : "Logo đang xem: của bộ nhận diện. "}
-            Logo đi theo kênh, chọn lại được mỗi lần kết xuất ở trang dự án.
+            Logo đi theo kênh, chọn lại được mỗi lần kết xuất (khung “Kết xuất” bên dưới).
           </p>
           <p className="text-[11px] text-muted-foreground">Đổi bộ chỉ đổi diện mạo (màu, font, logo, lớp phủ, phụ đề); lời đọc, hình và nhạc giữ nguyên, không trộn lại âm thanh.</p>
         </div>
@@ -324,6 +364,24 @@ export function Editor(props: EditorProps) {
             ) : null}
           </div>
         ) : null}
+
+        {props.canEdit ? (
+          <ExportPanel
+            projectId={props.projectId}
+            info={props.exportInfo}
+            version={props.version.version}
+            nextVersion={props.versions[0].version + 1}
+            approved={props.approvedTimelineId === props.version.id}
+            dirty={dirty}
+            canSave={props.version.isLatest}
+            disabled={Boolean(exportHint) || saving || pending}
+            busy={busy || saving || pending}
+            hint={exportHint}
+            working={exporting}
+            onExport={exportVideo}
+            onForce={forceRender}
+          />
+        ) : null}
       </div>
 
       {/* ---------------- track + inspector ---------------- */}
@@ -386,7 +444,7 @@ export function Editor(props: EditorProps) {
           />
           {dirty ? <p className="text-[11px] text-amber-700 dark:text-amber-400">Lưu thay đổi trước khi gửi duyệt / duyệt.</p> : null}
           <Link href={`/app/projects/${props.projectId}`} className="text-xs underline">
-            Về trang dự án (kết xuất, kịch bản, bài gốc)
+            Về trang dự án (đăng, kịch bản, bài gốc)
           </Link>
         </section>
         <section className="space-y-2 rounded-md border p-3">

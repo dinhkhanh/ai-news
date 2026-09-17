@@ -14,6 +14,9 @@ import { presignMap } from "@/lib/media/timeline-resolve";
 import { storedFrame } from "@/lib/media/framing";
 import type { PendingCapture } from "@/lib/media/visual-plan";
 import { busyStep } from "@/lib/project-state";
+import { PLATFORM_SPEC } from "@/lib/publish/platforms";
+import { dailyLimit, usedToday } from "@/lib/quota";
+import { presignGet } from "@/lib/r2";
 import { loadProjectStatus } from "@/lib/project-status";
 import { canApprove, docOfRow, verdictsOfScript } from "@/lib/review";
 import { displayHost } from "@/lib/url";
@@ -52,11 +55,13 @@ export default async function EditPage({ params, searchParams }: { params: Promi
       .where(eq(schema.projectReviews.projectId, id))
       .orderBy(desc(schema.projectReviews.createdAt))
       .limit(20);
+    const renders = await tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt), limit: 4 });
+    const channels = await tx.query.channels.findMany({ where: eq(schema.channels.organizationId, project.organizationId), orderBy: [schema.channels.platform, schema.channels.name] });
     const authors = await tx.select({ id: schema.user.id, name: schema.user.name }).from(schema.user);
-    return { project, timelines, assets, comments, reviews, authors: new Map(authors.map((a) => [a.id, a.name])) };
+    return { project, timelines, assets, comments, reviews, renders, channels, authors: new Map(authors.map((a) => [a.id, a.name])) };
   });
   if (!data) notFound();
-  const { project, timelines, assets, comments, reviews } = data;
+  const { project, timelines, assets, comments, reviews, renders, channels } = data;
   const selected = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   if (!selected) {
     return (
@@ -104,6 +109,9 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const urls = await presignMap(keys, 3600);
 
   const busy = busyStep(project);
+  const writer = canWrite(ws);
+  const [renderLimit, renderUsed] = writer ? await Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0];
+  const renderUrls = await Promise.all(renders.map((r) => (r.status === "done" && r.outputPath ? presignGet(r.outputPath, 3600).catch(() => null) : null)));
   const status = await loadProjectStatus(ws, project.id);
   const props: EditorProps = {
     projectId: project.id,
@@ -130,6 +138,24 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     faithfulnessCounts: verdicts?.counts ?? null,
     comments: comments.map((c) => ({ ...c, createdAt: c.createdAt.toISOString(), resolvedAt: c.resolvedAt?.toISOString() ?? null })),
     reviews: reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+    exportInfo: {
+      logoChannels: channels.filter((c) => c.logoPath).map((c) => ({ id: c.id, name: c.name, platformLabel: PLATFORM_SPEC[c.platform].label })),
+      defaultLogoChannelId: project.logoChannelId,
+      quota: { used: Math.ceil(renderUsed), limit: renderLimit },
+      renders: renders.map((r, i) => ({
+        id: r.id,
+        status: r.status,
+        timelineId: r.timelineId,
+        version: r.timelineVersion,
+        createdAt: r.createdAt.toISOString(),
+        logoChannelId: r.logoChannelId,
+        logoName: r.logoChannelId ? (channels.find((c) => c.id === r.logoChannelId)?.name ?? "kênh đã xoá") : "bộ nhận diện",
+        videoUrl: renderUrls[i],
+        error: r.error?.slice(0, 300) ?? null,
+        canForce: r.status === "qa_failed" && Boolean(r.timelineId) && renders.find((x) => x.timelineId === r.timelineId)?.id === r.id,
+        qaOverridden: Boolean((r.qaJson as { overridden?: boolean } | null)?.overridden),
+      })),
+    },
   };
 
   return (

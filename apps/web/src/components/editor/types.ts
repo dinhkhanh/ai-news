@@ -28,6 +28,28 @@ export type ReviewRow = { id: string; action: "submitted" | "approved" | "change
 
 export type VersionRow = { id: string; version: number; kind: string; changes: string[]; createdAt: string; createdByName: string | null };
 
+/** What the editor's export panel needs: logo choices, today's render quota and this project's latest renders. */
+export type ExportInfo = {
+  logoChannels: Array<{ id: string; name: string; platformLabel: string }>;
+  defaultLogoChannelId: string | null;
+  quota: { used: number; limit: number };
+  renders: Array<{
+    id: string;
+    status: string;
+    timelineId: string | null;
+    version: number | null;
+    createdAt: string;
+    logoChannelId: string | null;
+    logoName: string;
+    videoUrl: string | null;
+    error: string | null;
+    /** Failed QA and nothing newer exists for that version: a forced render (QA not gating) may be requested. */
+    canForce: boolean;
+    /** Finished only because QA was overridden. */
+    qaOverridden: boolean;
+  }>;
+};
+
 export type EditorProps = {
   projectId: string;
   projectTitle: string;
@@ -58,4 +80,5 @@ export type EditorProps = {
   faithfulnessCounts: { supported: number; partial: number; unsupported: number; unchecked: number } | null;
   comments: CommentRow[];
   reviews: ReviewRow[];
+  exportInfo: ExportInfo;
 };

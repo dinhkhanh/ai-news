@@ -5,13 +5,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
-import { channelLogo } from "@/lib/media/logo";
-import { projectAssetsRequested, projectFetchRequested, projectRenderRequested, projectScriptRequested } from "@/inngest/events";
+import { projectAssetsRequested, projectFetchRequested, projectScriptRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
 import { countWords } from "@/lib/fetch/readability";
 import { parsePreset } from "@/lib/presets";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
+import { queueRender } from "@/lib/render-request";
 import { copyObject } from "@/lib/r2";
 import { assertWorkspaceWriter, type Workspace } from "@/lib/workspace";
 
@@ -50,7 +50,7 @@ export async function confirmArticle(_: ActionState, fd: FormData): Promise<Acti
   });
 }
 
-/** Re-run extraction, optionally forcing one provider. */
+/** Re-run extraction, optionally starting with one provider (the others follow if it is blocked or fails). */
 export async function refetchArticle(_: ActionState, fd: FormData): Promise<ActionState> {
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
@@ -62,7 +62,7 @@ export async function refetchArticle(_: ActionState, fd: FormData): Promise<Acti
     await inngest.send(projectFetchRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, method }));
     await log("article.refetch_requested", { method: method ?? "auto" }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
-    return `Fetching again${method ? ` via ${method}` : ""}…`;
+    return `Fetching again${method ? ` via ${method} first` : ""}…`;
   });
 }
 
@@ -144,29 +144,16 @@ export async function requestAssets(_: ActionState, fd: FormData): Promise<Actio
   });
 }
 
-/** Phase 3: render a timeline version on Remotion Lambda. Enforces the daily render-minutes quota. */
+/** Phase 3: render a timeline version on Remotion Lambda. Enforces the daily render-minutes quota. `skipQa=1` forces a render past a failed QA. */
 export async function requestRender(_: ActionState, fd: FormData): Promise<ActionState> {
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
-    await loadProject(ws, projectId);
-    const timelineId = str(fd, "timelineId") || undefined;
-    const timeline = timelineId
-      ? await withOrgContext(ws, (tx) => tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.id, timelineId)) }))
-      : await withOrgContext(ws, (tx) => tx.query.timelines.findFirst({ where: eq(schema.timelines.projectId, projectId), orderBy: desc(schema.timelines.version) }));
-    if (!timeline) throw new Error("Build the timeline first");
     // Logo of this render: a channel, "kit" (the kit's own logo), or nothing posted = the project's logo channel.
     const logoChoice = fd.has("logoChannelId") ? str(fd, "logoChannelId") || "kit" : undefined;
-    const logo = logoChoice && logoChoice !== "kit" ? await channelLogo(ws, logoChoice) : null;
-    if (logoChoice && logoChoice !== "kit" && !logo) throw new Error("That channel has no logo (any more)");
-    const minutes = Number(timeline.durationSec ?? 60) / 60;
-    const quota = await assertQuota(ws.userId, "render_minutes");
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "render", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
-    await inngest.send(projectRenderRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: timeline.id, logoChannelId: logoChoice }));
-    await log("quota.render_minutes", { minutes: Math.round(minutes * 100) / 100, timelineId: timeline.id }, projectId);
-    await log("render.requested", { timelineId: timeline.id, version: timeline.version, logo: logo?.name ?? (logoChoice === "kit" ? "kit" : "project default"), quotaUsed: quota.used, quotaLimit: quota.limit }, projectId);
+    const r = await queueRender(ws, log, { projectId, timelineId: str(fd, "timelineId") || undefined, logoChoice, skipQa: str(fd, "skipQa") === "1" });
     revalidatePath(`/app/projects/${projectId}`);
-    return `Rendering v${timeline.version}${logo ? ` with the ${logo.name} logo` : ""} (${Math.ceil(quota.used + minutes)}/${quota.limit} render minutes today)…`;
+    return `Rendering v${r.version}${r.skipQa ? " without the QA gate" : ""}${r.logoName ? ` with the ${r.logoName} logo` : ""} (${r.minutesToday}/${r.minutesLimit} render minutes today)…`;
   });
 }
 

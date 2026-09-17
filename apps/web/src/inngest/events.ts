@@ -44,7 +44,7 @@ export const projectFetchRequested = eventType("project/fetch.requested", {
     projectId: z.string(),
     organizationId: z.string(),
     requestedBy: z.string(),
-    /** Force one provider; default runs the chain browser_rendering → http → firecrawl. */
+    /** Provider to try first; the rest of the chain (browser_rendering → http → firecrawl) still follows when it is blocked or fails. */
     method: z.enum(["browser_rendering", "http", "firecrawl"]).optional(),
     /** Manual paste replaces network fetching entirely. */
     manual: z.object({ title: z.string(), text: z.string() }).optional(),
@@ -87,6 +87,8 @@ export const projectRenderRequested = eventType("project/render.requested", {
     timelineId: z.string().optional(),
     /** Whose logo to draw: a channel id, "kit" for the brand kit's own logo; absent = the project's logo channel. */
     logoChannelId: z.string().optional(),
+    /** Forced render: the QA probe still runs and is stored, but a failed check no longer fails the render. Only offered after a `qa_failed` render of the same version. */
+    skipQa: z.boolean().optional(),
   }),
 });
 
