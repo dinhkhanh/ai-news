@@ -24,7 +24,27 @@ export type MediaAction =
       voiceLufs?: number;
       duckDb?: number;
     }
-  | { action: "web-video"; input: { url: string }; output: { key: string }; trim?: { startSec: number; endSec: number } };
+  | { action: "web-video"; input: { url: string }; output: { key: string }; trim?: { startSec: number; endSec: number } }
+  /** Normalise an uploaded recording (e.g. a browser tab capture, WebM/VFR) to constant-30 fps H.264 MP4 without audio; optional trim. */
+  | { action: "transcode"; input: { key: string }; output: { key: string }; trim?: { startSec: number; endSec: number } }
+  /** yt-dlp metadata only: `ytsearch<limit>:<query>` on YouTube plus any explicit video-page URLs (TikTok, Facebook, Vimeo, …). */
+  | { action: "web-video-search"; input: { query?: string; urls?: string[]; limit?: number } };
+
+/** A video found on a video site (yt-dlp metadata), before any download. */
+export type WebVideoCandidate = {
+  id: string;
+  url: string;
+  title: string;
+  site: string;
+  durationSec: number | null;
+  thumbnailUrl: string | null;
+  uploader: string | null;
+  viewCount: number | null;
+  uploadDate: string | null;
+  width: number | null;
+  height: number | null;
+};
+
 
 export type ProbeResult = {
   width: number;
@@ -53,4 +73,8 @@ export type MediaResult = {
   checks?: Record<string, Check>;
   error?: string;
   billedMs?: number;
+  /** web-video-search */
+  videos?: WebVideoCandidate[];
+  /** Per-target failures of a web-video-search (the call still succeeds). */
+  warnings?: string[];
 };

@@ -1,5 +1,6 @@
 import type { EditorDoc } from "@/lib/media/editor";
 import type { SceneVerdict } from "@/lib/llm/schemas";
+import type { PendingCapture } from "@/lib/media/visual-plan";
 
 /** A visual the editor can swap into a scene (every stock clip / article image fetched for the project). */
 export type VisualOption = {
@@ -42,6 +43,8 @@ export type EditorProps = {
   /** R2 key → presigned URL for everything the preview may play. */
   urls: Record<string, string>;
   options: VisualOption[];
+  /** YouTube picks of this build that the server could not download and nobody has recorded yet. */
+  captures: PendingCapture[];
   music: MusicOption[];
   verdicts: Record<string, { verdict: SceneVerdict["verdict"]; note: string | null; evidence: string | null }> | null;
   faithfulnessCounts: { supported: number; partial: number; unsupported: number; unchecked: number } | null;

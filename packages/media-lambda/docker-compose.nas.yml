@@ -1,0 +1,11 @@
+# Synology Container Manager → Project → Create: put this file and nas.env in one folder on the NAS.
+# Import the image first: Container Manager → Image → Action → Import → Add from file → the .tar from build-nas.sh.
+services:
+  webvideo-api:
+    image: ai-news-webvideo-api:1
+    container_name: ai-news-webvideo-api
+    restart: unless-stopped
+    env_file: nas.env
+    ports:
+      - "8787:8787"
+    mem_limit: 2g

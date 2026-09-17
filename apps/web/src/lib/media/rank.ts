@@ -63,15 +63,17 @@ const AssignSchema = z.object({
   ),
 });
 
-const ASSIGN_SYSTEM = `You place still images into the scenes of a vertical short news video. You see every scene (voice-over + on-screen text, and how many pictures it needs) and numbered candidate images taken from the source article and from other outlets' coverage of the same story.
-For each scene list the candidate numbers that best illustrate it, best first, up to the number it needs. Prefer images whose subject matches the scene's facts (place, people, object, event). Never list the same candidate for two scenes. Skip images with burnt-in text, logos, watermarks, or that would mislead about the story. A scene may get fewer picks than it needs, or none, if nothing fits.`;
+const ASSIGN_SYSTEM = `You place pictures into the scenes of a vertical short news video. You see every scene (voice-over + on-screen text, and how many pictures it needs) and numbered candidates: images from the source article, images from other outlets' coverage of the same story, and web videos about the story (shown by their thumbnail, with title, channel and length; a video listed for a scene fills as many consecutive shots of that scene as its hint says).
+For each scene list the candidate numbers that best illustrate it, best first, up to the number it needs. Prefer candidates whose subject matches the scene's facts (place, people, object, event). When two candidates fit equally, prefer the one from the source article; other outlets' images and web videos rank equally after it (each candidate says where it comes from). Only pick a web video whose title is clearly about this same story, not a similar or older event. Never list the same candidate for two scenes. Skip candidates with burnt-in text, logos, watermarks, or that would mislead about the story. A scene may get fewer picks than it needs, or none, if nothing fits.`;
 
 export type ImageCandidate = { key: string; thumbnailUrl: string; hint?: string | null };
 
 /**
- * One Haiku call assigns article/related images to scenes (each image at most
- * once). Returns, per scene, candidate indexes best first. Falls back to [] on
- * any failure so the caller can assign sequentially.
+ * One Haiku call assigns article / related images and web-video candidates
+ * (by thumbnail) to scenes, each at most once. Candidates are listed in
+ * `visual-plan.ts` order and the model is told to prefer the source article.
+ * Returns, per scene, candidate indexes best first. Falls back to [] on any
+ * failure so the caller can assign sequentially.
  */
 export async function assignImages(
   scenes: Array<{ id: string; voiceover: string; onScreenText: string; want: number }>,

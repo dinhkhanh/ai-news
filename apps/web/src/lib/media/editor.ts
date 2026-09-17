@@ -92,6 +92,19 @@ export function setShot(scene: EditorScene, index: number, visual: EditorVisual)
   return { ...scene, shots: scene.shots.map((s, i) => (i === index - 1 ? visual : s)) };
 }
 
+/**
+ * Put `visuals` into the scene's last shots, keeping the shot count. Shots are
+ * ordered by sourcing tier (`visual-plan.ts`), so the tail holds the
+ * lowest-priority pictures (stock, AI) – the ones a late-arriving web-video
+ * capture should displace.
+ */
+export function replaceTailShots(scene: EditorScene, visuals: EditorVisual[]): EditorScene {
+  const all = sceneShots(scene);
+  const take = visuals.slice(0, all.length);
+  const next = [...all.slice(0, all.length - take.length), ...take];
+  return { ...scene, visual: next[0], shots: next.slice(1) };
+}
+
 /** Remove shot `index`; removing the first promotes the next one. A scene always keeps at least one shot. */
 export function removeShot(scene: EditorScene, index: number): EditorScene {
   const all = sceneShots(scene);

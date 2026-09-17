@@ -75,7 +75,7 @@ function Thumb({ src, video, className }: { src: string | null; video: boolean; 
 
 function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; url: string | null; selected: boolean; usedAt: string[]; onPick: () => void }) {
   const src = o.thumbnailUrl ?? url;
-  const providerLabel = o.provider === "related" ? "báo khác" : o.provider === "article" ? "bài gốc" : o.provider === "upload" ? "tải lên" : o.provider === "url" ? "đường dẫn" : o.provider;
+  const providerLabel = o.provider === "related" ? "báo khác" : o.provider === "article" ? "bài gốc" : o.provider === "gemini_image" ? "AI" : o.provider === "yt-dlp" || o.provider === "yt-capture" ? "video web" : o.provider === "upload" ? "tải lên" : o.provider === "url" ? "đường dẫn" : o.provider;
   return (
     <button
       type="button"

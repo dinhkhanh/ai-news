@@ -6,7 +6,7 @@ export const INTEGRATIONS = [
   { provider: "mubert", label: "Mubert (API v3)", secretLabel: "CUSTOMER_ID:ACCESS_TOKEN", hasSpendCap: true, hasCredits: false },
   { provider: "firecrawl", label: "Firecrawl (fallback fetch)", secretLabel: "API key", hasSpendCap: false, hasCredits: true },
   { provider: "cloudflare_browser", label: "Cloudflare Browser Rendering", secretLabel: "API token", hasSpendCap: false, hasCredits: false },
-  { provider: "google_veo", label: "Google Veo / Imagen", secretLabel: "Project ID (auth via service account)", hasSpendCap: true, hasCredits: false },
+  { provider: "google_veo", label: "Google Vertex AI (Gemini image / Veo)", secretLabel: "Google Cloud Project ID (auth via GOOGLE_APPLICATION_CREDENTIALS_JSON)", hasSpendCap: true, hasCredits: false },
   { provider: "resend", label: "Resend (email)", secretLabel: "API key", hasSpendCap: false, hasCredits: false },
   { provider: "slack_webhook", label: "Slack webhook", secretLabel: "Webhook URL", hasSpendCap: false, hasCredits: false },
   { provider: "langfuse", label: "Langfuse", secretLabel: "Secret key", hasSpendCap: false, hasCredits: false },
@@ -19,8 +19,8 @@ export const isIntegrationProvider = (p: string): p is IntegrationProvider =>
   INTEGRATIONS.some((i) => i.provider === p);
 
 export const FEATURE_FLAGS = [
-  { key: "web_video_downloader", label: "Web-video downloader (yt-dlp)", description: "Allow trimming clips from web videos as B-roll." },
-  { key: "ai_media", label: "AI media (Veo / Imagen)", description: "Allow AI-generated B-roll, subject to per-project cap." },
+  { key: "web_video_downloader", label: "Web-video downloader (yt-dlp)", description: "Visual tier 2 (same rank as other outlets' images): search YouTube / video pages about the story, download only the picked sections through the media Lambda." },
+  { key: "ai_media", label: "AI media (Gemini image on Vertex)", description: "Last tier of the visual priority: generate stills only for shots the article, other outlets and stock could not fill. Subject to the daily ai_media quota and the Vertex spend cap." },
   { key: "scheduling", label: "Scheduled publishing", description: "Allow publish-at-time via delayed events." },
   { key: "publish_youtube", label: "Publish: YouTube Shorts", description: "Uploads via the Internal Google OAuth client (youtube.upload scope)." },
   { key: "publish_facebook", label: "Publish: Facebook Reels", description: "Needs the Meta app with publish_video approved (or app-role testers)." },

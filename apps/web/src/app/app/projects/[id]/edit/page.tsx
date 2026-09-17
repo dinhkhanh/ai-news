@@ -9,6 +9,7 @@ import type { EditorProps, VisualOption } from "@/components/editor/types";
 import { Badge } from "@/components/ui/badge";
 import { docKeys } from "@/lib/media/editor";
 import { presignMap } from "@/lib/media/timeline-resolve";
+import type { PendingCapture } from "@/lib/media/visual-plan";
 import { busyStep } from "@/lib/project-state";
 import { loadProjectStatus } from "@/lib/project-status";
 import { canApprove, docOfRow, verdictsOfScript } from "@/lib/review";
@@ -16,6 +17,8 @@ import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
+// Server actions of this page include the media-Lambda transcode of a browser capture (`registerWebCapture`).
+export const maxDuration = 120;
 
 /**
  * Timeline editor (docs/PLAN.md §4.7): Remotion Player preview + scene track.
@@ -85,6 +88,9 @@ export default async function EditPage({ params, searchParams }: { params: Promi
       searchTerm: a.searchTerm,
       rankScore: a.rankScore ? Number(a.rankScore) : null,
     }));
+  // YouTube picks the build could not download, minus the ones already recorded from a browser.
+  const captured = new Set(assets.filter((a) => a.provider === "yt-capture").map((a) => (a.providerId ?? "").split("@")[0]));
+  const captures = (((selected.buildJson as { webVideo?: { pending?: PendingCapture[] } }).webVideo?.pending ?? []) as PendingCapture[]).filter((c) => c.videoId && !captured.has(`youtube:${c.videoId}`));
   const keys = new Set<string>([...docKeys(doc), ...options.map((o) => o.key), ...music.map((m) => m.r2Path)]);
   if (mix?.mixKey) keys.add(mix.mixKey);
   // Article images have no remote thumbnail in R2; presign the key itself for the thumbnail grid.
@@ -109,6 +115,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     mix: mix ? { mixKey: mix.mixKey, signature: mix.signature } : null,
     urls,
     options,
+    captures: selected.id === timelines[0].id ? captures : [],
     music: music.map((m) => ({ id: m.id, title: m.title, key: m.r2Path, moodTags: m.moodTags, durationSec: m.durationSec ? Number(m.durationSec) : null, licence: m.licence })),
     verdicts: verdicts?.verdicts ?? null,
     faithfulnessCounts: verdicts?.counts ?? null,

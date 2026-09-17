@@ -10,12 +10,14 @@ import { ReviewPanel } from "@/components/review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { audioSignature, buildFromDoc, sceneShots, shotsMissing, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { audioSignature, buildFromDoc, replaceTailShots, sceneShots, shotsMissing, type EditorDoc, type EditorScene, type EditorVisual } from "@/lib/media/editor";
+import { SHOT_SEC, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
 import { CommentsPanel } from "./comments-panel";
 import { Preview } from "./preview";
 import { SceneInspector } from "./scene-inspector";
 import { SceneList } from "./scene-list";
+import { WebCapturePanel } from "./web-capture-panel";
 import type { EditorProps, VisualOption } from "./types";
 
 const FPS = 30;
@@ -53,6 +55,24 @@ export function Editor(props: EditorProps) {
   const addOption = (o: VisualOption, url: string) => {
     setOptions((list) => [o, ...list.filter((x) => x.assetId !== o.assetId)]);
     setUrls((u) => ({ ...u, [o.key]: url }));
+  };
+
+  // A YouTube section recorded in this browser: one clip, cut into the 5 s segments the build had planned, placed at the tail of those scenes.
+  const placeCapture = (c: PendingCapture, o: VisualOption, url: string) => {
+    addOption(o, url);
+    const usable = Math.floor((o.durationSec ?? c.segments * SHOT_SEC) / SHOT_SEC);
+    let segment = 0;
+    setDoc((d) => ({
+      ...d,
+      scenes: d.scenes.map((s) => {
+        const plan = c.scenes.find((x) => x.sceneId === s.id);
+        if (!plan) return s;
+        const visuals: EditorVisual[] = [];
+        for (let i = 0; i < plan.segments && segment < usable; i++, segment++) visuals.push({ kind: "video", key: o.key, clipDurationSec: SHOT_SEC, trimStartSec: segment * SHOT_SEC, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl });
+        return visuals.length ? replaceTailShots(s, visuals) : s;
+      }),
+    }));
+    toast.success(`Đã ghi "${c.title.slice(0, 40)}" và đặt vào ${c.scenes.map((x) => x.sceneId).join(", ")}. Xem lại rồi bấm Lưu.`);
   };
 
   const savedJson = useMemo(() => JSON.stringify(props.doc), [props.doc]);
@@ -250,6 +270,8 @@ export function Editor(props: EditorProps) {
       </div>
 
       {/* ---------------- track + inspector ---------------- */}
+      <WebCapturePanel projectId={props.projectId} captures={props.captures} disabled={readOnly} onCaptured={placeCapture} />
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-2">
           <div className="flex items-center justify-between">

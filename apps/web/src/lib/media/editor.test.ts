@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { brandSchema } from "@ai-news/video/schema";
-import { audioSignature, buildFromDoc, describeChanges, docFromTimeline, docKeys, editorDocSchema, GAP_MS, LEAD_MS, moveScene, removeShot, sceneCaptions, setCaptionText, setShot, shotsMissing, TAIL_MS, voicePlacement, type EditorDoc, type EditorVisual } from "./editor";
+import { audioSignature, buildFromDoc, describeChanges, docFromTimeline, docKeys, editorDocSchema, GAP_MS, LEAD_MS, moveScene, removeShot, replaceTailShots, sceneCaptions, setCaptionText, setShot, shotsMissing, TAIL_MS, voicePlacement, type EditorDoc, type EditorVisual } from "./editor";
 import { layoutShots, shotsNeeded } from "./timeline";
 
 const words = (text: string, ms: number) => {
@@ -161,4 +161,21 @@ describe("describeChanges + docKeys", () => {
   it("lists every key once", () => {
     expect(docKeys(doc).sort()).toEqual(["media/o/p/aroll/b1-0.jpg", "media/o/p/broll/b1-s1.mp4", "media/o/p/music/b1.mp3", "media/o/p/vo/b1-s1.wav", "media/o/p/vo/b1-s2.wav", "media/o/p/vo/b1-s3.wav"]);
   });
+
+describe("replaceTailShots", () => {
+  const img = (key: string): EditorVisual => ({ kind: "image", key, kenBurns: true, credit: null, assetId: null, thumbnailUrl: null });
+  const clip = (n: number): EditorVisual => ({ kind: "video", key: "cap.mp4", clipDurationSec: 5, trimStartSec: n * 5, credit: "Video: x / YouTube", assetId: "a", thumbnailUrl: null });
+  const scene = { ...doc.scenes[0], visual: img("article.jpg"), shots: [img("stock1.jpg"), img("ai1.png")] };
+
+  it("displaces the lowest-priority shots at the tail and keeps the count", () => {
+    const next = replaceTailShots(scene, [clip(0), clip(1)]);
+    expect([next.visual, ...next.shots].map((v) => (v.kind === "video" ? `clip@${v.trimStartSec}` : v.kind === "image" ? v.key : "solid"))).toEqual(["article.jpg", "clip@0", "clip@5"]);
+  });
+
+  it("never grows the scene when more segments arrive than it has shots", () => {
+    const next = replaceTailShots(scene, [clip(0), clip(1), clip(2), clip(3)]);
+    expect(1 + next.shots.length).toBe(3);
+    expect(next.visual).toEqual(clip(0));
+  });
+});
 });

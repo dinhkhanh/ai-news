@@ -34,6 +34,9 @@ const schema = z.object({
   REMOTION_FUNCTION_NAME: z.string().optional(),
   REMOTION_SERVE_URL: z.string().optional(),
   MEDIA_LAMBDA_FUNCTION_NAME: z.string().default("ai-news-media"),
+  /** Self-hosted web-video API on a regular ISP line (office NAS): base URL (https) + bearer token. Unset = downloads run on the Lambda. */
+  WEB_VIDEO_API_URL: z.string().url().optional(),
+  WEB_VIDEO_API_TOKEN: z.string().min(24).optional(),
 
   GOOGLE_APPLICATION_CREDENTIALS_JSON: z.string().optional(),
   CLOUDFLARE_API_TOKEN: z.string().optional(),

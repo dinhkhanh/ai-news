@@ -9,6 +9,7 @@ import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
 import { fetchSceneBroll } from "@/lib/media/broll";
 import { voicePlacement, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { aiImagesAvailable, generateSceneImages } from "@/lib/media/generate";
 import { pickMusic } from "@/lib/media/music";
 import { loadPronunciations, loadVoicePreset, synthesizeScene } from "@/lib/media/tts";
 import { shotsNeeded } from "@/lib/media/timeline";
@@ -19,7 +20,8 @@ import { docOfRow, saveTimelineVersion } from "@/lib/review";
  * Phase 4 (docs/PLAN.md §4.7 "regenerate one scene's B-roll or VO, change
  * music"): redo one part of the editor document and store the result as a
  * new timeline version (kind = regenerated) on top of the version the editor
- * was looking at. The optimistic lock in saveTimelineVersion rejects the
+ * was looking at. A B-roll re-search follows the tail of the visual priority
+ * (`visual-plan.ts`): stock first, AI stills only when stock has nothing. The optimistic lock in saveTimelineVersion rejects the
  * result if someone saved another version meanwhile.
  */
 export const regenerateSceneFn = inngest.createFunction(
@@ -96,17 +98,30 @@ export const regenerateSceneFn = inngest.createFunction(
         const exclude = new Set(seen.map((a) => `${a.provider}:${a.providerId}`));
         return fetchSceneBroll({ id: scene.id, voiceover: scene.voiceover, onScreenText: scene.onScreenText, brollTerms: terms }, { wantSec, buildId, keep: Math.max(2, keep), exclude }, pctx);
       });
-      if (!res.selected) throw new NonRetriableError(`Không tìm được clip mới cho ${scene.id}${res.errors[0] ? `: ${res.errors[0]}` : " (chưa có key Pexels/Pixabay?)"}`);
-      const clips = [res.selected, ...res.alternates].slice(0, keep).map((c) => ({ kind: "video" as const, key: c.key, clipDurationSec: c.durationSec ?? 5, trimStartSec: 0, credit: c.credit, assetId: c.assetId, thumbnailUrl: c.thumbnailUrl }));
-      // New clips take the first shots; keep the scene's remaining stills so the ≤ 5 s cadence holds.
+      // Last tier of the visual priority: when no stock clip exists, generate stills (flag + quota permitting) before giving up.
+      const generated = res.selected
+        ? null
+        : await step.run("ai-fallback", async () => {
+            const a = await aiImagesAvailable(requestedBy);
+            if (!a.enabled || !a.projectId) return { assets: [], errors: [a.reason ?? "AI tắt"], costUsd: 0 };
+            await reportProgress(pctx, { label: `Không có stock, tạo ${Math.min(keep, a.remaining)} ảnh AI cho cảnh ${scene.id}`, pct: 45 });
+            return generateSceneImages({ id: scene.id, onScreenText: scene.onScreenText, brollTerms: terms }, { count: Math.min(keep, a.remaining), buildId, language: base.doc.language, projectId: a.projectId }, pctx);
+          });
+      if (!res.selected && !generated?.assets.length) {
+        throw new NonRetriableError(`Không tìm được clip mới cho ${scene.id}${res.errors[0] ? `: ${res.errors[0]}` : " (chưa có key Pexels/Pixabay?)"}${generated?.errors[0] ? ` · AI: ${generated.errors[0]}` : ""}`);
+      }
+      const clips = res.selected ? [res.selected, ...res.alternates].slice(0, keep).map((c) => ({ kind: "video" as const, key: c.key, clipDurationSec: c.durationSec ?? 5, trimStartSec: 0, credit: c.credit, assetId: c.assetId, thumbnailUrl: c.thumbnailUrl }))
+        : (generated?.assets ?? []).map((a) => ({ kind: "image" as const, key: a.key, kenBurns: true, credit: a.credit, assetId: a.assetId, thumbnailUrl: a.thumbnailUrl }));
+      // New visuals take the first shots; keep the scene's remaining stills so the ≤ 5 s cadence holds.
       const keepStills = [scene.visual, ...scene.shots].filter((v) => v.kind === "image").slice(0, Math.max(0, keep - clips.length));
       const all = [...clips, ...keepStills];
       next = {
         ...base.doc,
         scenes: base.doc.scenes.map((s, i) => (i === sceneIdx ? { ...s, brollTerms: terms, visual: all[0], shots: all.slice(1) } : s)),
       };
-      changes.push(`${scene.id}: B-roll mới (${clips.length} clip, ${res.searched} ứng viên, ${terms.join(", ")})`);
+      changes.push(res.selected ? `${scene.id}: B-roll mới (${clips.length} clip, ${res.searched} ứng viên, ${terms.join(", ")})` : `${scene.id}: không có stock, ${clips.length} ảnh AI (Gemini) cho ${terms.join(", ")}`);
       build.stock = { ...base.stock, [scene.id]: { selected: res.selected, alternates: res.alternates, searched: res.searched, errors: res.errors, rankCostUsd: res.rankCostUsd } };
+      if (generated?.assets.length) build.ai = { sceneId: scene.id, assets: generated.assets.map((a) => ({ assetId: a.assetId, key: a.key })), errors: generated.errors, costUsd: generated.costUsd };
     }
 
     if (what === "music") {

@@ -26,7 +26,16 @@ import { canApprove, needsFaithfulnessOverride } from "@/lib/review";
 import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { dailyLimit, usedToday } from "@/lib/quota";
-import { confirmArticle, deleteProject, pasteArticle, pinRender, refetchArticle, requestAssets, requestRender, requestScript } from "./actions";
+import {
+  confirmArticle,
+  deleteProject,
+  pasteArticle,
+  pinRender,
+  refetchArticle,
+  requestAssets,
+  requestRender,
+  requestScript,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -42,14 +51,26 @@ const STATE_LABEL: Record<string, string> = {
   failed: "Lỗi",
 };
 const KIND_LABEL: Record<string, string> = { built: "dựng", edited: "sửa", regenerated: "tạo lại" };
-const RENDER_LABEL: Record<string, string> = { queued: "chờ", rendering: "đang kết xuất", post_processing: "hậu kỳ + QA", qa_failed: "QA không đạt", done: "xong", failed: "lỗi" };
+const RENDER_LABEL: Record<string, string> = {
+  queued: "chờ",
+  rendering: "đang kết xuất",
+  post_processing: "hậu kỳ + QA",
+  qa_failed: "QA không đạt",
+  done: "xong",
+  failed: "lỗi",
+};
 
 function PresetFields({ durationSec, tone }: { durationSec: number; tone: string }) {
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="space-y-1">
         <Label htmlFor="durationSec">Thời lượng</Label>
-        <select id="durationSec" name="durationSec" defaultValue={String(durationSec)} className="h-9 rounded-md border bg-background px-2 text-sm">
+        <select
+          id="durationSec"
+          name="durationSec"
+          defaultValue={String(durationSec)}
+          className="h-9 rounded-md border bg-background px-2 text-sm"
+        >
           {DURATION_PRESETS.map((d) => (
             <option key={d} value={d}>
               {d} giây
@@ -71,7 +92,13 @@ function PresetFields({ durationSec, tone }: { durationSec: number; tone: string
   );
 }
 
-export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ v?: string; t?: string; duplicate?: string }> }) {
+export default async function ProjectPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ v?: string; t?: string; duplicate?: string }>;
+}) {
   const { id } = await params;
   const sp = await searchParams;
   const ws = await requireWorkspace();
@@ -82,28 +109,64 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     if (!project) return null;
     // One round trip to the pooler is ~60 ms; issue the independent queries together so the
     // connection pipelines them instead of paying that ten times in a row.
-    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications] = await Promise.all([
-      tx.query.articles.findFirst({ where: eq(schema.articles.projectId, id), orderBy: desc(schema.articles.createdAt) }),
-      tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) }),
-      tx.query.timelines.findMany({ where: eq(schema.timelines.projectId, id), orderBy: desc(schema.timelines.version) }),
-      tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) }),
-      tx
-        .select({ id: schema.projectReviews.id, action: schema.projectReviews.action, note: schema.projectReviews.note, timelineVersion: schema.projectReviews.timelineVersion, faithfulnessOverride: schema.projectReviews.faithfulnessOverride, createdAt: schema.projectReviews.createdAt, actorName: schema.user.name })
-        .from(schema.projectReviews)
-        .leftJoin(schema.user, eq(schema.user.id, schema.projectReviews.actorId))
-        .where(eq(schema.projectReviews.projectId, id))
-        .orderBy(desc(schema.projectReviews.createdAt))
-        .limit(10),
-      tx.select({ openComments: count() }).from(schema.comments).where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt))),
-      tx.query.channels.findMany({ where: eq(schema.channels.organizationId, project.organizationId), orderBy: [schema.channels.platform, schema.channels.name] }),
-      tx.query.channelGrants.findMany({ where: eq(schema.channelGrants.userId, ws.userId) }),
-      tx
-        .select({ id: schema.publications.id, platform: schema.publications.platform, channelId: schema.publications.channelId, status: schema.publications.status, attempts: schema.publications.attempts, scheduledAt: schema.publications.scheduledAt, publishedAt: schema.publications.publishedAt, platformUrl: schema.publications.platformUrl, privacy: schema.publications.privacy, aiDisclosure: schema.publications.aiDisclosure, error: schema.publications.error, analyticsJson: schema.publications.analyticsJson, renderId: schema.publications.renderId, createdByName: schema.user.name })
-        .from(schema.publications)
-        .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
-        .where(eq(schema.publications.projectId, id))
-        .orderBy(desc(schema.publications.createdAt)),
-    ]);
+    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications] =
+      await Promise.all([
+        tx.query.articles.findFirst({
+          where: eq(schema.articles.projectId, id),
+          orderBy: desc(schema.articles.createdAt),
+        }),
+        tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) }),
+        tx.query.timelines.findMany({
+          where: eq(schema.timelines.projectId, id),
+          orderBy: desc(schema.timelines.version),
+        }),
+        tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) }),
+        tx
+          .select({
+            id: schema.projectReviews.id,
+            action: schema.projectReviews.action,
+            note: schema.projectReviews.note,
+            timelineVersion: schema.projectReviews.timelineVersion,
+            faithfulnessOverride: schema.projectReviews.faithfulnessOverride,
+            createdAt: schema.projectReviews.createdAt,
+            actorName: schema.user.name,
+          })
+          .from(schema.projectReviews)
+          .leftJoin(schema.user, eq(schema.user.id, schema.projectReviews.actorId))
+          .where(eq(schema.projectReviews.projectId, id))
+          .orderBy(desc(schema.projectReviews.createdAt))
+          .limit(10),
+        tx
+          .select({ openComments: count() })
+          .from(schema.comments)
+          .where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt))),
+        tx.query.channels.findMany({
+          where: eq(schema.channels.organizationId, project.organizationId),
+          orderBy: [schema.channels.platform, schema.channels.name],
+        }),
+        tx.query.channelGrants.findMany({ where: eq(schema.channelGrants.userId, ws.userId) }),
+        tx
+          .select({
+            id: schema.publications.id,
+            platform: schema.publications.platform,
+            channelId: schema.publications.channelId,
+            status: schema.publications.status,
+            attempts: schema.publications.attempts,
+            scheduledAt: schema.publications.scheduledAt,
+            publishedAt: schema.publications.publishedAt,
+            platformUrl: schema.publications.platformUrl,
+            privacy: schema.publications.privacy,
+            aiDisclosure: schema.publications.aiDisclosure,
+            error: schema.publications.error,
+            analyticsJson: schema.publications.analyticsJson,
+            renderId: schema.publications.renderId,
+            createdByName: schema.user.name,
+          })
+          .from(schema.publications)
+          .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
+          .where(eq(schema.publications.projectId, id))
+          .orderBy(desc(schema.publications.createdAt)),
+      ]);
     return { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications };
   });
   if (!data) notFound();
@@ -119,16 +182,36 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     }
   };
   const publisher = writer && canApprove(ws);
-  const imageKeys = Array.from(new Set((timelineJson?.scenes ?? []).flatMap((sc) => (sc.visual.kind === "image" ? [sc.visual.src] : []))));
+  const imageKeys = Array.from(
+    new Set((timelineJson?.scenes ?? []).flatMap((sc) => (sc.visual.kind === "image" ? [sc.visual.src] : []))),
+  );
   const recentRenders = renders.slice(0, 10);
   // Everything below is independent: presigning is local crypto and the quota / flag lookups are one query each.
-  const [imageSigned, mixUrl, renderSigned, screenshotUrl, [renderLimit, renderUsed], publishFlags, [publishLimit, publishUsed]] = await Promise.all([
+  const [
+    imageSigned,
+    mixUrl,
+    renderSigned,
+    screenshotUrl,
+    [renderLimit, renderUsed],
+    publishFlags,
+    [publishLimit, publishUsed],
+  ] = await Promise.all([
     Promise.all(imageKeys.map((key) => sign(key))),
     sign(timelineJson?.audio.mixSrc),
-    Promise.all(recentRenders.map(async (r) => [r.id, { video: r.status === "done" ? await sign(r.outputPath, 3600) : null, cover: await sign(r.coverPath) }] as const)),
+    Promise.all(
+      recentRenders.map(
+        async (r) =>
+          [
+            r.id,
+            { video: r.status === "done" ? await sign(r.outputPath, 3600) : null, cover: await sign(r.coverPath) },
+          ] as const,
+      ),
+    ),
     sign(article?.screenshotPath),
     writer ? Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0],
-    publisher ? flagsEnabled(["publish_youtube", "publish_facebook", "publish_instagram", "publish_tiktok", "scheduling"]) : ({} as Record<string, boolean>),
+    publisher
+      ? flagsEnabled(["publish_youtube", "publish_facebook", "publish_instagram", "publish_tiktok", "scheduling"])
+      : ({} as Record<string, boolean>),
     publisher ? Promise.all([dailyLimit(ws.userId, "publishes"), usedToday(ws.userId, "publishes")]) : [0, 0],
   ]);
   const imageUrls: Record<string, string> = {};
@@ -138,8 +221,13 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   });
   const renderLinks = new Map<string, { video: string | null; cover: string | null }>(renderSigned);
   // Publishing (phase 5): the approved version's finished render, granted channels, defaults from the script's per-platform metadata.
-  const approvedRender = project.approvedTimelineId ? (renders.find((r) => r.timelineId === project.approvedTimelineId && r.status === "done") ?? null) : null;
-  const approvedScript = scripts.find((s) => s.id === timelines.find((t) => t.id === project.approvedTimelineId)?.scriptId) ?? scripts[0] ?? null;
+  const approvedRender = project.approvedTimelineId
+    ? (renders.find((r) => r.timelineId === project.approvedTimelineId && r.status === "done") ?? null)
+    : null;
+  const approvedScript =
+    scripts.find((s) => s.id === timelines.find((t) => t.id === project.approvedTimelineId)?.scriptId) ??
+    scripts[0] ??
+    null;
   const scriptMeta = (approvedScript?.scenesJson as unknown as StoredScript | null)?.metadata ?? null;
   const publishChannels: PublishChannel[] = channels.map((c) => ({
     id: c.id,
@@ -149,7 +237,14 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     enabled: c.enabled && Boolean(c.vaultRef),
     healthy: c.healthy,
     flagOn: Boolean(publishFlags[PLATFORM_SPEC[c.platform].flag]),
-    defaults: buildMetadata({ platform: c.platform, meta: scriptMeta?.[PLATFORM_SPEC[c.platform].metadataKey] ?? null, fallbackTitle: project.title ?? project.url, language: project.language, source: { siteName: article?.siteName ?? null, url: article?.canonicalUrl ?? project.url }, aiDisclosure: project.aiDisclosure }),
+    defaults: buildMetadata({
+      platform: c.platform,
+      meta: scriptMeta?.[PLATFORM_SPEC[c.platform].metadataKey] ?? null,
+      fallbackTitle: project.title ?? project.url,
+      language: project.language,
+      source: { siteName: article?.siteName ?? null, url: article?.canonicalUrl ?? project.url },
+      aiDisclosure: project.aiDisclosure,
+    }),
   }));
   const publicationViews: PublicationView[] = publications.map((x) => ({
     id: x.id,
@@ -163,7 +258,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     privacy: x.privacy,
     aiDisclosure: x.aiDisclosure,
     error: x.error,
-    analytics: x.analyticsJson ? (({ views, likes, comments, shares, pulledAt }) => ({ views, likes, comments, shares, pulledAt }))(x.analyticsJson as unknown as Analytics) : null,
+    analytics: x.analyticsJson
+      ? (({ views, likes, comments, shares, pulledAt }) => ({ views, likes, comments, shares, pulledAt }))(
+          x.analyticsJson as unknown as Analytics,
+        )
+      : null,
     renderVersion: renders.find((r) => r.id === x.renderId)?.timelineVersion ?? null,
     createdByName: x.createdByName,
   }));
@@ -171,8 +270,15 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     project,
     latestScriptVersion: scripts[0]?.version ?? 0,
     latestTimelineVersion: timelines[0]?.version ?? 0,
-    renders: { total: renders.length, active: renders.filter((r) => r.status === "queued" || r.status === "rendering" || r.status === "post_processing").length },
-    publications: { total: publications.length, active: publications.filter((x) => x.status === "publishing" || x.status === "processing").length },
+    renders: {
+      total: renders.length,
+      active: renders.filter((r) => r.status === "queued" || r.status === "rendering" || r.status === "post_processing")
+        .length,
+    },
+    publications: {
+      total: publications.length,
+      active: publications.filter((x) => x.status === "publishing" || x.status === "processing").length,
+    },
   });
   const busy = Boolean(busyStep(project));
   const selected = scripts.find((s) => String(s.version) === sp.v) ?? scripts[0] ?? null;
@@ -196,7 +302,13 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           </div>
           <h1 className="truncate text-xl font-semibold tracking-tight">{project.title ?? project.url}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant={project.state === "failed" ? "destructive" : project.state === "scripted" ? "default" : "secondary"}>{STATE_LABEL[project.state] ?? project.state}</Badge>
+            <Badge
+              variant={
+                project.state === "failed" ? "destructive" : project.state === "scripted" ? "default" : "secondary"
+              }
+            >
+              {STATE_LABEL[project.state] ?? project.state}
+            </Badge>
             {project.autoPipeline ? <Badge variant="default">tự động</Badge> : null}
             <Badge variant="outline">{project.language === "vi" ? "Tiếng Việt" : "English"}</Badge>
             {project.sensitiveTopic ? <Badge variant="destructive">chủ đề nhạy cảm → cần publisher duyệt</Badge> : null}
@@ -216,7 +328,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
       </div>
 
       <PipelineStatus initial={status} />
-      {sp.duplicate ? <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">Bài này đã có dự án trong workspace; bạn đang xem dự án đó.</p> : null}
+      {sp.duplicate ? (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
+          Bài này đã có dự án trong workspace; bạn đang xem dự án đó.
+        </p>
+      ) : null}
       {project.lastError ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
           <span className="font-medium">Lỗi:</span> {project.lastError}
@@ -246,9 +362,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           <CardHeader>
             <CardTitle className="text-base">Xác nhận nội dung bài báo</CardTitle>
             <CardDescription>
-              Lấy bằng {article.fetchMethod} · {article.wordCount} từ · {article.siteName ?? displayHost(article.canonicalUrl)}
+              Lấy bằng {article.fetchMethod} · {article.wordCount} từ ·{" "}
+              {article.siteName ?? displayHost(article.canonicalUrl)}
               {article.author ? ` · ${article.author}` : ""}
-              {article.publishedAt ? ` · ${article.publishedAt.toISOString().slice(0, 10)}` : ""}. Sửa nếu cần rồi xác nhận; kịch bản chỉ được tạo từ văn bản đã xác nhận.
+              {article.publishedAt ? ` · ${article.publishedAt.toISOString().slice(0, 10)}` : ""}. Sửa nếu cần rồi xác
+              nhận; kịch bản chỉ được tạo từ văn bản đã xác nhận.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -256,7 +374,13 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
               <div className="flex gap-2 overflow-x-auto">
                 {article.images.slice(0, 6).map((im) => (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img key={im.url} src={im.url} alt={im.alt ?? ""} className="h-24 rounded border object-cover" loading="lazy" />
+                  <img
+                    key={im.url}
+                    src={im.url}
+                    alt={im.alt ?? ""}
+                    className="h-24 rounded border object-cover"
+                    loading="lazy"
+                  />
                 ))}
               </div>
             ) : null}
@@ -269,7 +393,12 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="language">Ngôn ngữ</Label>
-                  <select id="language" name="language" defaultValue={project.language} className="h-9 rounded-md border bg-background px-2 text-sm">
+                  <select
+                    id="language"
+                    name="language"
+                    defaultValue={project.language}
+                    className="h-9 rounded-md border bg-background px-2 text-sm"
+                  >
                     <option value="vi">Tiếng Việt</option>
                     <option value="en">English</option>
                   </select>
@@ -277,7 +406,13 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
               </div>
               <div className="space-y-1">
                 <Label htmlFor="text">Nội dung</Label>
-                <Textarea id="text" name="text" rows={18} defaultValue={article.text} className="text-sm leading-relaxed" />
+                <Textarea
+                  id="text"
+                  name="text"
+                  rows={18}
+                  defaultValue={article.text}
+                  className="text-sm leading-relaxed"
+                />
               </div>
               <div className="flex justify-end">
                 <Button type="submit" disabled={!writer || busy}>
@@ -287,7 +422,12 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             </ActionForm>
             {/* Separate forms: they must not nest inside the confirm form. */}
             {writer ? <div className="flex flex-wrap gap-2">{refetchButtons(project.id, busy)}</div> : null}
-            {writer ? <details className="text-sm"><summary className="cursor-pointer text-muted-foreground">Dán nội dung thủ công</summary><div className="mt-2">{pasteForm(project.id, busy)}</div></details> : null}
+            {writer ? (
+              <details className="text-sm">
+                <summary className="cursor-pointer text-muted-foreground">Dán nội dung thủ công</summary>
+                <div className="mt-2">{pasteForm(project.id, busy)}</div>
+              </details>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -300,11 +440,12 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
               <div>
                 <CardTitle className="text-base">Kịch bản</CardTitle>
                 <CardDescription>
-                  Claude Opus 5 viết kịch bản từ bài đã xác nhận, rồi kiểm chứng từng cảnh. Mỗi lần tạo là một phiên bản mới.
+                  Claude Opus 5 viết kịch bản từ bài đã xác nhận, rồi kiểm chứng từng cảnh. Mỗi lần tạo là một phiên bản
+                  mới.
                 </CardDescription>
               </div>
               {writer ? (
-                <ActionForm action={requestScript} className="flex flex-wrap items-end gap-3">
+                <ActionForm action={requestScript} className="flex flex-wrap items-center gap-3">
                   <input type="hidden" name="projectId" value={project.id} />
                   <PresetFields durationSec={project.durationSec} tone={project.tone} />
                   <Button type="submit" disabled={busy}>
@@ -330,16 +471,36 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             ) : null}
             {selected ? (
               <ScriptReview
-                article={{ title: article.title, text: article.text, siteName: article.siteName, url: article.canonicalUrl, screenshotUrl }}
+                article={{
+                  title: article.title,
+                  text: article.text,
+                  siteName: article.siteName,
+                  url: article.canonicalUrl,
+                  screenshotUrl,
+                }}
                 script={selected.scenesJson as unknown as StoredScript}
-                faithfulness={selected.faithfulnessJson && "scenes" in selected.faithfulnessJson ? (selected.faithfulnessJson as unknown as StoredFaithfulness) : null}
-                meta={{ version: selected.version, createdAt: selected.createdAt.toISOString(), costUsd: selected.costUsd, inputTokens: selected.inputTokens, outputTokens: selected.outputTokens }}
+                faithfulness={
+                  selected.faithfulnessJson && "scenes" in selected.faithfulnessJson
+                    ? (selected.faithfulnessJson as unknown as StoredFaithfulness)
+                    : null
+                }
+                meta={{
+                  version: selected.version,
+                  createdAt: selected.createdAt.toISOString(),
+                  costUsd: selected.costUsd,
+                  inputTokens: selected.inputTokens,
+                  outputTokens: selected.outputTokens,
+                }}
               />
             ) : !busy ? (
-              <p className="text-sm text-muted-foreground">Chưa có kịch bản. Chọn thời lượng và giọng điệu rồi bấm “Tạo kịch bản”.</p>
+              <p className="text-sm text-muted-foreground">
+                Chưa có kịch bản. Chọn thời lượng và giọng điệu rồi bấm “Tạo kịch bản”.
+              </p>
             ) : null}
             <details className="text-sm">
-              <summary className="cursor-pointer text-muted-foreground">Văn bản đã xác nhận · sửa và xác nhận lại</summary>
+              <summary className="cursor-pointer text-muted-foreground">
+                Văn bản đã xác nhận · sửa và xác nhận lại
+              </summary>
               <ActionForm action={confirmArticle} className="mt-2 space-y-2">
                 <input type="hidden" name="projectId" value={project.id} />
                 <input type="hidden" name="language" value={project.language} />
@@ -364,7 +525,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <CardTitle className="text-base">Dựng video</CardTitle>
-                <CardDescription>Lời đọc Google TTS + mốc từ, B-roll Pexels/Pixabay do Haiku xếp hạng (hoặc ảnh bài), nhạc nền, trộn âm −16 LUFS, rồi timeline. Mỗi lần dựng là một phiên bản mới.</CardDescription>
+                <CardDescription>
+                  Lời đọc Google TTS + mốc từ; hình theo thứ tự ưu tiên ảnh bài gốc → ảnh báo khác + video web cùng tin (yt-dlp, nếu bật) → clip
+                  stock Pexels/Pixabay (Haiku xếp hạng) → ảnh AI (Gemini, nếu bật); nhạc nền, trộn âm −16 LUFS, rồi timeline. Mỗi
+                  lần dựng là một phiên bản mới.
+                </CardDescription>
               </div>
               {writer ? (
                 <ActionForm action={requestAssets} className="flex flex-wrap items-center gap-3">
@@ -374,7 +539,9 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                     <input type="checkbox" name="skipStock" /> bỏ qua stock
                   </label>
                   <Button type="submit" disabled={busy}>
-                    {timelines.length ? `Dựng lại từ kịch bản v${selected?.version ?? scripts[0].version}` : `Dựng từ kịch bản v${selected?.version ?? scripts[0].version}`}
+                    {timelines.length
+                      ? `Dựng lại từ kịch bản v${selected?.version ?? scripts[0].version}`
+                      : `Dựng từ kịch bản v${selected?.version ?? scripts[0].version}`}
                   </Button>
                 </ActionForm>
               ) : null}
@@ -384,7 +551,12 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             {timelines.length > 1 ? (
               <div className="flex flex-wrap gap-1 text-xs">
                 {timelines.map((t) => (
-                  <Link key={t.id} href={`/app/projects/${project.id}?v=${sp.v ?? ""}&t=${t.version}`} title={t.changes.join(" · ")} className={`rounded-full border px-2 py-0.5 ${selectedTimeline?.id === t.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+                  <Link
+                    key={t.id}
+                    href={`/app/projects/${project.id}?v=${sp.v ?? ""}&t=${t.version}`}
+                    title={t.changes.join(" · ")}
+                    className={`rounded-full border px-2 py-0.5 ${selectedTimeline?.id === t.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                  >
                     v{t.version} · {KIND_LABEL[t.kind] ?? t.kind}
                     {t.id === project.approvedTimelineId ? " ✓" : ""}
                   </Link>
@@ -394,32 +566,51 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             {timelineJson && selectedTimeline ? (
               <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" render={<Link href={`/app/projects/${project.id}/edit?t=${selectedTimeline.version}`} />}>
+                  <Button
+                    size="sm"
+                    render={<Link href={`/app/projects/${project.id}/edit?t=${selectedTimeline.version}`} />}
+                  >
                     {writer ? "Mở trình chỉnh sửa" : "Xem trước trong trình chỉnh sửa"}
                   </Button>
                   <span className="text-xs text-muted-foreground">
                     Xem trước, đổi thứ tự / clip / phụ đề, đọc lại lời, chọn ảnh bìa, bình luận, gửi duyệt.
                     {openComments ? ` ${openComments} bình luận mở.` : ""}
-                    {selectedTimeline.changes.length ? ` Thay đổi v${selectedTimeline.version}: ${selectedTimeline.changes.slice(0, 3).join(" · ")}.` : ""}
+                    {selectedTimeline.changes.length
+                      ? ` Thay đổi v${selectedTimeline.version}: ${selectedTimeline.changes.slice(0, 3).join(" · ")}.`
+                      : ""}
                   </span>
                 </div>
-                <TimelineSummary timeline={timelineJson} build={selectedTimeline.buildJson as BuildJson} imageUrls={imageUrls} mixUrl={mixUrl} />
+                <TimelineSummary
+                  timeline={timelineJson}
+                  build={selectedTimeline.buildJson as BuildJson}
+                  imageUrls={imageUrls}
+                  mixUrl={mixUrl}
+                />
                 {writer ? (
                   <ActionForm action={requestRender} className="flex flex-wrap items-center gap-3 border-t pt-3">
                     <input type="hidden" name="projectId" value={project.id} />
                     <input type="hidden" name="timelineId" value={selectedTimeline.id} />
-                    <Button type="submit" disabled={busy} variant={selectedTimeline.id === project.approvedTimelineId ? "default" : "outline"}>
-                      {selectedTimeline.id === project.approvedTimelineId ? `Kết xuất bản duyệt v${selectedTimeline.version}` : `Kết xuất thử v${selectedTimeline.version}`}
+                    <Button
+                      type="submit"
+                      disabled={busy}
+                      variant={selectedTimeline.id === project.approvedTimelineId ? "default" : "outline"}
+                    >
+                      {selectedTimeline.id === project.approvedTimelineId
+                        ? `Kết xuất bản duyệt v${selectedTimeline.version}`
+                        : `Kết xuất thử v${selectedTimeline.version}`}
                     </Button>
                     <span className="text-xs text-muted-foreground">
-                      Remotion Lambda → chuẩn hoá −14 LUFS → QA. Hôm nay đã dùng {renderUsed}/{renderLimit} phút kết xuất.
+                      Remotion Lambda → chuẩn hoá −14 LUFS → QA. Hôm nay đã dùng {renderUsed}/{renderLimit} phút kết
+                      xuất.
                       {selectedTimeline.id !== project.approvedTimelineId ? " Bản chưa duyệt chỉ là kết xuất thử." : ""}
                     </span>
                   </ActionForm>
                 ) : null}
               </>
             ) : !busy ? (
-              <p className="text-sm text-muted-foreground">Chưa có timeline. Bấm “Dựng” để tạo lời đọc, B-roll và nhạc từ kịch bản đã chọn.</p>
+              <p className="text-sm text-muted-foreground">
+                Chưa có timeline. Bấm “Dựng” để tạo lời đọc, B-roll và nhạc từ kịch bản đã chọn.
+              </p>
             ) : null}
           </CardContent>
         </Card>
@@ -430,7 +621,10 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Duyệt</CardTitle>
-            <CardDescription>Người dựng gửi phiên bản mới nhất; publisher duyệt hoặc trả lại. Mọi bước được ghi log; cảnh không căn cứ cần publisher xác nhận bỏ qua.</CardDescription>
+            <CardDescription>
+              Người dựng gửi phiên bản mới nhất; publisher duyệt hoặc trả lại. Mọi bước được ghi log; cảnh không căn cứ
+              cần publisher xác nhận bỏ qua.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ReviewPanel
@@ -441,9 +635,12 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
               canEdit={writer}
               canApprove={canApprove(ws)}
               busy={busy}
-              needsOverride={needsFaithfulnessOverride(scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0])}
+              needsOverride={needsFaithfulnessOverride(
+                scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0],
+              )}
               faithfulnessCounts={(() => {
-                const f = (scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0])?.faithfulnessJson as StoredFaithfulness | null | undefined;
+                const f = (scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0])?.faithfulnessJson as
+                  StoredFaithfulness | null | undefined;
                 return f && "counts" in f ? f.counts : null;
               })()}
               sensitiveTopic={project.sensitiveTopic}
@@ -459,13 +656,22 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           <CardHeader>
             <CardTitle className="text-base">Đăng</CardTitle>
             <CardDescription>
-              YouTube Shorts, Facebook / Instagram Reels, TikTok. Chỉ đăng bản kết xuất của phiên bản đã duyệt; mỗi lượt có khoá idempotency riêng, trạng thái xử lý được kiểm tra định kỳ, số liệu kéo về hằng ngày.
+              YouTube Shorts, Facebook / Instagram Reels, TikTok. Chỉ đăng bản kết xuất của phiên bản đã duyệt; mỗi lượt
+              có khoá idempotency riêng, trạng thái xử lý được kiểm tra định kỳ, số liệu kéo về hằng ngày.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <PublishPanel
               projectId={project.id}
-              render={approvedRender ? { id: approvedRender.id, version: approvedRender.timelineVersion, durationSec: approvedRender.durationSec ? Number(approvedRender.durationSec) : null } : null}
+              render={
+                approvedRender
+                  ? {
+                      id: approvedRender.id,
+                      version: approvedRender.timelineVersion,
+                      durationSec: approvedRender.durationSec ? Number(approvedRender.durationSec) : null,
+                    }
+                  : null
+              }
               canPublish={publisher}
               schedulingOn={Boolean(publishFlags.scheduling)}
               aiDisclosure={project.aiDisclosure}
@@ -482,12 +688,16 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Kết xuất</CardTitle>
-            <CardDescription>1080×1920, 30 fps, H.264 CRF 18, −14 LUFS. Bản ghim không bao giờ hết hạn; bản khác giữ 12 tháng.</CardDescription>
+            <CardDescription>
+              1080×1920, 30 fps, H.264 CRF 18, −14 LUFS. Bản ghim không bao giờ hết hạn; bản khác giữ 12 tháng.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {renders.slice(0, 10).map((r) => {
               const links = renderLinks.get(r.id);
-              const checks = (r.qaJson as { checks?: Record<string, { ok: boolean; expected?: unknown; actual?: unknown }> } | null)?.checks ?? {};
+              const checks =
+                (r.qaJson as { checks?: Record<string, { ok: boolean; expected?: unknown; actual?: unknown }> } | null)
+                  ?.checks ?? {};
               return (
                 <div key={r.id} className="flex gap-3 rounded-md border p-2 text-sm">
                   <div className="h-28 w-16 shrink-0 overflow-hidden rounded bg-muted">
@@ -498,7 +708,17 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                   </div>
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-1">
-                      <Badge variant={r.status === "done" ? "default" : r.status === "failed" || r.status === "qa_failed" ? "destructive" : "secondary"}>{RENDER_LABEL[r.status] ?? r.status}</Badge>
+                      <Badge
+                        variant={
+                          r.status === "done"
+                            ? "default"
+                            : r.status === "failed" || r.status === "qa_failed"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {RENDER_LABEL[r.status] ?? r.status}
+                      </Badge>
                       <span className="text-xs text-muted-foreground">
                         timeline v{r.timelineVersion} · {r.createdAt.toISOString().slice(0, 16).replace("T", " ")}
                         {r.durationSec ? ` · ${Number(r.durationSec).toFixed(1)} s` : ""}
@@ -506,7 +726,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                         {r.renderSeconds ? ` · ${Number(r.renderSeconds).toFixed(0)} s render` : ""}
                       </span>
                       {r.pinned ? <Badge variant="outline">đã ghim</Badge> : null}
-                      {r.timelineId && r.timelineId === project.approvedTimelineId ? <Badge>bản duyệt</Badge> : <Badge variant="outline">kết xuất thử</Badge>}
+                      {r.timelineId && r.timelineId === project.approvedTimelineId ? (
+                        <Badge>bản duyệt</Badge>
+                      ) : (
+                        <Badge variant="outline">kết xuất thử</Badge>
+                      )}
                     </div>
                     <div className="flex flex-wrap gap-1 text-xs">
                       {Object.entries(checks).map(([k, c]) => (

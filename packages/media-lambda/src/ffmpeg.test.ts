@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBlackDetect, parseFps, parseLoudnormJson } from "./ffmpeg";
+import { parseBlackDetect, parseFps, parseLoudnormJson, ytdlpError } from "./ffmpeg";
 
 describe("ffmpeg output parsers", () => {
   it("parses loudnorm json from stderr tail", () => {
@@ -26,5 +26,10 @@ describe("parseLoudnormJson with ffmpeg 7+/8 trailing summary", () => {
     expect(parseLoudnormJson(stderr)?.input_i).toBe("-16.79");
     const silent = `{\n\t"input_i" : -inf,\n\t"input_tp" : -inf,\n\t"target_offset" : "inf"\n}\n[out#0/null @ 0x2] video:0KiB\n`;
     expect(parseLoudnormJson(silent)?.input_i).toBe("-inf");
+  });
+  it("extracts the yt-dlp error line instead of the command line", () => {
+    expect(ytdlpError({ message: "Command failed: yt-dlp ...", stderr: "WARNING: x\nERROR: [youtube] abc: Sign in to confirm you’re not a bot\n" })).toBe("ERROR: [youtube] abc: Sign in to confirm you’re not a bot");
+    expect(ytdlpError({ message: "Command failed", stderr: "Traceback\nImportError: unsupported version of Python\n" })).toBe("ImportError: unsupported version of Python");
+    expect(ytdlpError(new Error("spawn ENOENT"))).toBe("spawn ENOENT");
   });
 });

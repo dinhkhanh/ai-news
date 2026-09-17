@@ -5,17 +5,20 @@
  *   duck       – mix music under voice with sidechain compression (-12 dB under VO)
  *   cover      – extract a cover frame as JPEG
  *   mix        – VO segments + music → normalised, ducked WAV mix (see mix.ts)
- *   web-video  – yt-dlp download + optional trim (behind the web_video_downloader flag in the app)
+ *   web-video  – yt-dlp download (only the trimmed section when `trim` is given) → H.264 MP4 (behind the web_video_downloader flag in the app)
+ *   transcode  – uploaded recording (browser tab capture) → CFR 30 H.264 MP4, no audio, optional trim
+ *   web-video-search – yt-dlp metadata: YouTube `ytsearch` + explicit video-page URLs, no download
  * Runs as a container image (see Dockerfile) so ffmpeg/ffprobe/yt-dlp are on PATH.
  */
 import type { Context } from "aws-lambda";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ffmpeg, ffprobe, parseBlackDetect, parseFps, parseLoudnormJson, ytdlp } from "./ffmpeg.js";
+import { ffmpeg, ffprobe, parseBlackDetect, parseFps, parseLoudnormJson, ytdlp, ytdlpError } from "./ffmpeg.js";
 import { mix } from "./mix.js";
 import { download, upload } from "./r2.js";
-import type { Check, MediaAction, MediaResult, ProbeResult } from "./types.js";
+import type { Check, MediaAction, MediaResult, ProbeResult, WebVideoCandidate } from "./types.js";
+import { dedupeCandidates, parseSearchJson } from "./webvideo.js";
 
 const DEFAULT_TARGET_LUFS = -14;
 const DEFAULT_TRUE_PEAK = -1;
@@ -132,15 +135,48 @@ export async function handle(event: MediaAction, work: string): Promise<MediaRes
     }
     case "web-video": {
       const raw = path.join(work, "raw.mp4");
-      await ytdlp(["-f", "bv*[height>=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4", "--no-playlist", "-o", raw, event.input.url]);
+      const format = ["-f", "bv*[height>=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4", "--no-playlist", "--no-warnings", "--socket-timeout", "30"];
+      // With a trim, only that section is fetched (keyframe-accurate cut) so a long news video costs seconds, not minutes.
+      const section = event.trim ? ["--download-sections", `*${event.trim.startSec}-${event.trim.endSec}`, "--force-keyframes-at-cuts"] : [];
+      await ytdlp([...format, ...section, "-o", raw, event.input.url]).catch((e) => {
+        throw new Error(`yt-dlp: ${ytdlpError(e)}`);
+      });
       let final = raw;
       if (event.trim) {
         final = path.join(work, "trim.mp4");
-        await ffmpeg(["-ss", String(event.trim.startSec), "-to", String(event.trim.endSec), "-i", raw, "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-c:a", "aac", "-b:a", "192k", final]);
+        await ffmpeg(["-i", raw, "-t", String(event.trim.endSec - event.trim.startSec), "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", final]);
       }
       await upload(final, event.output.key, "video/mp4");
       const probe = await probeFile(final).catch(() => undefined);
       return { ok: true, action: "web-video", passed: true, outputKey: event.output.key, probe };
+    }
+    case "transcode": {
+      const input = path.join(work, "in" + (path.extname(event.input.key) || ".webm"));
+      const output = path.join(work, "out.mp4");
+      await download(event.input.key, input);
+      const trim = event.trim ? ["-ss", String(event.trim.startSec), "-t", String(event.trim.endSec - event.trim.startSec)] : [];
+      // MediaRecorder files are variable-frame-rate and often lack duration/cues: re-time to CFR 30 and make dimensions even for yuv420p.
+      await ffmpeg(["-fflags", "+genpts", "-i", input, ...trim, "-an", "-vf", "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output]);
+      await upload(output, event.output.key, "video/mp4");
+      const probe = await probeFile(output).catch(() => undefined);
+      return { ok: true, action: "transcode", passed: true, outputKey: event.output.key, probe };
+    }
+    case "web-video-search": {
+      const limit = Math.min(Math.max(event.input.limit ?? 8, 1), 20);
+      const targets = [...(event.input.query?.trim() ? [`ytsearch${limit}:${event.input.query.trim()}`] : []), ...(event.input.urls ?? []).filter((u) => /^https?:\/\//i.test(u)).slice(0, 10)];
+      const videos: WebVideoCandidate[] = [];
+      const warnings: string[] = [];
+      await Promise.all(
+        targets.map(async (t) => {
+          try {
+            const { stdout } = await ytdlp(["--dump-single-json", "--flat-playlist", "--skip-download", "--no-warnings", "--socket-timeout", "20", ...(t.startsWith("ytsearch") ? [] : ["--no-playlist"]), t], { maxBuffer: 16 * 1024 * 1024 });
+            videos.push(...parseSearchJson(stdout));
+          } catch (e) {
+            warnings.push(`${t.slice(0, 80)}: ${ytdlpError(e)}`);
+          }
+        }),
+      );
+      return { ok: true, action: "web-video-search", passed: true, videos: dedupeCandidates(videos), warnings };
     }
     default: {
       const never: never = event;

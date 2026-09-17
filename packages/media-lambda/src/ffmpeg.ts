@@ -13,7 +13,21 @@ export async function run(bin: string, args: string[], opts: { maxBuffer?: numbe
 
 export const ffmpeg = (args: string[]) => run(FFMPEG, ["-hide_banner", "-nostats", "-y", ...args]);
 export const ffprobe = (args: string[]) => run(FFPROBE, ["-hide_banner", ...args]);
-export const ytdlp = (args: string[]) => run(YTDLP, args);
+/**
+ * Current yt-dlp needs an external JS runtime for YouTube and only enables deno by
+ * default, so point it at the Lambda's own Node. Lambda can only write under /tmp,
+ * hence no cache dir.
+ */
+const YTDLP_BASE = ["--no-cache-dir", "--js-runtimes", `node:${process.execPath}`];
+export const ytdlp = (args: string[], opts: { maxBuffer?: number } = {}) => run(YTDLP, [...YTDLP_BASE, ...args], opts);
+
+/** The useful part of a failed yt-dlp run: its last "ERROR:" line, else the last non-empty stderr line. */
+export function ytdlpError(e: unknown): string {
+  const err = e as { stderr?: string; message?: string };
+  const lines = (err.stderr ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const hit = [...lines].reverse().find((l) => /^ERROR:/i.test(l)) ?? lines[lines.length - 1];
+  return (hit ?? err.message ?? String(e)).slice(0, 300);
+}
 
 /** Parse the JSON emitted by ffmpeg's loudnorm filter in print_format=json mode (last JSON object in stderr). */
 export function parseLoudnormJson(stderr: string): Record<string, string> | null {

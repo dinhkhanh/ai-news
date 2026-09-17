@@ -7,7 +7,10 @@ import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
 import { projectSceneRegenerateRequested } from "@/inngest/events";
+import { recordUsageCost } from "@/lib/activity";
+import { invokeMediaLambda } from "@/lib/media-lambda";
 import { downloadToR2 } from "@/lib/media/stock";
+import { youtubeId } from "@/lib/media/visual-plan";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { deleteObject, headObject, presignGet, presignPut, r2Key } from "@/lib/r2";
 import { saveTimelineVersion } from "@/lib/review";
@@ -148,6 +151,62 @@ export async function importVisualFromUrl(input: { projectId: string; url: strin
     await log("asset.imported_url", { assetId: row.id, key, kind, sizeBytes: dl.sizeBytes, url: url.slice(0, 300) }, input.projectId);
     const option: VisualOption = { assetId: row.id, key, kind, durationSec: null, credit: null, thumbnailUrl: kind === "image" ? url : null, provider: "url", sceneId: null, searchTerm: null, rankScore: null };
     return { ok: true, option, url: await presignGet(key, 3600), message: kind === "video" ? "Đã lấy clip từ đường dẫn" : "Đã lấy ảnh từ đường dẫn" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+
+/* ------------------------------------------------------------------ browser captures */
+
+const MEDIA_LAMBDA_USD_PER_SEC = 0.00006;
+
+/**
+ * A YouTube section recorded in the editor's own tab (`lib/media/tab-capture.ts`)
+ * and uploaded through `createUploadUrl`: normalise it on the media Lambda
+ * (CFR 30 H.264, exact length), then record it as a `web_video` asset with the
+ * source video's credit. The raw recording is deleted.
+ */
+export async function registerWebCapture(input: {
+  projectId: string;
+  key: string;
+  contentType: string;
+  capture: { videoId: string; url: string; title: string; uploader: string | null; thumbnailUrl: string | null; startSec: number; durationSec: number };
+}): Promise<VisualAdded> {
+  try {
+    const { ws, log } = await assertWorkspaceWriter();
+    const c = input.capture;
+    if (input.contentType !== "video/webm" && input.contentType !== "video/mp4") throw new Error("Unsupported recording type");
+    if (youtubeId(c.url) !== c.videoId) throw new Error("Đường dẫn YouTube không khớp");
+    const durationSec = Math.round(Number(c.durationSec));
+    if (!(durationSec >= 3 && durationSec <= 60) || !(c.startSec >= 0)) throw new Error("Đoạn ghi không hợp lệ");
+    const prefix = r2Key.media(ws.organizationId, input.projectId, "uploads/");
+    if (!input.key.startsWith(prefix)) throw new Error("Khoá tệp không hợp lệ");
+    const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, input.projectId), columns: { id: true } }));
+    if (!project) throw new Error("Project not found in this workspace");
+    const head = await headObject(input.key);
+    if (!head.exists || head.size === 0) throw new Error("Tệp chưa được tải lên xong");
+    const key = r2Key.media(ws.organizationId, input.projectId, `webvideo/cap-${c.videoId}-${nanoid(6)}.mp4`);
+    const res = await invokeMediaLambda({ action: "transcode", input: { key: input.key }, output: { key }, trim: { startSec: 0, endSec: durationSec } });
+    const costUsd = ((res.billedMs ?? 0) / 1000) * MEDIA_LAMBDA_USD_PER_SEC;
+    await recordUsageCost({ provider: "media_lambda", resource: "transcode", units: (res.billedMs ?? 0) / 1000, unitType: "seconds", costUsd, userId: ws.userId, organizationId: ws.organizationId, projectId: input.projectId, meta: { videoId: c.videoId } });
+    await deleteObject(input.key).catch(() => {});
+    const probe = res.probe;
+    if (!res.ok || !probe) throw new Error(`Chuyển mã thất bại: ${res.error ?? "không đọc được bản ghi"}`);
+    const credit = `Video: ${c.uploader ? `${c.uploader.slice(0, 80)} / ` : ""}YouTube`;
+    const clipSec = Math.round(probe.durationSec * 100) / 100;
+    const [row] = await withOrgContext(ws, (tx) =>
+      tx
+        .insert(schema.assets)
+        .values({
+          organizationId: ws.organizationId, projectId: input.projectId, origin: "web_video", provider: "yt-capture", providerId: `youtube:${c.videoId}@${c.startSec}-${c.startSec + durationSec}`, licence: "web video (editorial use, credited; recorded in the editor's browser)", sourceUrl: c.url, r2Path: key, mime: "video/mp4",
+          width: probe.width, height: probe.height, durationSec: clipSec.toFixed(2), sizeBytes: probe.sizeBytes, thumbnailUrl: c.thumbnailUrl, attribution: credit,
+          meta: { title: c.title.slice(0, 200), uploader: c.uploader, section: [c.startSec, c.startSec + durationSec], capturedBy: ws.userId, recordedAs: input.contentType },
+        })
+        .returning({ id: schema.assets.id }),
+    );
+    await log("asset.web_captured", { assetId: row.id, key, videoId: c.videoId, startSec: c.startSec, durationSec: clipSec, width: probe.width, height: probe.height, sizeBytes: probe.sizeBytes }, input.projectId);
+    const option: VisualOption = { assetId: row.id, key, kind: "video", durationSec: clipSec, credit, thumbnailUrl: c.thumbnailUrl, provider: "yt-capture", sceneId: null, searchTerm: c.title.slice(0, 80), rankScore: null };
+    return { ok: true, option, url: await presignGet(key, 3600), message: "Đã ghi clip YouTube" };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
   }

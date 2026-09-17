@@ -8,6 +8,7 @@ import { GetFunctionCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { getFunctions } from "@remotion/lambda-client";
 import { SpeechClient } from "@google-cloud/speech";
 import textToSpeech from "@google-cloud/text-to-speech";
+import { GoogleAuth } from "google-auth-library";
 import postgres from "postgres";
 
 type Check = { name: string; run: () => Promise<string> };
@@ -134,6 +135,23 @@ const checks: Check[] = [
       const silence = Buffer.alloc(24000);
       await client.recognize({ config: { encoding: "LINEAR16", sampleRateHertz: 24000, languageCode: "vi-VN", enableWordTimeOffsets: true }, audio: { content: silence.toString("base64") } });
       return "recognize() accepted vi-VN LINEAR16";
+    },
+  },
+  {
+    name: "Google Vertex AI (visual tier 4: Gemini image generation)",
+    run: async () => {
+      const sa = JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS_JSON ?? "{}") as { client_email?: string; project_id?: string; private_key?: string };
+      if (!sa.project_id) throw new Error("service account JSON has no project_id");
+      const auth = new GoogleAuth({ credentials: sa, scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+      const token = await auth.getAccessToken();
+      // countTokens is free: proves the Vertex AI API is enabled and the SA has the Vertex AI User role.
+      const res = await fetch(`https://aiplatform.googleapis.com/v1/projects/${sa.project_id}/locations/global/publishers/google/models/gemini-3.1-flash-image:countTokens`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "ping" }] }] }),
+      });
+      if (!res.ok) throw new Error(`countTokens HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
+      return `gemini-3.1-flash-image reachable in project ${sa.project_id} (enable via /admin/integrations → Google Vertex AI + flag ai_media)`;
     },
   },
   {
