@@ -1,7 +1,4 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
-import { db, schema } from "@/db";
-import { withServiceContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { loadAdminEvals } from "@/lib/admin-data";
 import type { EvalArticleResult, EvalSummary } from "@/lib/eval-summary";
 import { addEvalArticle, deleteEvalArticle, importEvalArticleFromProject, toggleEvalArticle } from "./actions";
 
@@ -18,40 +16,9 @@ export const dynamic = "force-dynamic";
 
 export default async function EvalsPage({ searchParams }: { searchParams: Promise<{ run?: string }> }) {
   const sp = await searchParams;
-  const [articles, runs, recentProjects] = await Promise.all([
-    db.select().from(schema.evalArticles).orderBy(desc(schema.evalArticles.createdAt)),
-    db
-      .select({
-        id: schema.promptEvals.id,
-        status: schema.promptEvals.status,
-        durationSec: schema.promptEvals.durationSec,
-        tone: schema.promptEvals.tone,
-        articleCount: schema.promptEvals.articleCount,
-        summary: schema.promptEvals.summary,
-        results: schema.promptEvals.results,
-        costUsd: schema.promptEvals.costUsd,
-        error: schema.promptEvals.error,
-        createdAt: schema.promptEvals.createdAt,
-        finishedAt: schema.promptEvals.finishedAt,
-        purpose: schema.promptTemplates.purpose,
-        language: schema.promptTemplates.language,
-        version: schema.promptTemplates.version,
-        templateId: schema.promptTemplates.id,
-      })
-      .from(schema.promptEvals)
-      .innerJoin(schema.promptTemplates, eq(schema.promptTemplates.id, schema.promptEvals.templateId))
-      .orderBy(desc(schema.promptEvals.createdAt))
-      .limit(30),
-    withServiceContext((tx) =>
-      tx
-        .select({ id: schema.projects.id, title: schema.projects.title, url: schema.projects.url, language: schema.projects.language, state: schema.projects.state })
-        .from(schema.projects)
-        .where(eq(schema.projects.state, "scripted"))
-        .orderBy(desc(schema.projects.createdAt))
-        .limit(15),
-    ),
-  ]);
-  const active = runs.find((r) => r.id === sp.run) ?? runs[0] ?? null;
+  // One round-trip: admin_evals_page() (migration 0013). Article texts stay in the database (only the word
+  // count is shown) and `results` comes back for the run on screen only.
+  const { articles, runs, recentProjects, active } = await loadAdminEvals(sp.run);
   const anyRunning = runs.some((r) => r.status === "queued" || r.status === "running");
   const counts = { vi: articles.filter((a) => a.language === "vi" && a.enabled).length, en: articles.filter((a) => a.language === "en" && a.enabled).length };
 
@@ -172,7 +139,7 @@ export default async function EvalsPage({ searchParams }: { searchParams: Promis
                   {a.notes ? <div className="text-xs text-muted-foreground">{a.notes}</div> : null}
                 </TableCell>
                 <TableCell>{a.language}</TableCell>
-                <TableCell className="tabular-nums">{a.text.split(/\s+/).length}</TableCell>
+                <TableCell className="tabular-nums">{a.words}</TableCell>
                 <TableCell className="text-xs">
                   {(a.expectations.mustMention?.length ?? 0) + (a.expectations.mustNotMention?.length ?? 0) || "—"}
                 </TableCell>

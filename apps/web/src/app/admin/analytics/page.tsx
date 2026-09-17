@@ -1,8 +1,6 @@
-import { and, count, desc, eq, gte, sql } from "drizzle-orm";
-import { schema } from "@/db";
-import { withServiceContext } from "@/db/context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { loadAdminAnalytics } from "@/lib/admin-data";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { dayStart } from "@/lib/quota";
 
@@ -10,58 +8,21 @@ export const dynamic = "force-dynamic";
 
 const n = (v: number | string | null | undefined) => (v == null ? "—" : Number(v).toLocaleString("en-US"));
 
-async function loadStats() {
-  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-  const views = sql<string>`coalesce(sum((${schema.publications.analyticsJson}->>'views')::numeric), 0)`;
-  const likes = sql<string>`coalesce(sum((${schema.publications.analyticsJson}->>'likes')::numeric), 0)`;
-  const comments = sql<string>`coalesce(sum((${schema.publications.analyticsJson}->>'comments')::numeric), 0)`;
-  const shares = sql<string>`coalesce(sum((${schema.publications.analyticsJson}->>'shares')::numeric), 0)`;
-  // renders/publications/usage_costs/channels are RLS-scoped: read them in the service context.
-  const [[produced], [published], byPlatform, byDay, byStatus, [ytToday], topPosts, channels] = await withServiceContext((tx) =>
-    Promise.all([
-      tx.select({ n: count() }).from(schema.renders).where(and(eq(schema.renders.status, "done"), gte(schema.renders.createdAt, since))),
-      tx.select({ n: count() }).from(schema.publications).where(and(eq(schema.publications.status, "published"), gte(schema.publications.publishedAt, since))),
-      tx
-        .select({ platform: schema.publications.platform, posts: count(), views, likes, comments, shares })
-        .from(schema.publications)
-        .where(and(eq(schema.publications.status, "published"), gte(schema.publications.publishedAt, since)))
-        .groupBy(schema.publications.platform),
-      tx
-        .select({ day: sql<string>`to_char(${schema.publications.publishedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`, posts: count(), views })
-        .from(schema.publications)
-        .where(and(eq(schema.publications.status, "published"), gte(schema.publications.publishedAt, since)))
-        .groupBy(sql`1`)
-        .orderBy(desc(sql`1`))
-        .limit(30),
-      tx.select({ status: schema.publications.status, n: count() }).from(schema.publications).where(gte(schema.publications.createdAt, since)).groupBy(schema.publications.status),
-      tx
-        .select({ units: sql<string>`coalesce(sum(${schema.usageCosts.units}), 0)` })
-        .from(schema.usageCosts)
-        .where(and(eq(schema.usageCosts.provider, "youtube_api"), gte(schema.usageCosts.createdAt, dayStart()))),
-      tx
-        .select({ id: schema.publications.id, platform: schema.publications.platform, url: schema.publications.platformUrl, title: schema.projects.title, views: sql<string>`(${schema.publications.analyticsJson}->>'views')::numeric`, publishedAt: schema.publications.publishedAt })
-        .from(schema.publications)
-        .leftJoin(schema.projects, eq(schema.projects.id, schema.publications.projectId))
-        .where(and(eq(schema.publications.status, "published"), gte(schema.publications.publishedAt, since)))
-        .orderBy(desc(sql`(${schema.publications.analyticsJson}->>'views')::numeric`))
-        .limit(10),
-      tx.select({ n: count(), unhealthy: sql<string>`count(*) filter (where not ${schema.channels.healthy})` }).from(schema.channels),
-    ]),
-  );
-  return { produced, published, byPlatform, byDay, byStatus, ytToday, topPosts, channels };
+/** One round-trip: `admin_analytics_stats()` (migration 0013) aggregates every tile and table. */
+function loadStats() {
+  return loadAdminAnalytics(new Date(Date.now() - 30 * 24 * 3600 * 1000), dayStart());
 }
 
 /** Admin analytics (docs/PLAN.md §6 "produced, published, platform performance"; §7 YouTube quota). */
 export default async function AnalyticsPage() {
-  const { produced, published, byPlatform, byDay, byStatus, ytToday, topPosts, channels } = await loadStats();
-  const statusMap = Object.fromEntries(byStatus.map((s) => [s.status, s.n]));
+  const { produced, published, byPlatform, byDay, byStatus: statusMap, ytUnitsToday, topPosts, channels, unhealthyChannels } = await loadStats();
   const tiles: Array<[string, string]> = [
-    ["Renders done (30 d)", n(produced.n)],
-    ["Published (30 d)", n(published.n)],
+    ["Renders done (30 d)", n(produced)],
+    ["Published (30 d)", n(published)],
     ["Scheduled / processing", n((statusMap.scheduled ?? 0) + (statusMap.publishing ?? 0) + (statusMap.processing ?? 0))],
     ["Failed (30 d)", n(statusMap.failed ?? 0)],
-    ["YouTube quota today", `${n(ytToday.units)} / 10,000`],
-    ["Channels", `${channels[0].n} (${channels[0].unhealthy} unhealthy)`],
+    ["YouTube quota today", `${n(ytUnitsToday)} / 10,000`],
+    ["Channels", `${channels} (${unhealthyChannels} unhealthy)`],
   ];
 
   return (

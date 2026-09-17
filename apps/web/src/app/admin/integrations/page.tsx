@@ -1,31 +1,19 @@
-import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loadAdminIntegrations } from "@/lib/admin-data";
 import { FEATURE_FLAGS, INTEGRATIONS } from "@/lib/integrations";
-import { maskSecret, readSecret } from "@/lib/vault";
 import { clearIntegrationSecret, saveIntegration, setFeatureFlag } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function IntegrationsPage() {
-  const [rows, flags] = await Promise.all([db.select().from(schema.integrations), db.select().from(schema.featureFlags)]);
+  // One round-trip: admin_integrations_page() (migration 0013) also masks the Vault secrets in the database.
+  const { integrations: rows, flags } = await loadAdminIntegrations();
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
-  const flagByKey = new Map(flags.map((f) => [f.key, f]));
-  const previews = new Map<string, string>();
-  await Promise.all(
-    rows.map(async (r) => {
-      if (!r.vaultRef) return;
-      try {
-        previews.set(r.provider, maskSecret(await readSecret(r.vaultRef)));
-      } catch {
-        previews.set(r.provider, "(vault read failed)");
-      }
-    }),
-  );
 
   return (
     <div className="space-y-8">
@@ -48,9 +36,9 @@ export default async function IntegrationsPage() {
                   {row?.enabled ? <Badge>enabled</Badge> : <Badge variant="secondary">disabled</Badge>}
                 </div>
                 <CardDescription>
-                  {row?.vaultRef ? (
+                  {row?.hasSecret ? (
                     <>
-                      Secret set <span className="font-mono">{previews.get(i.provider)}</span>
+                      Secret set <span className="font-mono">{row.preview}</span>
                     </>
                   ) : (
                     "No secret stored"
@@ -63,7 +51,7 @@ export default async function IntegrationsPage() {
                   <input type="hidden" name="provider" value={i.provider} />
                   <div className="space-y-1">
                     <Label htmlFor={`${i.provider}-secret`}>{i.secretLabel}</Label>
-                    <Input id={`${i.provider}-secret`} name="secret" type="password" autoComplete="off" placeholder={row?.vaultRef ? "Leave blank to keep current" : ""} />
+                    <Input id={`${i.provider}-secret`} name="secret" type="password" autoComplete="off" placeholder={row?.hasSecret ? "Leave blank to keep current" : ""} />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     {i.hasSpendCap ? (
@@ -89,7 +77,7 @@ export default async function IntegrationsPage() {
                     </Button>
                   </div>
                 </ActionForm>
-                {row?.vaultRef ? (
+                {row?.hasSecret ? (
                   <ActionForm action={clearIntegrationSecret} className="mt-2 text-right">
                     <input type="hidden" name="provider" value={i.provider} />
                     <Button type="submit" size="sm" variant="ghost" className="text-destructive">
@@ -107,7 +95,7 @@ export default async function IntegrationsPage() {
         <h2 className="text-lg font-semibold">Feature flags</h2>
         <div className="mt-3 divide-y rounded-md border">
           {FEATURE_FLAGS.map((f) => {
-            const row = flagByKey.get(f.key);
+            const on = flags[f.key] ?? false;
             return (
               <ActionForm key={f.key} action={setFeatureFlag} className="flex items-center justify-between gap-4 px-4 py-3">
                 <input type="hidden" name="key" value={f.key} />
@@ -117,8 +105,8 @@ export default async function IntegrationsPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" name="enabled" defaultChecked={row?.enabled ?? false} className="size-4" />
-                    {row?.enabled ? "on" : "off"}
+                    <input type="checkbox" name="enabled" defaultChecked={on} className="size-4" />
+                    {on ? "on" : "off"}
                   </label>
                   <Button type="submit" size="sm" variant="outline">
                     Apply

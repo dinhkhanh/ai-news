@@ -1,21 +1,18 @@
-import { asc } from "drizzle-orm";
-import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { loadAdminQuotas } from "@/lib/admin-data";
 import { QUOTA_RESOURCES } from "@/lib/integrations";
 import { deleteQuota, saveQuota } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function QuotasPage() {
-  const rows = await db.select().from(schema.quotas).orderBy(asc(schema.quotas.scope), asc(schema.quotas.scopeId), asc(schema.quotas.resource));
+  const { quotas: rows, users, orgs } = await loadAdminQuotas();
   const defaults = rows.filter((r) => r.scopeId === "*");
   const overrides = rows.filter((r) => r.scopeId !== "*");
-  const users = await db.select({ id: schema.user.id, email: schema.user.email }).from(schema.user).orderBy(asc(schema.user.email));
-  const orgs = await db.select({ id: schema.organization.id, name: schema.organization.name }).from(schema.organization).orderBy(asc(schema.organization.name));
 
   return (
     <div className="space-y-6">

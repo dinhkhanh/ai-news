@@ -1,11 +1,8 @@
-import { asc, eq, inArray } from "drizzle-orm";
-import { db, schema } from "@/db";
-import { withServiceContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { flagsEnabled } from "@/lib/flags";
+import { loadAdminChannels } from "@/lib/admin-data";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { checkChannel, disconnectChannel, grantChannel, pullAnalyticsNow, revokeChannel, setChannelEnabled } from "./actions";
 
@@ -13,22 +10,8 @@ export const dynamic = "force-dynamic";
 
 export default async function ChannelsPage({ searchParams }: { searchParams: Promise<{ connected?: string; error?: string }> }) {
   const sp = await searchParams;
-  const [orgs, channels, members, integrations, flags] = await Promise.all([
-    db.select({ id: schema.organization.id, name: schema.organization.name, kind: schema.organization.kind }).from(schema.organization).orderBy(asc(schema.organization.name)),
-    // channels/channel_grants are RLS-scoped: read them in the service context.
-    withServiceContext((tx) => tx.select().from(schema.channels).orderBy(asc(schema.channels.platform), asc(schema.channels.name))),
-    db
-      .select({ organizationId: schema.member.organizationId, userId: schema.member.userId, role: schema.member.role, email: schema.user.email, name: schema.user.name })
-      .from(schema.member)
-      .innerJoin(schema.user, eq(schema.user.id, schema.member.userId)),
-    db.select({ provider: schema.integrations.provider, enabled: schema.integrations.enabled, vaultRef: schema.integrations.vaultRef }).from(schema.integrations).where(inArray(schema.integrations.provider, ["meta_app", "tiktok_app"])),
-    flagsEnabled(["publish_youtube", "publish_facebook", "publish_instagram", "publish_tiktok", "scheduling"]),
-  ]);
-  const grants = channels.length
-    ? await withServiceContext((tx) => tx.select().from(schema.channelGrants).where(inArray(schema.channelGrants.channelId, channels.map((c) => c.id))))
-    : [];
-  const metaReady = integrations.some((i) => i.provider === "meta_app" && i.enabled && i.vaultRef);
-  const tiktokReady = integrations.some((i) => i.provider === "tiktok_app" && i.enabled && i.vaultRef);
+  // One round-trip: admin_channels_page() (migration 0013) reads across workspaces.
+  const { orgs, channels, members, grants, metaReady, tiktokReady, flags } = await loadAdminChannels();
 
   return (
     <div className="space-y-6">
@@ -89,7 +72,7 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
                         ) : null}
                         <span className="font-medium">{c.name}</span>
                         <Badge variant="outline">{PLATFORM_SPEC[c.platform].label}</Badge>
-                        {!c.vaultRef ? <Badge variant="destructive">no token</Badge> : c.healthy ? <Badge>healthy</Badge> : <Badge variant="destructive">unhealthy</Badge>}
+                        {!c.hasToken ? <Badge variant="destructive">no token</Badge> : c.healthy ? <Badge>healthy</Badge> : <Badge variant="destructive">unhealthy</Badge>}
                         {!c.enabled ? <Badge variant="secondary">paused</Badge> : null}
                         <span className="text-xs text-muted-foreground">
                           {c.expiresAt ? `token expires ${c.expiresAt.toISOString().slice(0, 16).replace("T", " ")}` : "non-expiring token"}

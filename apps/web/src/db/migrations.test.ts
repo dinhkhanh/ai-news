@@ -157,4 +157,95 @@ describe("migrations", () => {
     const { rows: empty } = await pg.query<{ s: Record<string, unknown> }>("select admin_overview_stats(now() + interval '1 day') as s");
     expect(empty[0].s).toMatchObject({ events: 0, spendUsd: 0, byProvider: [] });
   });
+
+  it("serve each admin page from one function call (migration 0013)", async () => {
+    const one = async <T,>(q: string) => (await pg.query<{ d: T }>(q)).rows[0].d;
+    await pg.exec(`insert into member(id, organization_id, user_id, role) values ('m1','o1','u1','owner'), ('m2','o2','u2','owner');
+      insert into channels(id, organization_id, platform, external_id, name, healthy, expires_at) values
+        ('00000000-0000-0000-0000-0000000000c1','o1','youtube','yt1','Chan A', true, now() + interval '1 day'),
+        ('00000000-0000-0000-0000-0000000000c2','o2','tiktok','tt1','Chan B', false, null);
+      insert into channel_grants(organization_id, channel_id, user_id) values ('o1','00000000-0000-0000-0000-0000000000c1','u1');
+      insert into renders(id, organization_id, project_id, status, cost_usd) values ('00000000-0000-0000-0000-0000000000d1','o1','00000000-0000-0000-0000-000000000001','done', 0.1200);
+      insert into publications(organization_id, project_id, render_id, channel_id, platform, status, published_at, analytics_json, idempotency_key, platform_url) values
+        ('o1','00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000c1','youtube','published', now(), '{"views": 100, "likes": 7}', 'k1', 'https://y/1'),
+        ('o1','00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000c1','youtube','published', now(), null, 'k2', null),
+        ('o1','00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000c1','youtube','failed', null, null, 'k3', null);
+      insert into usage_costs(provider, units, unit_type, cost_usd, organization_id) values ('youtube_api', 1600, 'units', 0, 'o1');`);
+
+    const a = await one<Record<string, unknown>>("select admin_analytics_stats(now() - interval '30 days', now() - interval '1 hour') as d");
+    expect(a).toMatchObject({
+      produced: 1, published: 2, ytUnitsToday: 1600, channels: 2, unhealthyChannels: 1,
+      byStatus: { published: 2, failed: 1 },
+      byPlatform: [{ platform: "youtube", posts: 2, views: 100, likes: 7, comments: 0, shares: 0 }],
+    });
+    // Posts without analytics sort last, not first.
+    expect((a.topPosts as Array<{ views: number | null; title: string }>).map((p) => [p.views, p.title])).toEqual([[100, "x"], [null, "x"]]);
+    expect((a.byDay as unknown[]).length).toBe(1);
+
+    const c = await one<{ orgs: unknown[]; channels: Array<Record<string, unknown>>; members: unknown[]; grants: unknown[]; metaReady: boolean; flags: Record<string, boolean> }>(
+      "select admin_channels_page() as d",
+    );
+    expect(c.orgs.length).toBe(2);
+    expect(c.channels.map((x) => [x.name, x.hasToken, x.scopes])).toEqual([["Chan A", false, []], ["Chan B", false, []]]);
+    expect(new Date(c.channels[0].expiresAt as string).getTime()).toBeGreaterThan(Date.now());
+    expect(c.members).toContainEqual({ organizationId: "o1", userId: "u1", role: "owner", email: "u@suzu.group", name: "U" });
+    expect(c.grants.length).toBe(1);
+    expect(c.metaReady).toBe(false);
+    expect(typeof c.flags).toBe("object");
+
+    const w = await one<{ orgs: unknown[]; members: unknown[]; users: Array<{ email: string }> }>("select admin_workspaces_page() as d");
+    expect([w.orgs.length, w.members.length, w.users.map((u) => u.email)]).toEqual([2, 2, ["u2@suzu.group", "u@suzu.group"]]);
+
+    const q = await one<{ quotas: Array<{ scopeId: string; dailyLimit: number }>; users: unknown[]; orgs: unknown[] }>("select admin_quotas_page() as d");
+    expect(q.quotas.length).toBeGreaterThanOrEqual(4);
+    expect(q.quotas.every((r) => r.scopeId === "*" && typeof r.dailyLimit === "number")).toBe(true);
+
+    // No vault schema here: the page still loads and says the preview could not be read.
+    await pg.exec(`insert into integrations(provider, enabled, vault_ref, spend_cap_monthly_usd) values ('anthropic', true, gen_random_uuid(), 50), ('pexels', false, null, null)`);
+    const i = await one<{ integrations: Array<Record<string, unknown>> }>("select admin_integrations_page() as d");
+    const byProvider = Object.fromEntries(i.integrations.map((r) => [r.provider, r]));
+    expect(byProvider.anthropic).toMatchObject({ hasSecret: true, enabled: true, spendCapMonthlyUsd: "50.00", preview: "(vault read failed)" });
+    expect(byProvider.pexels).toMatchObject({ hasSecret: false, preview: null });
+
+    const renders = await one<Array<Record<string, unknown>>>("select admin_recent_renders(20) as d");
+    expect(renders).toMatchObject([{ status: "done", costUsd: "0.1200", durationSec: null }]);
+
+    const act = await one<Array<{ type: string; actorEmail: string | null }>>("select admin_activity_page('project.', null, 100, 0) as d");
+    expect(act.length).toBe(2);
+    expect(await one<unknown[]>("select admin_activity_page('nope', null, 100, 0) as d")).toEqual([]);
+    expect((await one<unknown[]>("select admin_activity_page(null, null, 1, 1) as d")).length).toBe(1);
+  });
+
+  it("load eval results only for the run on screen (migration 0013)", async () => {
+    const one = async <T,>(q: string) => (await pg.query<{ d: T }>(q)).rows[0].d;
+    await pg.exec(`insert into eval_articles(language, title, text) values ('vi', 'Bai', '  mot hai   ba bon  ');
+      insert into prompt_evals(id, template_id, status, results, created_at)
+        select ('00000000-0000-0000-0000-0000000000e' || n)::uuid, (select id from prompt_templates order by purpose, language, version limit 1), 'done',
+               jsonb_build_array(jsonb_build_object('run', n)), now() - make_interval(mins => n)
+        from generate_series(1, 2) n;`);
+    type Page = { articles: Array<Record<string, unknown>>; runs: Array<Record<string, unknown>>; activeId: string; activeResults: unknown; recentProjects: unknown[] };
+    const newest = await one<Page>("select admin_evals_page(null) as d");
+    expect(newest.articles).toMatchObject([{ title: "Bai", words: 4 }]);
+    expect(newest.articles[0]).not.toHaveProperty("text");
+    expect(newest.runs.length).toBe(2);
+    expect(newest.runs[0]).not.toHaveProperty("results");
+    expect([newest.activeId, newest.activeResults]).toEqual(["00000000-0000-0000-0000-0000000000e1", [{ run: 1 }]]);
+    const picked = await one<Page>("select admin_evals_page('00000000-0000-0000-0000-0000000000e2') as d");
+    expect([picked.activeId, picked.activeResults]).toEqual(["00000000-0000-0000-0000-0000000000e2", [{ run: 2 }]]);
+    // Unknown run id falls back to the newest run.
+    const unknown = await one<Page>("select admin_evals_page('00000000-0000-0000-0000-0000000000ff') as d");
+    expect(unknown.activeId).toBe("00000000-0000-0000-0000-0000000000e1");
+  });
+
+  it("keep the admin functions off the public API roles (migration 0013)", async () => {
+    const { rows } = await pg.query<{ proname: string; grantees: string[] }>(
+      `select p.proname, array(select (a).grantee::regrole::text from (select aclexplode(p.proacl) a) s) as grantees
+       from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname like 'admin\\_%'`,
+    );
+    expect(rows.length).toBe(10);
+    for (const r of rows) {
+      expect(r.grantees, r.proname).toContain("ai_news_app");
+      for (const g of r.grantees) expect(["postgres", "ai_news_app"], `${r.proname} granted to ${g}`).toContain(g);
+    }
+  });
 });

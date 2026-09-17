@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect } from "react";
+import { startTransition, useActionState, useEffect } from "react";
 import { toast } from "sonner";
 import type { ActionState } from "@/lib/admin";
 import { ACTION_EVENT } from "@/components/pipeline-status";
@@ -34,7 +34,9 @@ export function ActionForm({ action, children, className, resetOnSuccess }: Prop
         e.preventDefault();
         const form = e.currentTarget;
         const submitter = (e.nativeEvent as SubmitEvent).submitter;
-        formAction(new FormData(form, submitter instanceof HTMLElement ? submitter : undefined));
+        const fd = new FormData(form, submitter instanceof HTMLElement ? submitter : undefined);
+        // Outside the `action` prop the dispatch needs its own transition, or `pending` never updates.
+        startTransition(() => formAction(fd));
         if (resetOnSuccess) queueMicrotask(() => setTimeout(() => form.reset(), 0));
       }}
     >

@@ -1,27 +1,15 @@
-import { asc, eq } from "drizzle-orm";
-import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { loadAdminWorkspaces } from "@/lib/admin-data";
 import { ORG_ROLE_NAMES } from "@/lib/permissions";
 import { removeMember, setMemberRole } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function WorkspacesPage() {
-  const orgs = await db.select().from(schema.organization).orderBy(asc(schema.organization.createdAt));
-  const members = await db
-    .select({
-      organizationId: schema.member.organizationId,
-      userId: schema.member.userId,
-      role: schema.member.role,
-      email: schema.user.email,
-      name: schema.user.name,
-    })
-    .from(schema.member)
-    .innerJoin(schema.user, eq(schema.user.id, schema.member.userId));
-  const users = await db.select({ id: schema.user.id, email: schema.user.email }).from(schema.user).orderBy(asc(schema.user.email));
+  const { orgs, members, users } = await loadAdminWorkspaces();
 
   return (
     <div className="space-y-6">

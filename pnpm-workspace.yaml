@@ -43,3 +43,5 @@ minimumReleaseAgeExclude:
   - '@remotion/web-renderer@4.0.525'
   - '@remotion/zod-types@4.0.525'
   - remotion@4.0.525
+patchedDependencies:
+  postgres@3.4.9: patches/postgres@3.4.9.patch

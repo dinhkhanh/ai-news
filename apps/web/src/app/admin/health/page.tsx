@@ -1,12 +1,10 @@
-import { desc } from "drizzle-orm";
-import { schema } from "@/db";
-import { withServiceContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { loadAdminRecentRenders } from "@/lib/admin-data";
 import { headObject, presignGet } from "@/lib/r2";
 import { triggerTestRender } from "./actions";
 
@@ -27,15 +25,14 @@ const ENV_CHECKS: Array<[string, string]> = [
 ];
 
 export default async function HealthPage() {
-  // renders is RLS-scoped: read across all workspaces in the service context.
-  const renders = await withServiceContext((tx) => tx.select().from(schema.renders).orderBy(desc(schema.renders.createdAt)).limit(20));
-  let r2Status: string;
-  try {
-    const h = await headObject("tmp/_test/.probe");
-    r2Status = h.exists ? "reachable" : "reachable (bucket empty)";
-  } catch (e) {
-    r2Status = `error: ${e instanceof Error ? e.message : String(e)}`;
-  }
+  // The R2 probe is a network call: run it next to the (single) database round-trip, not after it.
+  const [renders, r2Status] = await Promise.all([
+    loadAdminRecentRenders(20),
+    headObject("tmp/_test/.probe").then(
+      (h) => (h.exists ? "reachable" : "reachable (bucket empty)"),
+      (e) => `error: ${e instanceof Error ? e.message : String(e)}`,
+    ),
+  ]);
   const links = new Map<string, string>();
   for (const r of renders) {
     if (r.outputPath && r.status === "done") {

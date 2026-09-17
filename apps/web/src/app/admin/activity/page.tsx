@@ -1,6 +1,4 @@
-import { and, desc, eq, ilike, type SQL } from "drizzle-orm";
-import { schema } from "@/db";
-import { withServiceContext } from "@/db/context";
+import { loadAdminActivity } from "@/lib/admin-data";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,32 +9,8 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
   const pageSize = 100;
-  const filters: SQL[] = [];
-  if (sp.type) filters.push(ilike(schema.activityEvents.type, `${sp.type}%`));
-  if (sp.actor) filters.push(eq(schema.activityEvents.actorId, sp.actor));
-
-  // Admin reads span every workspace: RLS on activity_events only returns rows
-  // inside the service context (app.role = service).
-  const rows = await withServiceContext((tx) =>
-    tx
-      .select({
-        id: schema.activityEvents.id,
-        type: schema.activityEvents.type,
-        actorEmail: schema.user.email,
-        impersonatorId: schema.activityEvents.impersonatorId,
-        organizationId: schema.activityEvents.organizationId,
-        projectId: schema.activityEvents.projectId,
-        payload: schema.activityEvents.payload,
-        ip: schema.activityEvents.ip,
-        createdAt: schema.activityEvents.createdAt,
-      })
-      .from(schema.activityEvents)
-      .leftJoin(schema.user, eq(schema.user.id, schema.activityEvents.actorId))
-      .where(filters.length ? and(...filters) : undefined)
-      .orderBy(desc(schema.activityEvents.id))
-      .limit(pageSize)
-      .offset((page - 1) * pageSize),
-  );
+  // One round-trip: admin_activity_page() (migration 0013) reads across workspaces.
+  const rows = await loadAdminActivity({ type: sp.type, actor: sp.actor, limit: pageSize, offset: (page - 1) * pageSize });
 
   const qs = (p: number) => {
     const u = new URLSearchParams();

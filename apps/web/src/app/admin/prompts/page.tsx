@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -37,11 +37,16 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const purpose = PROMPT_PURPOSES.includes(sp.purpose as never) ? (sp.purpose as (typeof PROMPT_PURPOSES)[number]) : "script";
   const language = sp.language === "en" ? "en" : "vi";
-  const [all, running] = await Promise.all([
-    db.select().from(schema.promptTemplates).orderBy(desc(schema.promptTemplates.createdAt)),
-    db.query.promptEvals.findFirst({ where: (e, { inArray }) => inArray(e.status, ["queued", "running"]) }),
+  // Template bodies are long: load them for the pair on screen only; the tab strip just needs to know which pairs have a promoted version.
+  const [versions, promotedPairs, running] = await Promise.all([
+    db
+      .select()
+      .from(schema.promptTemplates)
+      .where(and(eq(schema.promptTemplates.purpose, purpose), eq(schema.promptTemplates.language, language)))
+      .orderBy(desc(schema.promptTemplates.version)),
+    db.select({ purpose: schema.promptTemplates.purpose, language: schema.promptTemplates.language }).from(schema.promptTemplates).where(eq(schema.promptTemplates.promoted, true)),
+    db.query.promptEvals.findFirst({ columns: { id: true }, where: (e, { inArray }) => inArray(e.status, ["queued", "running"]) }),
   ]);
-  const versions = all.filter((t) => t.purpose === purpose && t.language === language).sort((a, b) => b.version - a.version);
   const promoted = versions.find((v) => v.promoted);
   const builtIn = defaultTemplate(purpose, language);
   const evaluable = EVALUABLE.has(purpose);
@@ -65,7 +70,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
         {PROMPT_PURPOSES.map((p) =>
           (["vi", "en"] as const).map((l) => {
             const active = p === purpose && l === language;
-            const has = all.some((t) => t.purpose === p && t.language === l && t.promoted);
+            const has = promotedPairs.some((t) => t.purpose === p && t.language === l);
             return (
               <a
                 key={`${p}-${l}`}
