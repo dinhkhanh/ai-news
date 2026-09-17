@@ -7,7 +7,8 @@
           "http://localhost:3000",
           "https://ai-news.vercel.app",
           "https://*.vercel.app",
-          "https://suzu.net"
+          "https://suzu.net",
+          "https://www.suzu.net"
         ],
         "methods": ["GET", "PUT", "HEAD"],
         "headers": ["content-type", "content-length"]
