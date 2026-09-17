@@ -8,7 +8,7 @@ import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
 import { heuristicLanguage } from "@/lib/language";
-import { fetchArticle, manualArticle, type FetchAttempt, type FetchMethod } from "@/lib/fetch";
+import { FETCH_METHOD_LABEL as PROVIDER_LABEL, fetchArticle, fetchOrder, manualArticle, type FetchAttempt, type FetchMethod } from "@/lib/fetch";
 import { classifyArticle } from "@/lib/llm/classify";
 import { chooseBrandKit } from "@/lib/media/brand";
 import { putObject, r2Key } from "@/lib/r2";
@@ -50,12 +50,19 @@ export const fetchArticleFn = inngest.createFunction(
     });
 
     const fetched = await step.run("extract", async () => {
-      await reportProgress(pctx, { label: manual ? "Lưu nội dung dán" : method ? `Lấy nội dung bài qua ${method}` : "Lấy nội dung bài (Browser Rendering → HTTP → Firecrawl)", pct: 10 });
+      await reportProgress(pctx, { label: manual ? "Lưu nội dung dán" : `Lấy nội dung bài (${fetchOrder(method).map((m) => PROVIDER_LABEL[m]).join(" → ")})`, pct: 10 });
       if (manual) {
         return { method: "manual" as FetchMethod, extracted: manualArticle({ ...manual, url: project.url }), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[] };
       }
       try {
-        const out = await fetchArticle(project.url, { preferred: method });
+        const out = await fetchArticle(project.url, {
+          preferred: method,
+          // Blocked or failed: say so and move on to the next provider, in the manual re-fetch as well.
+          onAttempt: (next, previous) =>
+            previous
+              ? reportProgress(pctx, { label: `${PROVIDER_LABEL[previous.method]} ${previous.blocked ? "bị chặn" : "không lấy được bài"}, chuyển sang ${PROVIDER_LABEL[next]}`, pct: 10 + 15 * fetchOrder(method).indexOf(next) })
+              : undefined,
+        });
         return { method: out.method, extracted: out.extracted, rawHtml: out.rawHtml, screenshotB64: out.screenshot?.toString("base64") ?? null, attempts: out.attempts };
       } catch (e) {
         // Every provider failed: not worth retrying automatically; the user picks a fallback.

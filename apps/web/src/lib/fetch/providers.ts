@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { env } from "@/lib/env";
 import { readSecret } from "@/lib/vault";
+import { BlockedError, isBlockStatus } from "./blocked";
 
 /**
  * Network providers for article fetching (docs/PLAN.md §2 "Article fetch"):
@@ -105,7 +106,10 @@ export async function httpGetHtml(url: string, timeoutMs = 20_000): Promise<{ ht
     redirect: "follow",
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
+  if (!res.ok) {
+    const what = `HTTP ${res.status} from ${new URL(url).hostname}`;
+    throw isBlockStatus(res.status) ? new BlockedError(what) : new Error(what);
+  }
   const ct = res.headers.get("content-type") ?? "";
   if (!/text\/html|application\/xhtml/.test(ct)) throw new Error(`Not an HTML page (${ct || "unknown content type"})`);
   return { html: await res.text(), finalUrl: res.url || url, ms: Date.now() - t0 };
@@ -114,7 +118,7 @@ export async function httpGetHtml(url: string, timeoutMs = 20_000): Promise<{ ht
 export type FirecrawlResult = {
   html: string | null;
   markdown: string | null;
-  metadata: { title?: string; description?: string; language?: string; sourceURL?: string; ogImage?: string; author?: string; publishedTime?: string };
+  metadata: { title?: string; description?: string; language?: string; sourceURL?: string; url?: string; statusCode?: number; ogImage?: string; author?: string; publishedTime?: string };
   ms: number;
 };
 
