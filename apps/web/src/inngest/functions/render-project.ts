@@ -8,6 +8,7 @@ import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity, recordUsageCost } from "@/lib/activity";
 import { env } from "@/lib/env";
+import { channelLogo } from "@/lib/media/logo";
 import { resolveTimelineSrcs } from "@/lib/media/timeline-resolve";
 import { invokeMediaLambda, type MediaResult } from "@/lib/media-lambda";
 import { notifySlack } from "@/lib/notify";
@@ -42,12 +43,15 @@ export const renderProjectFn = inngest.createFunction(
     },
   },
   async ({ event, step }) => {
-    const { projectId, organizationId, requestedBy, timelineId } = event.data;
+    const { projectId, organizationId, requestedBy, timelineId, logoChannelId } = event.data;
     const ctx = { userId: requestedBy, organizationId };
     const pctx = { ...ctx, projectId };
 
     const input = await step.run("load", async () => {
       await reportProgress(pctx, { label: "Chuẩn bị timeline", pct: 2 });
+      // The kit is shared by every channel, the logo is the channel's: this render's choice, else the project's; "kit" or a channel without a logo = the logo embedded in the timeline.
+      const wanted = logoChannelId === "kit" ? null : (logoChannelId ?? (await withOrgContext(ctx, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { logoChannelId: true } })))?.logoChannelId ?? null);
+      const logo = await channelLogo(ctx, wanted);
       return withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
@@ -58,13 +62,15 @@ export const renderProjectFn = inngest.createFunction(
         await tx.update(schema.projects).set({ busyStep: "render", lastError: null }).where(eq(schema.projects.id, projectId));
         const [render] = await tx
           .insert(schema.renders)
-          .values({ organizationId, projectId, timelineId: timeline.id, timelineVersion: timeline.version, status: "queued", requestedBy })
+          .values({ organizationId, projectId, timelineId: timeline.id, timelineVersion: timeline.version, status: "queued", requestedBy, logoChannelId: logo?.id ?? null, logoPath: logo?.logoPath ?? (timeline.json as unknown as Timeline).brand.logoSrc ?? null })
           .returning({ id: schema.renders.id });
         return {
           renderId: render.id,
           timelineId: timeline.id,
           timelineVersion: timeline.version,
-          timeline: timeline.json as unknown as Timeline,
+          // Stored versions are immutable; the logo is swapped on the copy that goes to Lambda.
+          timeline: logo ? { ...(timeline.json as unknown as Timeline), brand: { ...(timeline.json as unknown as Timeline).brand, logoSrc: logo.logoPath } } : (timeline.json as unknown as Timeline),
+          logoChannel: logo?.name ?? null,
           title: project.title ?? "ai-news",
           durationSec: Number(timeline.durationSec ?? 0),
           /** Only a render of the approved version advances the project (docs/PLAN.md §4.8); others are previews. */

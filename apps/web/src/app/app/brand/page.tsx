@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BRAND_FONTS } from "@ai-news/video/schema";
+import { BRAND_FONTS, CAPTION_FONT_RANGE, HEADLINE_FONT_RANGE } from "@ai-news/video/schema";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,18 @@ function Px({ name, label, value, min, max, placeholder, hint }: { name: string;
       <Label htmlFor={name}>{label}</Label>
       <Input id={name} name={name} type="number" inputMode="numeric" step={1} min={min} max={max} defaultValue={value ?? ""} placeholder={placeholder} className="tabular-nums" />
       {hint ? <p className="text-[11px] text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
+
+/** Colour (with opacity; 0% = no shadow) + blur + offset of one text box's shadow. */
+function ShadowFields({ prefix, label, value }: { prefix: string; label: string; value: { colour: string; blur: number; x: number; y: number } }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))]">
+      <ColourField name={`${prefix}Colour`} label={label} value={value.colour} hint="Độ đậm 0% = không có bóng." />
+      <Px name={`${prefix}Blur`} label="Độ nhoè (0–200)" min={0} max={200} value={value.blur} />
+      <Px name={`${prefix}X`} label="Lệch ngang" min={-200} max={200} value={value.x} />
+      <Px name={`${prefix}Y`} label="Lệch dọc" min={-200} max={200} value={value.y} />
     </div>
   );
 }
@@ -157,17 +169,32 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
                   người. Xem kết quả ngay ở khung “Xem trước”.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Px name="headlineFontSize" label="Cỡ tiêu đề (28–120)" min={28} max={120} value={brand.headline.fontSize} hint="Tiêu đề mở đầu tự lớn hơn 22%." />
-                <Px name="headlineX" label="Tiêu đề: X mép trái" min={0} max={1080} value={brand.headline.x} placeholder="tự động (60)" />
-                <Px name="headlineY" label="Tiêu đề: Y mép dưới" min={0} max={1920} value={brand.headline.y} placeholder="tự động" hint="Tiêu đề dài mọc lên phía trên mốc này." />
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tiêu đề (headline) – thẻ chữ lớn của mỗi cảnh</div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Px name="headlineFontSize" label={`Cỡ chữ tiêu đề (${HEADLINE_FONT_RANGE.min}–${HEADLINE_FONT_RANGE.max})`} min={HEADLINE_FONT_RANGE.min} max={HEADLINE_FONT_RANGE.max} value={Math.max(HEADLINE_FONT_RANGE.min, brand.headline.fontSize)} hint="Nên lớn hơn phụ đề. Tiêu đề cảnh mở đầu tự lớn hơn 22%." />
+                  <Px name="headlineX" label="X: mép trái thẻ" min={0} max={1080} value={brand.headline.x} placeholder="tự động (60)" />
+                  <Px name="headlineY" label="Y: mép dưới thẻ" min={0} max={1920} value={brand.headline.y} placeholder="tự động" hint="Tiêu đề dài mọc lên phía trên mốc này." />
+                </div>
+                <ShadowFields prefix="headlineShadow" label="Bóng đổ của thẻ tiêu đề" value={brand.headline.shadow} />
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Px name="captionFontSize" label="Cỡ phụ đề (36–96)" min={36} max={96} value={brand.caption.fontSize} />
-                <Px name="captionX" label="Phụ đề: X tâm khối" min={0} max={1080} value={brand.caption.x} placeholder="tự động (480)" />
-                <Px name="captionY" label="Phụ đề: Y mép dưới" min={0} max={1920} value={brand.caption.y} placeholder="tự động" hint="Có giá trị thì bỏ qua “vị trí” bên dưới." />
+              <div className="space-y-2 border-t pt-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phụ đề (captions) – lời đọc chạy theo giọng</div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Px name="captionFontSize" label={`Cỡ chữ phụ đề (${CAPTION_FONT_RANGE.min}–${CAPTION_FONT_RANGE.max})`} min={CAPTION_FONT_RANGE.min} max={CAPTION_FONT_RANGE.max} value={brand.caption.fontSize} />
+                  <Px name="captionX" label="X: tâm khối / mép trái" min={0} max={1080} value={brand.caption.x} placeholder="tự động (480 / 60)" hint="Căn giữa: X là tâm khối. Căn trái: X là mép trái." />
+                  <Px name="captionY" label="Y: mép dưới khối" min={0} max={1920} value={brand.caption.y} placeholder="tự động" hint="Có giá trị thì bỏ qua “vị trí tự động”." />
+                </div>
+                <ShadowFields prefix="captionShadow" label="Bóng đổ của khung phụ đề" value={brand.caption.shadow} />
               </div>
-              <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <div className="flex flex-wrap items-end gap-x-4 gap-y-2 border-t pt-3">
+                <div className="space-y-1">
+                  <Label htmlFor="captionAlign">Căn lề phụ đề</Label>
+                  <select id="captionAlign" name="captionAlign" defaultValue={brand.caption.align} className="h-9 rounded-md border bg-background px-2 text-sm">
+                    <option value="center">căn giữa</option>
+                    <option value="left">căn trái</option>
+                  </select>
+                </div>
                 <div className="space-y-1">
                   <Label htmlFor="captionPosition">Vị trí phụ đề tự động</Label>
                   <select id="captionPosition" name="captionPosition" defaultValue={brand.caption.position} className="h-9 rounded-md border bg-background px-2 text-sm">
@@ -185,7 +212,7 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
-                <Label htmlFor="logo">Logo (PNG/SVG/WebP, ≤ 2 MB)</Label>
+                <Label htmlFor="logo">Logo xem trước / dự phòng (PNG/SVG/WebP, ≤ 2 MB)</Label>
                 <Input id="logo" name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
                 <div className="space-y-1 pt-2">
                   <Label htmlFor="logoMotion">Chuyển động logo trong video</Label>
@@ -198,6 +225,10 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
                   </select>
                   <p className="text-[11px] text-muted-foreground">Mọi kiểu đều có màn xuất hiện: logo xoay ra từ cạnh khi video bắt đầu.</p>
                 </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Bộ nhận diện dùng chung cho mọi kênh, còn logo đi theo kênh (admin tải lên ở /admin/channels, chọn khi tạo dự án và mỗi lần kết xuất). Logo ở đây dùng cho khung xem trước và khi
+                  dự án không chọn kênh hoặc kênh chưa có logo.
+                </p>
                 {logoUrl ? (
                   <div className="flex items-center gap-3 pt-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}

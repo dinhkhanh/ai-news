@@ -242,6 +242,11 @@ export const projects = pgTable(
     brandKitId: uuid("brand_kit_id").references((): AnyPgColumn => brandKits.id, { onDelete: "set null" }),
     brandKitSource: text("brand_kit_source").$type<"manual" | "auto">(),
     brandKitReason: text("brand_kit_reason"),
+    /**
+     * Whose logo this project's videos carry: the kit is shared by every channel, the logo is the channel's
+     * (`channels.logo_path`). Null, or a channel without a logo = the kit's own logo. A render may pick another channel.
+     */
+    logoChannelId: uuid("logo_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
     /** Approval flow (docs/PLAN.md §4.8): the timeline version a publisher approved; cleared by any later edit. */
@@ -433,6 +438,9 @@ export const renders = pgTable(
     projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
     timelineId: uuid("timeline_id").references(() => timelines.id, { onDelete: "set null" }),
     timelineVersion: integer("timeline_version"),
+    /** The channel whose logo this render carries (null = the kit's logo), and the file actually drawn, for the record. */
+    logoChannelId: uuid("logo_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
+    logoPath: text("logo_path"),
     remotionRenderId: text("remotion_render_id"),
     remotionBucket: text("remotion_bucket"),
     outputPath: text("output_path"),
@@ -462,6 +470,8 @@ export const channels = pgTable(
     externalId: text("external_id").notNull(),
     name: text("name").notNull(),
     avatarUrl: text("avatar_url"),
+    /** The channel's logo as drawn in its videos (R2 key under library/brand/<org>/); the platform avatar above is only for lists. */
+    logoPath: text("logo_path"),
     vaultRef: uuid("vault_ref"),
     scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
     expiresAt: timestamp("expires_at", { withTimezone: true }),

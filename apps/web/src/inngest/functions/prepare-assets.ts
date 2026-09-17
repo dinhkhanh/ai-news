@@ -95,6 +95,8 @@ export const prepareAssetsFn = inngest.createFunction(
         language: row.project.language,
         tone: row.project.tone,
         brandKitId: row.project.brandKitId,
+        /** Only whether a channel logo will be drawn matters here (face guard); the render puts the file in. */
+        hasChannelLogo: Boolean(row.project.logoChannelId),
         title: row.project.title ?? s.title,
         articleTitle: row.article?.title ?? row.project.title ?? s.title,
         source: { name: row.article?.siteName ?? null, url: row.project.canonicalUrl ?? row.project.url },
@@ -104,6 +106,7 @@ export const prepareAssetsFn = inngest.createFunction(
     });
     const media = (name: string) => r2Key.media(organizationId, projectId, name);
 
+    // The timeline embeds the kit with the kit's own logo; the channel's logo is put in at render time (render-project) and in the editor preview, so one version renders for any channel.
     const brand = await step.run("brand", () => loadBrand(ctx, input.brandKitId));
 
     /* ---- voice-over per scene (parallel) ---- */
@@ -222,7 +225,7 @@ export const prepareAssetsFn = inngest.createFunction(
           headlineStyle: brand.brand.headline,
           hasCaptions: Boolean(sc?.voiceover.trim()),
           showSource: brand.brand.showSource && Boolean(input.source.name),
-          hasLogo: Boolean(brand.brand.logoSrc),
+          hasLogo: Boolean(brand.brand.logoSrc) || input.hasChannelLogo,
         });
         f = frameStill(faceScan.frames[index] ?? null, zones);
         framings.set(k, f);

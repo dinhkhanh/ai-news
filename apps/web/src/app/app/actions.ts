@@ -6,6 +6,7 @@ import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
 import { projectFetchRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
+import { channelLogo } from "@/lib/media/logo";
 import { parsePreset } from "@/lib/presets";
 import { startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
@@ -26,6 +27,10 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
     const kitId = str(fd, "brandKitId");
     const kit = kitId ? await withOrgContext(ws, (tx) => tx.query.brandKits.findFirst({ where: and(eq(schema.brandKits.organizationId, ws.organizationId), eq(schema.brandKits.id, kitId)), columns: { id: true, name: true } })) : null;
     if (kitId && !kit) throw new Error("That brand kit no longer exists");
+    // Whose logo the videos carry (brand kits are shared across channels); empty = the kit's own logo.
+    const logoChannelId = str(fd, "logoChannelId");
+    const logoChannel = await channelLogo(ws, logoChannelId);
+    if (logoChannelId && !logoChannel) throw new Error("That channel has no logo (any more)");
     // Auto mode will spend a script + a render on this user's behalf: fail fast if today's quota is already gone.
     if (auto) await Promise.all([assertQuota(ws.userId, "scripts"), assertQuota(ws.userId, "render_minutes")]);
 
@@ -40,10 +45,10 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
     const [project] = await withOrgContext(ws, (tx) =>
       tx
         .insert(schema.projects)
-        .values({ organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, durationSec, tone, autoPipeline: auto, brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, busyStep: "fetch", busyProgress: startProgress() })
+        .values({ organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, durationSec, tone, autoPipeline: auto, brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null, busyStep: "fetch", busyProgress: startProgress() })
         .returning({ id: schema.projects.id }),
     );
-    await log("project.created", { url, durationSec, tone, auto, brandKit: kit?.name ?? "auto", duplicateOf: existing?.id ?? null }, project.id);
+    await log("project.created", { url, durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, duplicateOf: existing?.id ?? null }, project.id);
     await inngest.send(projectFetchRequested.create({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
     target = `/app/projects/${project.id}`;
     return auto ? "Project created; running fetch → script → build → render automatically…" : "Project created; fetching the article…";

@@ -41,13 +41,14 @@ function brandFromForm(form: HTMLFormElement, base: Brand): Brand | null {
   const fd = new FormData(form);
   const s = (k: string) => String(fd.get(k) ?? "").trim();
   const n = (k: string) => (s(k) === "" ? null : Math.round(Number(s(k))));
+  const shadow = (prefix: string, d: Brand["headline"]["shadow"]) => ({ colour: s(`${prefix}Colour`) || d.colour, blur: n(`${prefix}Blur`) ?? d.blur, x: n(`${prefix}X`) ?? d.x, y: n(`${prefix}Y`) ?? d.y });
   const parsed = brandSchema.safeParse({
     ...base,
     name: s("name") || base.name,
     colours: { primary: s("primary"), accent: s("accent"), background: s("background"), text: s("text"), captionBg: s("captionBg"), captionHighlight: s("captionHighlight") },
     fonts: { heading: s("fontHeading"), body: s("fontBody"), caption: s("fontCaption") },
-    caption: { position: s("captionPosition"), fontSize: n("captionFontSize") ?? base.caption.fontSize, uppercase: fd.get("captionUppercase") === "on", highlightWords: fd.get("captionHighlightWords") === "on", x: n("captionX"), y: n("captionY") },
-    headline: { fontSize: n("headlineFontSize") ?? base.headline.fontSize, x: n("headlineX"), y: n("headlineY") },
+    caption: { position: s("captionPosition"), align: s("captionAlign") || base.caption.align, shadow: shadow("captionShadow", base.caption.shadow), fontSize: n("captionFontSize") ?? base.caption.fontSize, uppercase: fd.get("captionUppercase") === "on", highlightWords: fd.get("captionHighlightWords") === "on", x: n("captionX"), y: n("captionY") },
+    headline: { shadow: shadow("headlineShadow", base.headline.shadow), fontSize: n("headlineFontSize") ?? base.headline.fontSize, x: n("headlineX"), y: n("headlineY") },
     logoMotion: s("logoMotion"),
     overlayLayer: s("overlayLayer"),
     showSource: fd.get("showSource") === "on",
@@ -127,6 +128,7 @@ export function BrandPreview({ formId, brand, logoUrl, overlayUrl }: Props) {
           </label>
         ) : null}
       </div>
+      {live.headline.fontSize < live.caption.fontSize ? <p className="text-xs text-amber-700 dark:text-amber-400">Tiêu đề ({live.headline.fontSize}px) đang nhỏ hơn phụ đề ({live.caption.fontSize}px); tiêu đề nên lớn hơn.</p> : null}
       {invalid ? <p className="text-xs text-amber-700 dark:text-amber-400">Có ô đang nhập dở / ngoài giới hạn; đang hiển thị giá trị hợp lệ gần nhất.</p> : null}
       <p className="text-[11px] text-muted-foreground">Đúng bộ dựng hình dùng khi kết xuất, trên một tin mẫu. Thay đổi hiện ngay, chưa lưu cho tới khi bấm Lưu. Vùng đỏ: giao diện TikTok / Reels / Shorts che mất.</p>
     </div>

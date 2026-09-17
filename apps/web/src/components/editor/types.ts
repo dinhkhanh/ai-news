@@ -50,6 +50,8 @@ export type EditorProps = {
   /** YouTube picks of this build that the server could not download and nobody has recorded yet. */
   captures: PendingCapture[];
   music: MusicOption[];
+  /** Logo of the project's channel (presigned), shown in the preview in place of the kit's; renders do the same swap. */
+  previewLogo: { url: string; channelName: string } | null;
   /** The workspace's brand kits (R2 keys inside), so the look can be swapped without a rebuild. */
   brandKits: Array<{ id: string; name: string; isDefault: boolean; brand: Brand }>;
   verdicts: Record<string, { verdict: SceneVerdict["verdict"]; note: string | null; evidence: string | null }> | null;

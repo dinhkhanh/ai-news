@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withServiceContext } from "@/db/context";
 import { assertAdmin, run, str, type ActionState } from "@/lib/admin";
+import { storeLogo } from "@/lib/media/logo";
 import { channelAccessToken, deleteChannelToken, probeToken } from "@/lib/publish/oauth";
 import { pullChannelAnalytics } from "@/lib/publish/service";
 
@@ -109,5 +110,23 @@ export async function disconnectChannel(_: ActionState, fd: FormData): Promise<A
     await log("channel.disconnected", { channelId, platform: ch.platform, name: ch.name, kept: Boolean(used) }, { organizationId: ch.organizationId });
     revalidatePath("/admin/channels");
     return used ? `${ch.name} disconnected (kept for publication history)` : `${ch.name} removed`;
+  });
+}
+
+/** The logo this channel's videos carry (brand kits are shared across channels, logos are not). */
+export async function setChannelLogo(_: ActionState, fd: FormData): Promise<ActionState> {
+  return run(async () => {
+    const { log } = await assertAdmin();
+    const ch = await loadChannel(str(fd, "channelId"));
+    const remove = fd.get("remove") === "on";
+    const file = fd.get("logo");
+    let logoPath = ch.logoPath;
+    if (file instanceof File && file.size > 0) logoPath = await storeLogo(file, ch.organizationId, `channel-logo-${ch.id}`);
+    else if (!remove) throw new Error("Choose a PNG, SVG, WebP or JPEG file");
+    if (remove && !(file instanceof File && file.size > 0)) logoPath = null;
+    await withServiceContext((tx) => tx.update(schema.channels).set({ logoPath }).where(eq(schema.channels.id, ch.id)));
+    await log(logoPath ? "channel.logo_set" : "channel.logo_removed", { channelId: ch.id, platform: ch.platform, name: ch.name }, { organizationId: ch.organizationId });
+    revalidatePath("/admin/channels");
+    return logoPath ? `Logo saved for ${ch.name}; the next render for this channel uses it` : `Logo removed from ${ch.name}; its videos fall back to the brand kit's logo`;
   });
 }

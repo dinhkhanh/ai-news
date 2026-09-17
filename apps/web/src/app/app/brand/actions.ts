@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { and, eq, ne } from "drizzle-orm";
-import { BRAND_FONTS, LOGO_MOTIONS, OUTPUT, type LogoMotion } from "@ai-news/video/schema";
+import { BRAND_FONTS, CAPTION_FONT_RANGE, HEADLINE_FONT_RANGE, LOGO_MOTIONS, OUTPUT, type BoxShadow, type LogoMotion } from "@ai-news/video/schema";
 import { nanoid } from "nanoid";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
@@ -10,8 +10,9 @@ import { run, str, type ActionState } from "@/lib/admin";
 import { normaliseColour } from "@/lib/colour";
 import { DEFAULT_BRAND } from "@/lib/media/brand";
 import { parseKeywords } from "@/lib/media/brand-match";
+import { storeLogo } from "@/lib/media/logo";
 import { pngInfo } from "@/lib/media/png";
-import { deleteObject, getObjectRange, headObject, presignGet, presignPut, putObject, r2Key } from "@/lib/r2";
+import { deleteObject, getObjectRange, headObject, presignGet, presignPut, r2Key } from "@/lib/r2";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 
 /** `#rrggbb`, or `#rrggbbaa` for a translucent colour (the picker's opacity slider). */
@@ -36,6 +37,14 @@ const px = (fd: FormData, key: string, min: number, max: number) => {
   if (!Number.isFinite(n) || n < min || n > max) throw new Error(`${key}: a number from ${min} to ${max}, or empty for automatic`);
   return n;
 };
+
+/** Box shadow from the four `<prefix>Colour / Blur / X / Y` fields; empty numbers keep the default. */
+const shadow = (fd: FormData, prefix: string, d: BoxShadow): BoxShadow => ({
+  colour: colour(fd, `${prefix}Colour`, d.colour),
+  blur: px(fd, `${prefix}Blur`, 0, 200) ?? d.blur,
+  x: px(fd, `${prefix}X`, -200, 200) ?? d.x,
+  y: px(fd, `${prefix}Y`, -200, 200) ?? d.y,
+});
 
 const OVERLAY_MAX_BYTES = 12 * 1024 * 1024;
 const overlayPrefix = (org: string, kitId: string) => r2Key.library(`brand/${org}/overlay-${kitId}-`);
@@ -68,10 +77,7 @@ export async function saveBrandKit(_: ActionState, fd: FormData): Promise<Action
     let logoPath = existing?.logoPath ?? null;
     const logo = fd.get("logo");
     if (logo instanceof File && logo.size > 0) {
-      if (logo.size > 2 * 1024 * 1024) throw new Error("Logo must be under 2 MB");
-      if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(logo.type)) throw new Error("Logo must be PNG, JPEG, WebP or SVG");
-      const ext = logo.type === "image/svg+xml" ? "svg" : logo.type.split("/")[1].replace("jpeg", "jpg");
-      logoPath = await putObject(r2Key.library(`brand/${ws.organizationId}/logo-${Date.now()}.${ext}`), Buffer.from(await logo.arrayBuffer()), logo.type);
+      logoPath = await storeLogo(logo, ws.organizationId, "logo");
     }
     if (fd.get("removeLogo") === "on") logoPath = null;
     const values = {
@@ -93,13 +99,15 @@ export async function saveBrandKit(_: ActionState, fd: FormData): Promise<Action
       },
       captionStyle: {
         position: str(fd, "captionPosition") === "middle" ? "middle" : "bottom",
-        fontSize: Math.min(96, Math.max(36, Number(str(fd, "captionFontSize") || 64))),
+        fontSize: px(fd, "captionFontSize", CAPTION_FONT_RANGE.min, CAPTION_FONT_RANGE.max) ?? DEFAULT_BRAND.caption.fontSize,
+        align: str(fd, "captionAlign") === "left" ? "left" : "center",
+        shadow: shadow(fd, "captionShadow", DEFAULT_BRAND.caption.shadow),
         uppercase: fd.get("captionUppercase") === "on",
         highlightWords: fd.get("captionHighlightWords") === "on",
         x: px(fd, "captionX", 0, OUTPUT.width),
         y: px(fd, "captionY", 0, OUTPUT.height),
       },
-      headlineStyle: { fontSize: px(fd, "headlineFontSize", 28, 120) ?? DEFAULT_BRAND.headline.fontSize, x: px(fd, "headlineX", 0, OUTPUT.width), y: px(fd, "headlineY", 0, OUTPUT.height) },
+      headlineStyle: { fontSize: px(fd, "headlineFontSize", HEADLINE_FONT_RANGE.min, HEADLINE_FONT_RANGE.max) ?? DEFAULT_BRAND.headline.fontSize, shadow: shadow(fd, "headlineShadow", DEFAULT_BRAND.headline.shadow), x: px(fd, "headlineX", 0, OUTPUT.width), y: px(fd, "headlineY", 0, OUTPUT.height) },
       lowerThird: { showSource: fd.get("showSource") === "on", outroText: str(fd, "outroText") || null },
       safeZones: { top: 220, bottom: 420, left: 60, right: 180 },
     };

@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cancelPublication, createPublication, retryPublication } from "@/app/app/projects/[id]/publish-actions";
 import { PLATFORM_SPEC, type Platform, type PublishMetadata } from "@/lib/publish/platforms";
 
-export type PublishChannel = { id: string; platform: Platform; name: string; granted: boolean; enabled: boolean; healthy: boolean; flagOn: boolean; defaults: PublishMetadata };
+export type PublishChannel = { id: string; platform: Platform; name: string; granted: boolean; enabled: boolean; healthy: boolean; flagOn: boolean; /** The channel has a video logo of its own. */ hasLogo: boolean; defaults: PublishMetadata };
 export type PublicationView = {
   id: string;
   platform: Platform;
@@ -33,6 +33,8 @@ export const PRIVACY_LABEL: Record<string, string> = { public: "Công khai", unl
 type Props = {
   projectId: string;
   render: { id: string; version: number | null; durationSec: number | null } | null;
+  /** Finished renders of the approved version, newest first, with the channel whose logo each carries (null = the kit's logo). */
+  renders: Array<{ id: string; logoChannelId: string | null; logoName: string }>;
   canPublish: boolean;
   schedulingOn: boolean;
   aiDisclosure: boolean;
@@ -78,11 +80,21 @@ export function PublishPanel(p: Props) {
         ? (() => {
             const c = p.channels.find((x) => x.id === open)!;
             const spec = PLATFORM_SPEC[c.platform];
+            // Logos belong to channels: publish the render made with this channel's logo when there is one.
+            const own = p.renders.find((r) => r.logoChannelId === c.id);
+            const chosen = own ?? p.renders[0] ?? null;
             return (
               <ActionForm key={c.id} action={createPublication} className="space-y-3 rounded-md border p-3">
                 <input type="hidden" name="projectId" value={p.projectId} />
                 <input type="hidden" name="channelId" value={c.id} />
-                <input type="hidden" name="renderId" value={p.render!.id} />
+                <input type="hidden" name="renderId" value={chosen?.id ?? p.render!.id} />
+                {c.hasLogo && !own ? (
+                  <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+                    Chưa có bản kết xuất mang logo của {c.name}: bản sẽ đăng mang logo “{chosen?.logoName ?? "bộ nhận diện"}”. Muốn đúng logo, kết xuất lại ở mục Kết xuất (chọn logo {c.name}) rồi quay lại đây.
+                  </p>
+                ) : own ? (
+                  <p className="text-xs text-muted-foreground">Đăng bản kết xuất mang logo của {c.name}.</p>
+                ) : null}
                 <div className="text-xs text-muted-foreground">
                   {spec.label} · {c.name} · giới hạn: {spec.titleMax ? `tiêu đề ${spec.titleMax}` : ""} {spec.descriptionMax ? `· mô tả ${spec.descriptionMax}` : ""} · {spec.hashtagMax} hashtag · ≤ {spec.maxDurationSec}s
                 </div>

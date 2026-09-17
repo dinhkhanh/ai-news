@@ -55,6 +55,7 @@ type RawChannel = {
   externalId: string;
   name: string;
   avatarUrl: string | null;
+  logoPath: string | null;
   hasToken: boolean;
   scopes: string[];
   expiresAt: string | null;

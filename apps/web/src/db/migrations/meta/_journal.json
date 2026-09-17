@@ -120,6 +120,13 @@
       "when": 1789631902008,
       "tag": "0016_brand_kit_headline_style",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789633198627,
+      "tag": "0017_channel_logos",
+      "breakpoints": true
     }
   ]
 }

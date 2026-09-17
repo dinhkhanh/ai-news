@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { loadAdminChannels } from "@/lib/admin-data";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
-import { checkChannel, disconnectChannel, grantChannel, pullAnalyticsNow, revokeChannel, setChannelEnabled } from "./actions";
+import { presignMap } from "@/lib/media/timeline-resolve";
+import { checkChannel, disconnectChannel, grantChannel, pullAnalyticsNow, revokeChannel, setChannelEnabled, setChannelLogo } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   // One round-trip: admin_channels_page() (migration 0013) reads across workspaces.
   const { orgs, channels, members, grants, metaReady, tiktokReady, flags } = await loadAdminChannels();
+  // Presigning is local signing, no network; the logos themselves load in the browser.
+  const logoUrls = await presignMap(channels.flatMap((c) => (c.logoPath ? [c.logoPath] : [])), 600);
 
   return (
     <div className="space-y-6">
@@ -83,6 +86,26 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
                       <div className="text-xs text-muted-foreground">
                         id {c.externalId} · scopes {c.scopes.length ? c.scopes.join(", ") : "—"}
                       </div>
+                      <ActionForm action={setChannelLogo} className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 p-2">
+                        <input type="hidden" name="channelId" value={c.id} />
+                        <span className="text-xs font-medium">Video logo</span>
+                        {c.logoPath && logoUrls[c.logoPath] ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={logoUrls[c.logoPath]} alt={`${c.name} logo`} className="h-9 max-w-32 rounded bg-slate-800 object-contain p-1" />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">none: videos for this channel use the brand kit&apos;s logo</span>
+                        )}
+                        <input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="max-w-56 text-xs" />
+                        {c.logoPath ? (
+                          <label className="flex items-center gap-1 text-xs">
+                            <input type="checkbox" name="remove" /> remove
+                          </label>
+                        ) : null}
+                        <Button type="submit" size="sm" variant="outline" className="h-7">
+                          Save logo
+                        </Button>
+                        <span className="text-[11px] text-muted-foreground">PNG / SVG / WebP, ≤ 2 MB, transparent background; drawn top-right at 90 px high.</span>
+                      </ActionForm>
                       <div className="flex flex-wrap items-center gap-1">
                         <span className="text-xs">Granted:</span>
                         {gs.length === 0 ? <span className="text-xs text-muted-foreground">nobody</span> : null}

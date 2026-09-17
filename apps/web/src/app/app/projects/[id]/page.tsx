@@ -177,6 +177,23 @@ export default async function ProjectPage({
   if (!data) notFound();
   const { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications, kits } = data;
   const projectKit = kits.find((k) => k.id === project.brandKitId) ?? null;
+  // Brand kits are shared across channels; the logo is the channel's and can differ per render.
+  const logoChannels = channels.filter((c) => c.logoPath);
+  const logoName = (channelId: string | null) => (channelId ? (channels.find((c) => c.id === channelId)?.name ?? "kênh đã xoá") : "bộ nhận diện");
+  const logoSelect = (id: string) =>
+    logoChannels.length ? (
+      <label className="flex items-center gap-1 text-xs text-muted-foreground" htmlFor={id}>
+        logo
+        <select id={id} name="logoChannelId" defaultValue={logoChannels.some((c) => c.id === project.logoChannelId) ? project.logoChannelId! : ""} className="h-8 max-w-48 rounded-md border bg-background px-2 text-xs text-foreground">
+          <option value="">của bộ nhận diện</option>
+          {logoChannels.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} · {PLATFORM_SPEC[c.platform].label}
+            </option>
+          ))}
+        </select>
+      </label>
+    ) : null;
   const selectedTimeline = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   const timelineJson = selectedTimeline ? (selectedTimeline.json as unknown as Timeline) : null;
   const sign = async (key: string | null | undefined, ttl = 900) => {
@@ -230,6 +247,10 @@ export default async function ProjectPage({
   const approvedRender = project.approvedTimelineId
     ? (renders.find((r) => r.timelineId === project.approvedTimelineId && r.status === "done") ?? null)
     : null;
+  // The version worth re-rendering for other channels: the approved one, else the newest that has a finished render.
+  const rerenderTimeline = timelines.find((t) => t.id === (project.approvedTimelineId ?? renders.find((r) => r.status === "done")?.timelineId)) ?? null;
+  const approvedRenders = renders.filter((r) => r.status === "done" && r.timelineId === rerenderTimeline?.id);
+  const renderedLogos = [...new Set(approvedRenders.map((r) => (r.logoChannelId ? (channels.find((c) => c.id === r.logoChannelId)?.name ?? "kênh đã xoá") : "bộ nhận diện")))];
   const approvedScript =
     scripts.find((s) => s.id === timelines.find((t) => t.id === project.approvedTimelineId)?.scriptId) ??
     scripts[0] ??
@@ -242,6 +263,7 @@ export default async function ProjectPage({
     granted: ws.isAdmin || grants.some((g) => g.channelId === c.id),
     enabled: c.enabled && Boolean(c.vaultRef),
     healthy: c.healthy,
+    hasLogo: Boolean(c.logoPath),
     flagOn: Boolean(publishFlags[PLATFORM_SPEC[c.platform].flag]),
     defaults: buildMetadata({
       platform: c.platform,
@@ -616,6 +638,7 @@ export default async function ProjectPage({
                   <ActionForm action={requestRender} className="flex flex-wrap items-center gap-3 border-t pt-3">
                     <input type="hidden" name="projectId" value={project.id} />
                     <input type="hidden" name="timelineId" value={selectedTimeline.id} />
+                    {logoSelect("render-logo")}
                     <Button
                       type="submit"
                       disabled={busy}
@@ -698,6 +721,7 @@ export default async function ProjectPage({
                     }
                   : null
               }
+              renders={renders.filter((r) => r.status === "done" && project.approvedTimelineId && r.timelineId === project.approvedTimelineId).map((r) => ({ id: r.id, logoChannelId: r.logoChannelId, logoName: logoName(r.logoChannelId) }))}
               canPublish={publisher}
               schedulingOn={Boolean(publishFlags.scheduling)}
               aiDisclosure={project.aiDisclosure}
@@ -719,6 +743,20 @@ export default async function ProjectPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {writer && logoChannels.length && rerenderTimeline ? (
+              <ActionForm action={requestRender} className="flex flex-wrap items-center gap-2 rounded-md border border-dashed p-2">
+                <input type="hidden" name="projectId" value={project.id} />
+                <input type="hidden" name="timelineId" value={rerenderTimeline.id} />
+                <span className="text-xs font-medium">Kết xuất lại v{rerenderTimeline.version} với logo kênh khác</span>
+                {logoSelect("rerender-logo")}
+                <Button type="submit" size="sm" variant="outline" disabled={busy}>
+                  Kết xuất
+                </Button>
+                <span className="text-[11px] text-muted-foreground">
+                  Cùng nội dung, chỉ khác logo; tính phút kết xuất như thường. Đã có: {renderedLogos.length ? renderedLogos.join(", ") : "chưa có bản nào"}.
+                </span>
+              </ActionForm>
+            ) : null}
             {renders.slice(0, 10).map((r) => {
               const links = renderLinks.get(r.id);
               const checks =
@@ -751,6 +789,7 @@ export default async function ProjectPage({
                         {r.costUsd ? ` · $${Number(r.costUsd).toFixed(3)}` : ""}
                         {r.renderSeconds ? ` · ${Number(r.renderSeconds).toFixed(0)} s render` : ""}
                       </span>
+                      <Badge variant="outline">logo: {logoName(r.logoChannelId)}</Badge>
                       {r.pinned ? <Badge variant="outline">đã ghim</Badge> : null}
                       {r.timelineId && r.timelineId === project.approvedTimelineId ? (
                         <Badge>bản duyệt</Badge>

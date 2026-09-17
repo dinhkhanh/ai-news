@@ -62,6 +62,9 @@ describe("overlayZones", () => {
     const right = zones({ x: 900 });
     expect((right.captions.x0 + right.captions.x1) / 2).toBe(900);
     expect(right.captions.x1).toBeLessThanOrEqual(1080);
+    // Left-aligned captions: x is the left edge (60 by default) and the block runs to the right rail.
+    expect(zones({ align: "left" }).captions).toMatchObject({ x0: 60, x1: 900 });
+    expect(zones({ align: "left", x: 200 }).captions).toMatchObject({ x0: 200, x1: 900 });
     // The hook keeps its size advantage over the kit's headline size.
     expect(zones({}, { fontSize: 40 }, "hook").headline.y0).toBeLessThan(zones({}, { fontSize: 40 }).headline.y0);
   });

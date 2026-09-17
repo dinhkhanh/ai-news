@@ -85,6 +85,8 @@ export const projectRenderRequested = eventType("project/render.requested", {
     requestedBy: z.string(),
     /** Timeline version to render; default = latest. */
     timelineId: z.string().optional(),
+    /** Whose logo to draw: a channel id, "kit" for the brand kit's own logo; absent = the project's logo channel. */
+    logoChannelId: z.string().optional(),
   }),
 });
 

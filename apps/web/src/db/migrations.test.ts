@@ -265,4 +265,17 @@ describe("migrations", () => {
     const { rows } = await pg.query<{ brand_kit_id: string | null }>("select brand_kit_id from projects where id='00000000-0000-4000-8000-000000000014'");
     expect(rows[0].brand_kit_id).toBeNull();
   });
+  it("give channels a logo and let projects and renders point at the channel whose logo they carry (migration 0017)", async () => {
+    await pg.exec(`insert into "user"(id,name,email) values ('u17','U17','u17@suzu.group');
+      insert into organization(id,name,slug) values ('o17','O17','o17');`);
+    const ch = await pg.query<{ id: string }>(`insert into channels(organization_id,platform,external_id,name,logo_path) values ('o17','youtube','UC17','Kênh 17','library/brand/o17/channel-logo.png') returning id`);
+    await pg.query(`insert into projects(id,organization_id,owner_id,url,logo_channel_id) values ('00000000-0000-4000-8000-000000000017','o17','u17','https://example.com/b',$1)`, [ch.rows[0].id]);
+    await pg.query(`insert into renders(organization_id,project_id,logo_channel_id,logo_path) values ('o17','00000000-0000-4000-8000-000000000017',$1,'library/brand/o17/channel-logo.png')`, [ch.rows[0].id]);
+    const page = await pg.query<{ data: { channels: Array<{ id: string; logoPath: string | null }> } }>("select admin_channels_page() as data");
+    expect(page.rows[0].data.channels.find((c) => c.id === ch.rows[0].id)?.logoPath).toBe("library/brand/o17/channel-logo.png");
+    // Disconnecting the channel keeps the project and the render (and what the render drew).
+    await pg.query("delete from channels where id=$1", [ch.rows[0].id]);
+    const left = await pg.query<{ p: string | null; r: string | null; path: string }>("select p.logo_channel_id as p, r.logo_channel_id as r, r.logo_path as path from projects p join renders r on r.project_id=p.id where p.id='00000000-0000-4000-8000-000000000017'");
+    expect(left.rows[0]).toEqual({ p: null, r: null, path: "library/brand/o17/channel-logo.png" });
+  });
 });

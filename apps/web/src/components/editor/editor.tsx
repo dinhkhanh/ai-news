@@ -23,11 +23,11 @@ import type { EditorProps, VisualOption } from "./types";
 const FPS = 30;
 
 /** Swap R2 keys for presigned URLs; anything without a URL falls back so the Player never requests a bare key. */
-function resolveForPlayer(t: Timeline, urls: Record<string, string>): Timeline {
+function resolveForPlayer(t: Timeline, urls: Record<string, string>, logoUrl: string | null): Timeline {
   const u = (k: string | null) => (k ? (urls[k] ?? null) : null);
   return {
     ...t,
-    brand: { ...t.brand, logoSrc: u(t.brand.logoSrc), overlaySrc: u(t.brand.overlaySrc) },
+    brand: { ...t.brand, logoSrc: logoUrl ?? u(t.brand.logoSrc), overlaySrc: u(t.brand.overlaySrc) },
     scenes: t.scenes.map((s) => {
       const visual = (v: Timeline["scenes"][number]["visual"]) => {
         const src = v.kind === "solid" ? null : u(v.src);
@@ -82,7 +82,7 @@ export function Editor(props: EditorProps) {
   const mixUsable = Boolean(props.mix && props.mix.signature === audioSignature(doc));
 
   const built = useMemo(() => buildFromDoc(doc, mixUsable && props.mix ? { mixKey: props.mix.mixKey, voiceKey: null } : null), [doc, mixUsable, props.mix]);
-  const playerTimeline = useMemo(() => resolveForPlayer(built.timeline, urls), [built.timeline, urls]);
+  const playerTimeline = useMemo(() => resolveForPlayer(built.timeline, urls, props.previewLogo?.url ?? null), [built.timeline, urls, props.previewLogo]);
   // Where each picture is used, so the inspector can flag repeats across scenes.
   const usedKeys = useMemo(() => {
     const out: Record<string, string[]> = {};
@@ -252,6 +252,10 @@ export function Editor(props: EditorProps) {
               .
             </p>
           )}
+          <p className="text-[11px] text-muted-foreground">
+            {props.previewLogo ? `Logo đang xem: kênh ${props.previewLogo.channelName}. ` : "Logo đang xem: của bộ nhận diện. "}
+            Logo đi theo kênh, chọn lại được mỗi lần kết xuất ở trang dự án.
+          </p>
           <p className="text-[11px] text-muted-foreground">Đổi bộ chỉ đổi diện mạo (màu, font, logo, lớp phủ, phụ đề); lời đọc, hình và nhạc giữ nguyên, không trộn lại âm thanh.</p>
         </div>
 
@@ -343,7 +347,7 @@ export function Editor(props: EditorProps) {
               index={selectedIndex}
               total={doc.scenes.length}
               options={options}
-              overlay={{ caption: doc.brand.caption, headlineStyle: doc.brand.headline, showSource: doc.brand.showSource && Boolean(doc.source.name), hasLogo: Boolean(doc.brand.logoSrc) }}
+              overlay={{ caption: doc.brand.caption, headlineStyle: doc.brand.headline, showSource: doc.brand.showSource && Boolean(doc.source.name), hasLogo: Boolean(doc.brand.logoSrc || props.previewLogo) }}
               hasOverlay={Boolean(doc.brand.overlaySrc)}
               urls={urls}
               usedKeys={usedKeys}

@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { listBrandKits } from "@/lib/media/brand";
+import { listLogoChannels } from "@/lib/media/logo";
+import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { loadProjectStatuses } from "@/lib/project-status";
 import { dailyLimit, usedToday } from "@/lib/quota";
@@ -35,8 +37,9 @@ const STATE_LABEL: Record<string, string> = {
 export default async function AppHome() {
   const ws = await requireWorkspace();
   const writer = canWrite(ws);
-  const [kits, projects, limit, used] = await Promise.all([
+  const [kits, logoChannels, projects, limit, used] = await Promise.all([
     writer ? listBrandKits(ws) : [],
+    writer ? listLogoChannels(ws) : [],
     withOrgContext(ws, (tx) =>
       tx
         .select({
@@ -127,6 +130,25 @@ export default async function AppHome() {
                     ))}
                   </select>
                 </div>
+                {logoChannels.length ? (
+                  <div className="space-y-1">
+                    <Label htmlFor="logoChannelId">Logo kênh</Label>
+                    <select
+                      id="logoChannelId"
+                      name="logoChannelId"
+                      defaultValue={logoChannels.length === 1 ? logoChannels[0].id : ""}
+                      className="h-9 max-w-56 rounded-md border bg-background px-2 text-sm"
+                      title="Bộ nhận diện dùng chung cho mọi kênh; logo thì theo kênh. Sau khi có video, có thể kết xuất lại với logo của kênh khác."
+                    >
+                      <option value="">Logo của bộ nhận diện</option>
+                      {logoChannels.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} · {PLATFORM_SPEC[c.platform as keyof typeof PLATFORM_SPEC]?.label ?? c.platform}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 {kits.length > 1 ? (
                   <div className="space-y-1">
                     <Label htmlFor="brandKitId">Bộ nhận diện</Label>

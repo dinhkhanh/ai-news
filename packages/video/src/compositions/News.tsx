@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { boxShadowCss, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -113,7 +113,7 @@ const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Bra
           fontWeight: 800,
           lineHeight: 1.18,
           maxWidth: "100%",
-          boxShadow: "0 12px 40px rgba(0,0,0,.35)",
+          boxShadow: boxShadowCss(brand.headline?.shadow ?? DEFAULT_HEADLINE_SHADOW),
         }}
       >
         {text}
@@ -213,7 +213,7 @@ const Captions: React.FC<{ captions: Caption[]; brand: Brand }> = ({ captions, b
   const top = at.anchor === "top" ? at.y0 : undefined;
   const bottom = at.anchor === "bottom" ? height - at.y1 : undefined;
   return (
-    <div style={{ position: "absolute", left: at.x0, width: at.x1 - at.x0, top, bottom, display: "flex", justifyContent: "center" }}>
+    <div style={{ position: "absolute", left: at.x0, width: at.x1 - at.x0, top, bottom, display: "flex", justifyContent: at.align === "left" ? "flex-start" : "center" }}>
       <div
         style={{
           fontFamily: family,
@@ -224,8 +224,9 @@ const Captions: React.FC<{ captions: Caption[]; brand: Brand }> = ({ captions, b
           background: brand.colours.captionBg,
           padding: "14px 26px",
           borderRadius: 16,
-          textAlign: "center",
+          textAlign: at.align,
           textShadow: "0 2px 8px rgba(0,0,0,.6)",
+          boxShadow: boxShadowCss(brand.caption.shadow ?? DEFAULT_CAPTION_SHADOW),
         }}
       >
         {brand.caption.highlightWords

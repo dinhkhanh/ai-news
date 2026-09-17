@@ -13,7 +13,20 @@ export const captionBlockHeight = (fontSize: number) => 2 * fontSize * 1.35 + 28
 export const OUTRO_HEIGHT = 160;
 /** The hook's headline is this much bigger than the kit's headline size. */
 export const HOOK_HEADLINE_SCALE = 66 / 54;
-export const DEFAULT_HEADLINE_FONT_SIZE = 54;
+/** Headlines ("tiêu đề") read bigger than captions ("phụ đề", default 64). */
+export const DEFAULT_HEADLINE_FONT_SIZE = 72;
+/** Size of the headline in timelines stored before kits had a headline size (they render as they always did). */
+const LEGACY_HEADLINE_FONT_SIZE = 54;
+/** Limits offered at /app/brand; the headline range sits above the caption range. */
+export const HEADLINE_FONT_RANGE = { min: 48, max: 160 } as const;
+export const CAPTION_FONT_RANGE = { min: 28, max: 96 } as const;
+
+/** Shadow of a text box (CSS `box-shadow`): colour with alpha, blur and offset in px. */
+export type BoxShadow = { colour: string; blur: number; x: number; y: number };
+export const DEFAULT_HEADLINE_SHADOW: BoxShadow = { colour: "#00000059", blur: 40, x: 0, y: 12 };
+/** Captions had no box shadow; fully transparent = none. */
+export const DEFAULT_CAPTION_SHADOW: BoxShadow = { colour: "#00000000", blur: 24, x: 0, y: 8 };
+export const boxShadowCss = (s: BoxShadow) => `${s.x}px ${s.y}px ${s.blur}px ${s.colour}`;
 const TEXT_GAP = 24;
 
 /** Padding of the headline card, proportional to its font size (16/26 px at the default 54). */
@@ -23,7 +36,7 @@ export const HEADLINE_BAR = 14;
 
 /** What the text layout needs of a brand; every field may be missing in timelines stored before it existed. */
 export type TextLayoutInput = {
-  caption: { position: "bottom" | "middle"; fontSize: number; x?: number | null; y?: number | null };
+  caption: { position: "bottom" | "middle"; fontSize: number; align?: "center" | "left"; x?: number | null; y?: number | null };
   headline?: { fontSize?: number; x?: number | null; y?: number | null } | null;
 };
 
@@ -37,7 +50,8 @@ export type TextLayoutInput = {
  * bottom-caption slot when the captions are in the upper half; on the closing
  * scene the outro sits above the captions and the headline above the outro.
  *
- * Manual: `caption.x` = horizontal centre of the caption block, `caption.y` =
+ * Manual: `caption.x` = horizontal centre of the caption block (its left edge
+ * when `caption.align` is `left`), `caption.y` =
  * its bottom edge; `headline.x` = left edge of the card, `headline.y` = its
  * bottom edge (so a longer headline still grows upwards). A manual caption
  * moves the automatic headline with it.
@@ -51,13 +65,18 @@ export function textLayout(brand: TextLayoutInput, kind: "hook" | "body" | "cta"
   // Free slot for headline / outro: right above captions that sit in the lower half, else the bottom-caption slot.
   const slot = captions.y0 > OUTPUT.height / 2 ? captions.y0 - TEXT_GAP : OUTPUT.height - (SAFE_ZONES.bottom + 30);
   const outroY1 = Math.min(slot, OUTPUT.height - (SAFE_ZONES.bottom + 140));
-  const base = brand.headline?.fontSize ?? DEFAULT_HEADLINE_FONT_SIZE;
+  const base = brand.headline?.fontSize ?? LEGACY_HEADLINE_FONT_SIZE;
   return {
     captions: (() => {
+      if (c.align === "left") {
+        // Left-aligned: `x` is the left edge of the block, which may run to the platform's right rail.
+        const x0 = c.x ?? SAFE_ZONES.left;
+        return { ...captions, align: "left" as const, x0, x1: Math.max(x0 + 300, OUTPUT.width - SAFE_ZONES.right) };
+      }
       const centreX = c.x ?? autoCentre;
-      // As wide as the safe zones allow, narrower when the block is pushed towards an edge (always centred on `centreX`).
+      // Centred: `x` is the centre; as wide as the safe zones allow, narrower when pushed towards an edge.
       const half = Math.max(150, Math.min((OUTPUT.width - SAFE_ZONES.left - SAFE_ZONES.right) / 2, centreX - 20, OUTPUT.width - 20 - centreX));
-      return { ...captions, centreX, x0: centreX - half, x1: centreX + half };
+      return { ...captions, align: "center" as const, x0: centreX - half, x1: centreX + half };
     })(),
     outro: { y0: outroY1 - OUTRO_HEIGHT, y1: outroY1 },
     headline: {
@@ -94,6 +113,16 @@ export const LOGO_MOTION_PERIOD_SEC = 6;
 export const OVERLAY_LAYERS = ["under_text", "top"] as const;
 export type OverlayLayer = (typeof OVERLAY_LAYERS)[number];
 
+const shadowSchema = (d: BoxShadow) =>
+  z
+    .object({
+      colour: z.string().default(d.colour),
+      blur: z.number().int().min(0).max(200).default(d.blur),
+      x: z.number().int().min(-200).max(200).default(d.x),
+      y: z.number().int().min(-200).max(200).default(d.y),
+    })
+    .prefault({});
+
 /**
  * Brand kit as embedded in a timeline so a render is reproducible even if the
  * workspace kit changes later. Colours are CSS colours.
@@ -115,7 +144,10 @@ export const brandSchema = z.object({
   }),
   caption: z.object({
     position: z.enum(["bottom", "middle"]).default("bottom"),
-    fontSize: z.number().int().min(36).max(96).default(64),
+    fontSize: z.number().int().min(CAPTION_FONT_RANGE.min).max(CAPTION_FONT_RANGE.max).default(64),
+    /** `center`: `x` is the centre of the block; `left`: `x` is its left edge and the lines start there. */
+    align: z.enum(["center", "left"]).default("center"),
+    shadow: shadowSchema(DEFAULT_CAPTION_SHADOW),
     uppercase: z.boolean().default(false),
     highlightWords: z.boolean().default(true),
     /** Manual position in frame px (see `textLayout`): centre of the block / its bottom edge; null = automatic. */
@@ -125,7 +157,9 @@ export const brandSchema = z.object({
   /** Headline card: size of body headlines (the hook is `HOOK_HEADLINE_SCALE` bigger); `x` = left edge, `y` = bottom edge, null = automatic. */
   headline: z
     .object({
-      fontSize: z.number().int().min(28).max(120).default(DEFAULT_HEADLINE_FONT_SIZE),
+      // Parses down to 28 so a kit saved under the first limits still loads; the form offers HEADLINE_FONT_RANGE.
+      fontSize: z.number().int().min(28).max(HEADLINE_FONT_RANGE.max).default(DEFAULT_HEADLINE_FONT_SIZE),
+      shadow: shadowSchema(DEFAULT_HEADLINE_SHADOW),
       x: z.number().int().min(0).max(OUTPUT.width).nullable().default(null),
       y: z.number().int().min(0).max(OUTPUT.height).nullable().default(null),
     })
