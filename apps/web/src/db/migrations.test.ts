@@ -85,6 +85,17 @@ describe("migrations", () => {
     expect(after[0].n).toBe(6);
   });
 
+  it("give every seeded script template the newsTerms rule next to brollTerms (migration 0019)", async () => {
+    const { rows } = await pg.query<{ language: string; version: number; body: string }>("select language, version, body from prompt_templates where purpose = 'script' order by language, version");
+    expect(rows).toHaveLength(4);
+    for (const r of rows) {
+      const i = r.body.indexOf(". brollTerms");
+      expect(i, `${r.language}@${r.version}`).toBeGreaterThan(0);
+      expect(r.body.indexOf("newsTerms"), `${r.language}@${r.version}`).toBeGreaterThan(i);
+      expect(r.body.indexOf("newsTerms")).toBeLessThan(r.body.indexOf("\n9."));
+    }
+  });
+
   it("add the phase 2 columns", async () => {
     const { rows } = await pg.query<{ table_name: string; column_name: string }>(
       "select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='projects' and column_name in ('busy_step','duration_sec','tone')) or (table_name='articles' and column_name in ('confirmed_at','confirmed_by','word_count','updated_at')))",

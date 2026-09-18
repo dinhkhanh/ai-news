@@ -225,6 +225,8 @@ export const projects = pgTable(
     state: projectStateEnum("state").notNull().default("created"),
     aiDisclosure: boolean("ai_disclosure").notNull().default(false),
     sensitiveTopic: boolean("sensitive_topic").notNull().default(false),
+    /** Political story (classified at fetch): the build and the editor never use stock footage or AI stills for it. */
+    political: boolean("political").notNull().default(false),
     inngestRunId: text("inngest_run_id"),
     /** Pipeline step currently running for this project (fetch | script | ...), null when idle. */
     busyStep: text("busy_step"),

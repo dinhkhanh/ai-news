@@ -248,7 +248,7 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
                   </select>
                 </div>
                 <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="showSource" defaultChecked={brand.showSource} /> hiện dòng “Nguồn: …”
+                  <input type="checkbox" name="showSource" defaultChecked={brand.showSource} /> hiện nguồn ảnh / video trên từng cảnh (nguồn bài báo luôn hiện ở cuối)
                 </label>
               </div>
             </div>

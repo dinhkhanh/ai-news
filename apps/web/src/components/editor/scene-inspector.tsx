@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { analyseVisual, createUploadUrl, importVisualFromUrl, registerUpload } from "@/app/app/projects/[id]/edit/actions";
+import { analyseVisual, createUploadUrl, importVisualFromUrl, importWebVideo, registerUpload } from "@/app/app/projects/[id]/edit/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import type { TextLayoutInput } from "@ai-news/video/schema";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 import { FRAMING_ISSUE_LABEL, frameStill, overlayZones, type FrameFaces } from "@/lib/media/framing";
+import { DEFAULT_MANUAL_SECTION_SEC, MAX_MANUAL_SECTION_SEC, parseTimecode, webVideoPageUrl, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
 import type { VisualOption } from "./types";
 
@@ -32,6 +33,8 @@ type Props = {
   /** Regeneration needs a saved document and an idle project. */
   canRegenerate: boolean;
   regenerateHint: string | null;
+  /** Political story: a B-roll re-search only looks for real pictures of what the scene names (no stock, no AI). */
+  political: boolean;
   onChange: (scene: EditorScene) => void;
   onRemove: () => void;
   onRegenerate: (what: "voice" | "broll", payload: { voiceover?: string; brollTerms?: string[] }) => void;
@@ -40,6 +43,8 @@ type Props = {
   onOptionAdded: (option: VisualOption, url: string) => void;
   /** Faces of a picture were just detected on request; the parent keeps them on the option. */
   onOptionFramed: (assetId: string, frame: FrameFaces) => void;
+  /** A pasted YouTube page the server could not fetch: hand it to the in-browser recorder, aimed at the shot being filled. */
+  onCaptureNeeded: (capture: PendingCapture) => void;
 };
 
 const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm";
@@ -99,12 +104,19 @@ function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; ur
 }
 
 /** Everything editable on one scene: headline, shots (swap/upload/link/trim/hold), captions, voice and B-roll regeneration, faithfulness. */
-export function SceneInspector({ projectId, scene, index, total, options, overlay, hasOverlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, onChange, onRemove, onRegenerate, onSeek, onOptionAdded, onOptionFramed }: Props) {
+export function SceneInspector({ projectId, scene, index, total, options, overlay, hasOverlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, political, onChange, onRemove, onRegenerate, onSeek, onOptionAdded, onOptionFramed, onCaptureNeeded }: Props) {
   const [voiceText, setVoiceText] = useState(scene.voiceover);
   const [terms, setTerms] = useState(scene.brollTerms.join(", "));
   const [showAll, setShowAll] = useState(false);
   const [shotIdx, setShotIdx] = useState(0);
   const [linkUrl, setLinkUrl] = useState("");
+  // Section of a pasted video page ("0:20" → "0:40"); blank = the first DEFAULT_MANUAL_SECTION_SEC seconds.
+  const [linkFrom, setLinkFrom] = useState("");
+  const [linkTo, setLinkTo] = useState("");
+  const linkIsPage = Boolean(webVideoPageUrl(linkUrl));
+  const linkFromSec = parseTimecode(linkFrom);
+  const linkToSec = parseTimecode(linkTo);
+  const linkTimesOk = (!linkFrom.trim() || linkFromSec != null) && (!linkTo.trim() || linkToSec != null) && (linkFromSec == null || linkToSec == null || linkToSec > linkFromSec);
   const [busy, setBusy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -212,7 +224,28 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
 
   const importUrl = async () => {
     const url = linkUrl.trim();
-    if (!url) return;
+    if (!url || !linkTimesOk) return;
+    // A video page (YouTube, TikTok, Facebook…) is resolved and cut on the server; anything else must be a direct file link.
+    if (linkIsPage) {
+      setBusy("Đang đọc trang video và tải đoạn đã chọn…");
+      try {
+        const res = await importWebVideo({ projectId, url, startSec: linkFromSec, endSec: linkToSec, sceneId: scene.id, shot: active });
+        if (!res.ok && "capture" in res) {
+          onCaptureNeeded(res.capture);
+          toast.warning(res.message, { duration: 10_000 });
+          return;
+        }
+        await applyAdded(res);
+        if (res.ok) {
+          setLinkUrl("");
+          setLinkFrom("");
+          setLinkTo("");
+        }
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
     setBusy("Đang lấy tệp từ đường dẫn…");
     try {
       const res = await importVisualFromUrl({ projectId, url });
@@ -341,11 +374,20 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
               <span className="text-[11px] text-muted-foreground">JPG, PNG, WebP, MP4, MOV, WebM · tối đa 200 MB · thay cho cảnh quay {active + 1}</span>
             </div>
             <div className="flex items-center gap-2">
-              <Input value={linkUrl} disabled={Boolean(busy)} placeholder="https://…/anh.jpg hoặc …/clip.mp4 (link trực tiếp tới tệp)" onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className="h-8 text-sm" />
-              <Button type="button" size="sm" variant="outline" disabled={Boolean(busy) || !/^https?:\/\//i.test(linkUrl.trim())} onClick={() => void importUrl()}>
+              <Input value={linkUrl} disabled={Boolean(busy)} placeholder="Link YouTube / TikTok / Facebook reels… hoặc link trực tiếp tới tệp ảnh, video" onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className="h-8 text-sm" />
+              <Button type="button" size="sm" variant="outline" disabled={Boolean(busy) || !/^https?:\/\//i.test(linkUrl.trim()) || !linkTimesOk} onClick={() => void importUrl()}>
                 Lấy
               </Button>
             </div>
+            {linkIsPage ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Cắt đoạn từ</span>
+                <Input value={linkFrom} disabled={Boolean(busy)} placeholder="0:00" onChange={(e) => setLinkFrom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className={cn("h-7 w-20 text-sm", linkFrom.trim() && linkFromSec == null && "border-destructive")} aria-label="Bắt đầu (phút:giây)" />
+                <span className="text-muted-foreground">đến</span>
+                <Input value={linkTo} disabled={Boolean(busy)} placeholder={`+${DEFAULT_MANUAL_SECTION_SEC}s`} onChange={(e) => setLinkTo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className={cn("h-7 w-20 text-sm", ((linkTo.trim() && linkToSec == null) || !linkTimesOk) && "border-destructive")} aria-label="Kết thúc (phút:giây)" />
+                <span className="text-muted-foreground">phút:giây · tối đa {MAX_MANUAL_SECTION_SEC} s · chỉ tải đúng đoạn này, ghi nguồn kênh</span>
+              </div>
+            ) : null}
             {busy ? <p className="text-[11px] text-muted-foreground">{busy}</p> : null}
           </div>
         ) : null}
@@ -434,11 +476,22 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
         </div>
         {scene.kind !== "cta" ? (
           <div className="space-y-1">
+            {/* What the voice-over names is searched first (other outlets' pictures, face-guarded); the English terms feed stock / AI after. */}
+            {scene.newsTerms?.length ? (
+              <p className="text-[11px] text-muted-foreground">
+                Theo lời bình: {scene.newsTerms.map((t) => (
+                  <span key={t} className="mr-1 rounded bg-primary/10 px-1.5 py-0.5 text-foreground">
+                    {t}
+                  </span>
+                ))}
+              </p>
+            ) : null}
             <Label htmlFor="terms">Từ khoá B-roll (tiếng Anh, phân cách bằng dấu phẩy)</Label>
-            <Input id="terms" value={terms} disabled={!canRegenerate} onChange={(e) => setTerms(e.target.value)} placeholder="city traffic aerial, metro construction" />
-            <Button type="button" size="sm" variant="outline" disabled={!canRegenerate || !terms.trim()} onClick={() => onRegenerate("broll", { brollTerms: terms.split(",").map((t) => t.trim()).filter(Boolean) })}>
-              Tìm B-roll mới
+            <Input id="terms" value={terms} disabled={!canRegenerate || political} onChange={(e) => setTerms(e.target.value)} placeholder="city traffic aerial, metro construction" />
+            <Button type="button" size="sm" variant="outline" disabled={!canRegenerate || (political ? !scene.newsTerms?.length : !terms.trim())} onClick={() => onRegenerate("broll", { brollTerms: terms.split(",").map((t) => t.trim()).filter(Boolean) })}>
+              {political ? "Tìm ảnh thật từ báo khác" : "Tìm hình mới"}
             </Button>
+            {political ? <p className="text-[11px] text-amber-700 dark:text-amber-400">Tin chính trị: không dùng stock hay ảnh AI, chỉ ảnh thật của người / nơi / sự kiện trong lời bình.</p> : null}
           </div>
         ) : null}
       </div>

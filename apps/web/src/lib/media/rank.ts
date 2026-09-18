@@ -64,7 +64,7 @@ const AssignSchema = z.object({
 });
 
 const ASSIGN_SYSTEM = `You place pictures into the scenes of a vertical short news video. You see every scene (voice-over + on-screen text, and how many pictures it needs) and numbered candidates: images from the source article, images from other outlets' coverage of the same story, and web videos about the story (shown by their thumbnail, with title, channel and length; a video listed for a scene fills as many consecutive shots of that scene as its hint says).
-For each scene list the candidate numbers that best illustrate it, best first, up to the number it needs. Prefer candidates whose subject matches the scene's facts (place, people, object, event). When two candidates fit equally, prefer the one from the source article; other outlets' images and web videos rank equally after it (each candidate says where it comes from). Only pick a web video whose title is clearly about this same story, not a similar or older event. Never list the same candidate for two scenes. Skip candidates with burnt-in text, logos, watermarks, or that would mislead about the story. A scene may get fewer picks than it needs, or none, if nothing fits.`;
+For each scene list the candidate numbers that best illustrate it, best first, up to the number it needs. What you hear is what you see: prefer candidates whose subject is what the scene's voice-over names (the person, organisation, place, object, event). A candidate marked "found for <scene> (<query>)" was searched for by that scene's own voice-over; give it to that scene when the thumbnail shows that subject, and to another scene only when it clearly fits there better. When two candidates fit equally, prefer the one from the source article; other outlets' images and web videos rank equally after it (each candidate says where it comes from). Only pick a web video whose title is clearly about this same story or the subject the scene names, not a similar or older event. Never list the same candidate for two scenes. Skip candidates with burnt-in text, logos, watermarks, or that would mislead about the story. A scene may get fewer picks than it needs, or none, if nothing fits.`;
 
 export type ImageCandidate = { key: string; thumbnailUrl: string; hint?: string | null };
 
@@ -87,7 +87,7 @@ export async function assignImages(
     { type: "text", text: `Scenes:\n${scenes.map((s) => `- ${s.id} (needs ${s.want}): VO "${s.voiceover}" / on-screen "${s.onScreenText}"`).join("\n")}\n\nCandidates:` },
   ];
   candidates.forEach((c, i) => {
-    content.push({ type: "text", text: `Candidate ${i + 1}${c.hint ? ` (${c.hint.slice(0, 120)})` : ""}` });
+    content.push({ type: "text", text: `Candidate ${i + 1}${c.hint ? ` (${c.hint.slice(0, 220)})` : ""}` });
     content.push({ type: "image", source: { type: "url", url: c.thumbnailUrl } });
   });
   const res = await client.messages.parse({

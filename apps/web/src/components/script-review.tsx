@@ -92,10 +92,16 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
                 <p className="mt-1 text-xs">
                   <span className="text-muted-foreground">On screen:</span> <span className="font-medium">{s.onScreenText}</span>
                 </p>
-                {s.brollTerms.length ? (
+                {s.brollTerms.length || s.newsTerms?.length ? (
                   <div className="mt-1 flex flex-wrap gap-1">
+                    {/* What the voice-over names (other outlets' pictures, web video) reads first; English stock phrases after. */}
+                    {(s.newsTerms ?? []).map((t) => (
+                      <span key={`n-${t}`} className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-foreground" title="Tìm ảnh / video thật theo lời bình">
+                        {t}
+                      </span>
+                    ))}
                     {s.brollTerms.map((t) => (
-                      <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                      <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title="Từ khoá stock (tiếng Anh)">
                         {t}
                       </span>
                     ))}

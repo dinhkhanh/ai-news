@@ -98,11 +98,11 @@ export function sceneTimings(input: Pick<BuildInput, "scenes" | "gapMs" | "tailM
 
 export function buildTimeline(input: BuildInput): { timeline: Timeline; durationSec: number; timings: SceneTiming[] } {
   const { timings, durationSec } = sceneTimings(input);
+  // Media credits are drawn on their own shots (`shots[].credit`); the outro lists the article and the music.
   const credits = new Set<string>();
   const scenes = input.scenes.map((s, i) => {
     const t = timings[i];
     const shots = layoutShots([s.visual, ...(s.shots ?? [])], t.durationFrames);
-    for (const sh of shots) if (sh.credit) credits.add(sh.credit);
     return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual: shots[0].visual, shots, credit: shots[0].credit, voiceSrc: s.voice?.key ?? null, overlay: s.overlay ?? true };
   });
   const captions = input.scenes.flatMap((s, i) => {

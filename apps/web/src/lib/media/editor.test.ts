@@ -34,7 +34,9 @@ describe("buildFromDoc", () => {
     expect(timeline.scenes[0].voiceSrc).toBe("media/o/p/vo/b1-s1.wav");
     expect(timeline.audio.mixSrc).toBe("media/o/p/mix/b1.wav");
     expect(timeline.captions.length).toBeGreaterThan(2);
-    expect(timeline.attribution).toEqual(["Video: Pexels", "Ảnh: VnExpress", "Nhạc: Mubert"]);
+    // Media credits stay on their shots; the outro only lists the music (the article source comes from `timeline.source`).
+    expect(timeline.scenes.map((s) => s.shots[0].credit)).toEqual(["Video: Pexels", "Ảnh: VnExpress", null]);
+    expect(timeline.attribution).toEqual(["Nhạc: Mubert"]);
   });
   it("keeps trim and hold and shifts later scenes", () => {
     const edited: EditorDoc = { ...doc, scenes: doc.scenes.map((s, i) => (i === 0 ? { ...s, holdMs: 1000, visual: { ...s.visual, trimStartSec: 2 } as EditorDoc["scenes"][0]["visual"] } : s)) };

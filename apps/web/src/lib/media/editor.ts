@@ -46,7 +46,10 @@ export const editorSceneSchema = z.object({
   onScreenText: z.string().max(120),
   /** Spoken text (source for a voice regeneration); words[] carries the timings actually synthesised. */
   voiceover: z.string().max(2000),
+  /** English stock-footage phrases (Pexels / Pixabay, AI stills). */
   brollTerms: z.array(z.string().max(80)).max(6).default([]),
+  /** News search queries naming what the voice-over mentions (people, organisations, places…): other outlets' images and web video for this scene. */
+  newsTerms: z.array(z.string().max(80)).max(3).default([]),
   durationSec: z.number().positive(),
   voice: z.object({ key: z.string().min(1), durationMs: z.number().positive(), words: z.array(timedWordSchema) }).nullable(),
   /** First shot of the scene. */
@@ -267,6 +270,7 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
       onScreenText: sc.headline,
       voiceover: v?.spokenText ?? (voice?.words ?? []).map((w) => w.w).join(" "),
       brollTerms: [],
+      newsTerms: [],
       durationSec: Math.round((durationMs / 1000) * 10) / 10,
       voice,
       visual,

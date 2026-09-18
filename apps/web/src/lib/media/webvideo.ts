@@ -54,8 +54,45 @@ export async function findWebVideos(input: { query: string; language: "vi" | "en
   return { candidates, searched: all.length, errors };
 }
 
+/** A found video that still knows which search turned it up and the scenes that search was run for ([] = the story). */
+export type FoundWebVideo = WebVideoCandidate & { query: string; sceneIds: string[] };
+
+/** Most candidates one search contributes to the placement model; the story search may bring more than a scene's. */
+const PER_SCENE_QUERY = 4;
+const PER_STORY_QUERY = 8;
+const MAX_CANDIDATES = 16;
+
+/**
+ * All tier-2 video searches of a build at once (`tier2Queries` in
+ * visual-plan.ts): one `findWebVideos` per query in parallel, merged
+ * round-robin and deduped by URL, a video found twice credited to both scenes.
+ */
+export async function findWebVideosFor(queries: Array<{ query: string; sceneIds: string[] }>, opts: { language: "vi" | "en" }): Promise<{ candidates: FoundWebVideo[]; searched: number; errors: string[] }> {
+  const results = await Promise.all(
+    queries.map(async (q) => {
+      const limit = q.sceneIds.length ? PER_SCENE_QUERY : PER_STORY_QUERY;
+      const r = await findWebVideos({ query: q.query, language: opts.language, limit });
+      return { ...r, candidates: r.candidates.slice(0, limit).map((c): FoundWebVideo => ({ ...c, query: q.query, sceneIds: q.sceneIds })) };
+    }),
+  );
+  const byUrl = new Map<string, FoundWebVideo>();
+  for (let i = 0; results.some((r) => r.candidates[i]); i++) {
+    for (const r of results) {
+      const c = r.candidates[i];
+      if (!c) continue;
+      const cur = byUrl.get(c.url);
+      if (cur) cur.sceneIds = [...new Set([...cur.sceneIds, ...c.sceneIds])];
+      else byUrl.set(c.url, { ...c });
+    }
+  }
+  return { candidates: [...byUrl.values()].slice(0, MAX_CANDIDATES), searched: results.reduce((a, r) => a + r.searched, 0), errors: results.flatMap((r) => r.errors) };
+}
+
 /** Short hint for the placement model: what the thumbnail is, from where, how long. */
 export const webVideoHint = (c: WebVideoCandidate, segments: number) => `web video, ${segments} shot${segments > 1 ? "s" : ""}: "${c.title.slice(0, 70)}" – ${c.uploader ?? c.site}, ${Math.round(c.durationSec ?? 0)} s`;
+
+/** Suffix of a candidate's hint naming the scenes whose voice-over it was searched for ("what you hear is what you see"). */
+export const foundForHint = (c: { query: string; sceneIds: string[] }) => (c.sceneIds.length ? `, found for ${c.sceneIds.join(" + ")} ("${c.query.slice(0, 50)}")` : "");
 
 /**
  * Download the `[startSec, endSec)` section of one candidate through the media

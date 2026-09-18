@@ -134,6 +134,13 @@
       "when": 1789637131578,
       "tag": "0018_face_guard_default_on",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789696170814,
+      "tag": "0019_political_news_terms",
+      "breakpoints": true
     }
   ]
 }

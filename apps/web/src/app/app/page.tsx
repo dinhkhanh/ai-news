@@ -50,6 +50,7 @@ export default async function AppHome() {
           busyStep: schema.projects.busyStep,
           language: schema.projects.language,
           sensitiveTopic: schema.projects.sensitiveTopic,
+          political: schema.projects.political,
           autoPipeline: schema.projects.autoPipeline,
           createdAt: schema.projects.createdAt,
           ownerName: schema.user.name,
@@ -235,6 +236,11 @@ export default async function AppHome() {
                 {p.sensitiveTopic ? (
                   <Badge variant="outline" className="ml-1">
                     nhạy cảm
+                  </Badge>
+                ) : null}
+                {p.political ? (
+                  <Badge variant="outline" className="ml-1" title="Không dùng stock hay ảnh AI">
+                    chính trị
                   </Badge>
                 ) : null}
               </TableCell>

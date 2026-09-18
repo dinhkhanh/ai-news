@@ -12,9 +12,9 @@ const PHOTO = `data:image/svg+xml;utf8,${encodeURIComponent(
 )}`;
 
 const SCENES = [
-  { id: "s1", kind: "hook" as const, sec: 3, headline: "Metro số 1 kéo dài thêm 12 km" },
-  { id: "s2", kind: "body" as const, sec: 3.5, headline: "Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa" },
-  { id: "s3", kind: "cta" as const, sec: 2.5, headline: "" },
+  { id: "s1", kind: "hook" as const, sec: 3, headline: "Metro số 1 kéo dài thêm 12 km", credit: "Ảnh: VnExpress" },
+  { id: "s2", kind: "body" as const, sec: 3.5, headline: "Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa", credit: "Video: Quang Nguyen / Pexels" },
+  { id: "s3", kind: "cta" as const, sec: 2.5, headline: "", credit: null },
 ];
 const CAPTIONS = ["Sáng nay, Thành phố Hồ Chí Minh", "công bố kế hoạch mở rộng", "tuyến metro đầu tiên.", "Gói hỗ trợ có hiệu lực", "từ tháng sau trên cả nước.", "Theo dõi để cập nhật."];
 
@@ -22,7 +22,7 @@ function sampleTimeline(brand: Brand, photo: boolean): Timeline {
   let from = 0;
   const scenes = SCENES.map((s) => {
     const durationFrames = Math.round(s.sec * FPS);
-    const scene = { id: s.id, kind: s.kind, from, durationFrames, headline: s.headline, visual: photo && s.kind !== "cta" ? { kind: "image" as const, src: PHOTO, kenBurns: false } : { kind: "solid" as const } };
+    const scene = { id: s.id, kind: s.kind, from, durationFrames, headline: s.headline, credit: s.credit, visual: photo && s.kind !== "cta" ? { kind: "image" as const, src: PHOTO, kenBurns: false } : { kind: "solid" as const } };
     from += durationFrames;
     return scene;
   });
@@ -33,7 +33,7 @@ function sampleTimeline(brand: Brand, photo: boolean): Timeline {
     const span = per - 250;
     return { text, startMs, endMs: Math.round(startMs + span), words: words.map((w, j) => ({ w, s: Math.round(startMs + (j * span) / words.length), e: Math.round(startMs + ((j + 1) * span) / words.length) })) };
   });
-  return timelineSchema.parse({ version: 1, fps: 30, width: 1080, height: 1920, durationFrames: from, language: "vi", title: "Xem trước", source: { name: "VnExpress", url: "https://vnexpress.net" }, brand, scenes, captions, audio: { mixSrc: null, voiceSrc: null, musicSrc: null }, attribution: ["Video: Pexels", "Nhạc: Mubert"] });
+  return timelineSchema.parse({ version: 1, fps: 30, width: 1080, height: 1920, durationFrames: from, language: "vi", title: "Xem trước", source: { name: "VnExpress", url: "https://vnexpress.net/metro-so-1-keo-dai-them-12-km-4712345.html" }, brand, scenes, captions, audio: { mixSrc: null, voiceSrc: null, musicSrc: null }, attribution: ["Nhạc: Mubert"] });
 }
 
 /** The kit as the form currently reads; null while a field holds something the schema rejects (the last good kit stays on screen). */

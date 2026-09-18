@@ -11,6 +11,11 @@ export const SceneSchema = z.object({
   voiceover: z.string().describe("Voice-over text, written to be read aloud by TTS"),
   onScreenText: z.string().describe("Short caption shown on screen, max 8 words"),
   brollTerms: z.array(z.string()).describe("2-4 English stock-footage search phrases"),
+  newsTerms: z
+    .array(z.string())
+    .describe(
+      "1-3 news search queries in the article's language naming exactly what this scene's voice-over mentions – the person, organisation, company, place, product or event – so pictures of them can be found (what you hear is what you see); [] when the voice-over names nothing specific",
+    ),
   durationSec: z.number().describe("Estimated seconds for this scene"),
   supportingSentence: z.string().nullable().describe("Verbatim sentence from the article that supports this scene, null for hook/CTA without facts"),
 });
@@ -56,6 +61,8 @@ export const ClassificationSchema = z.object({
   isNewsArticle: z.boolean(),
   sensitiveTopic: z.boolean(),
   sensitiveCategories: z.array(z.enum(["elections", "health", "legal", "minors", "violence", "none"])),
+  /** Politics in the wide sense (government, parties, officials, elections, policy, diplomacy, security): such videos use no stock or AI pictures. */
+  political: z.boolean(),
   reason: z.string(),
 });
 export type Classification = z.infer<typeof ClassificationSchema>;
@@ -102,6 +109,7 @@ export function normaliseScript(s: Script): Script {
     voiceover: sc.voiceover.trim(),
     onScreenText: sc.onScreenText.trim(),
     brollTerms: sc.brollTerms.map((t) => t.trim()).filter(Boolean).slice(0, 6),
+    newsTerms: (sc.newsTerms ?? []).map((t) => t.trim()).filter(Boolean).slice(0, 3),
     durationSec: Math.max(1, Math.round(sc.durationSec * 10) / 10),
     supportingSentence: sc.supportingSentence?.trim() || null,
   }));

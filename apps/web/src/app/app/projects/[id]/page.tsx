@@ -340,6 +340,7 @@ export default async function ProjectPage({
             {project.autoPipeline ? <Badge variant="default">tự động</Badge> : null}
             <Badge variant="outline">{project.language === "vi" ? "Tiếng Việt" : "English"}</Badge>
             {project.sensitiveTopic ? <Badge variant="destructive">chủ đề nhạy cảm → cần publisher duyệt</Badge> : null}
+            {project.political ? <Badge variant="secondary" title="Chỉ ảnh / video thật của tin; không dùng stock hay ảnh AI">chính trị: không stock / AI</Badge> : null}
             <a href={project.url} target="_blank" rel="noreferrer" className="text-muted-foreground underline">
               mở bài gốc
             </a>

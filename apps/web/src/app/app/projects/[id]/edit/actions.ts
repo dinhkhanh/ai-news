@@ -12,7 +12,9 @@ import { invokeMediaLambda } from "@/lib/media-lambda";
 import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
 import { storedFrame, type FrameFaces } from "@/lib/media/framing";
 import { downloadToR2 } from "@/lib/media/stock";
-import { youtubeId } from "@/lib/media/visual-plan";
+import { formatTimecode, manualSection, SHOT_SEC, webVideoPageUrl, youtubeId, type PendingCapture } from "@/lib/media/visual-plan";
+import { storeWebVideo, webVideoEnabled } from "@/lib/media/webvideo";
+import type { ChosenAsset } from "@/lib/media/broll";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { deleteObject, headObject, presignGet, presignPut, r2Key } from "@/lib/r2";
 import { queueRender } from "@/lib/render-request";
@@ -199,6 +201,56 @@ export async function importVisualFromUrl(input: { projectId: string; url: strin
     await log("asset.imported_url", { assetId: row.id, key, kind, sizeBytes: dl.sizeBytes, url: url.slice(0, 300) }, input.projectId);
     const option: VisualOption = { assetId: row.id, key, kind, durationSec: null, credit: null, thumbnailUrl: kind === "image" ? url : null, provider: "url", sceneId: null, searchTerm: null, rankScore: null, frame: kind === "image" ? await guardFrame({ assetId: row.id, key }, { ...ws, projectId: input.projectId }) : null };
     return { ok: true, option, url: await presignGet(key, 3600), message: kind === "video" ? "Đã lấy clip từ đường dẫn" : "Đã lấy ảnh từ đường dẫn" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+
+export type WebVideoAdded = VisualAdded | { ok: false; message: string; capture: PendingCapture };
+
+/**
+ * Fetch one section of a video page (YouTube, TikTok, Facebook reels / watch,
+ * Vimeo, Dailymotion) pasted in the inspector: yt-dlp resolves the page
+ * (metadata only), then only `[startSec, endSec)` is downloaded through the
+ * web-video route (self-hosted API, else the media Lambda) and stored as a
+ * `web_video` asset with the uploader's credit. A YouTube page the server
+ * cannot fetch (datacenter IPs are bot-checked) comes back as a `capture` for
+ * the in-browser recorder, aimed at the shot the user was filling.
+ */
+export async function importWebVideo(input: { projectId: string; url: string; startSec: number | null; endSec: number | null; sceneId: string; shot: number }): Promise<WebVideoAdded> {
+  try {
+    const { ws, log } = await assertWorkspaceWriter();
+    const url = webVideoPageUrl(input.url);
+    if (!url) throw new Error("Dán link trang video (YouTube, TikTok, Facebook reels/watch, Vimeo, Dailymotion) hoặc link trực tiếp tới tệp");
+    if (!(await webVideoEnabled())) throw new Error("Tải video web đang tắt (cờ web_video_downloader tại /admin/integrations)");
+    const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, input.projectId), columns: { id: true } }));
+    if (!project) throw new Error("Project not found in this workspace");
+    const first = manualSection({ startSec: input.startSec, endSec: input.endSec, durationSec: null });
+    if (!first.ok) throw new Error(first.error);
+    const meta = await invokeMediaLambda({ action: "web-video-search", input: { urls: [url], limit: 1 } });
+    const c = meta.ok ? meta.videos?.[0] : undefined;
+    if (!c) throw new Error(`Không đọc được trang video${meta.error ? `: ${meta.error}` : meta.warnings?.[0] ? `: ${meta.warnings[0]}` : ""}`);
+    const section = manualSection({ startSec: input.startSec, endSec: input.endSec, durationSec: c.durationSec });
+    if (!section.ok) throw new Error(section.error);
+    const ctx = { ...ws, projectId: input.projectId };
+    let asset: ChosenAsset;
+    try {
+      asset = await storeWebVideo(c, { buildId: `manual-${nanoid(6)}`, startSec: section.startSec, endSec: section.endSec, index: 0 }, ctx);
+    } catch (e) {
+      const videoId = youtubeId(url);
+      const message = e instanceof Error ? e.message : "download failed";
+      if (!videoId) throw new Error(`Không tải được đoạn video: ${message.slice(0, 200)}`);
+      await log("asset.web_video_blocked", { url: url.slice(0, 300), startSec: section.startSec, endSec: section.endSec, error: message.slice(0, 300) }, input.projectId);
+      const segments = Math.max(1, Math.ceil((section.endSec - section.startSec) / SHOT_SEC));
+      return {
+        ok: false,
+        message: `YouTube chặn máy chủ (${message.slice(0, 120)}). Ghi đoạn ${formatTimecode(section.startSec)}–${formatTimecode(section.startSec + segments * SHOT_SEC)} ngay trong trình duyệt ở bảng “Ghi từ trình duyệt”.`,
+        capture: { videoId, url, title: c.title, uploader: c.uploader, thumbnailUrl: c.thumbnailUrl, startSec: section.startSec, segments, scenes: [{ sceneId: input.sceneId, segments }], error: message.slice(0, 200), manual: { sceneId: input.sceneId, shot: input.shot } },
+      };
+    }
+    await log("asset.imported_web_video", { assetId: asset.assetId, key: asset.key, url: url.slice(0, 300), site: c.site, startSec: section.startSec, endSec: section.endSec }, input.projectId);
+    const option: VisualOption = { assetId: asset.assetId, key: asset.key, kind: "video", durationSec: asset.durationSec, credit: asset.credit, thumbnailUrl: asset.thumbnailUrl, provider: asset.provider, sceneId: null, searchTerm: null, rankScore: null, frame: null };
+    return { ok: true, option, url: await presignGet(asset.key, 3600), message: `Đã lấy ${formatTimecode(section.startSec)}–${formatTimecode(section.endSec)} từ ${c.site}` };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
   }

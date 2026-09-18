@@ -17,13 +17,13 @@ import { frameStill, overlayZones, type FrameFaces, type Framing } from "@/lib/m
 import { aiImagesAvailable, generateSceneImages } from "@/lib/media/generate";
 import { pickMusic } from "@/lib/media/music";
 import { assignImages } from "@/lib/media/rank";
-import { findRelatedImages, storeRelatedImages } from "@/lib/media/related";
+import { findRelatedImagesFor, storeRelatedImages, type RelatedAsset } from "@/lib/media/related";
 import { mixDocAudio } from "@/lib/media/remix";
 import { downloadToR2, stockProvidersAvailable } from "@/lib/media/stock";
 import { sceneTimings, shotsNeeded } from "@/lib/media/timeline";
 import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice } from "@/lib/media/tts";
-import { allocateChecked, orderByTier, SHOT_SEC, shortfall, splitBudget, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type VisualTier } from "@/lib/media/visual-plan";
-import { findWebVideos, storeWebVideo, webVideoEnabled, webVideoHint, type WebVideoCandidate } from "@/lib/media/webvideo";
+import { allocateChecked, orderByTier, SHOT_SEC, shortfall, splitBudget, tier2Queries, tierAllowed, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type SceneQuery, type VisualTier } from "@/lib/media/visual-plan";
+import { findWebVideosFor, foundForHint, storeWebVideo, webVideoEnabled, webVideoHint, type FoundWebVideo } from "@/lib/media/webvideo";
 import { deleteObject, r2Key } from "@/lib/r2";
 
 const ext = (url: string, fallback: string) => {
@@ -97,11 +97,14 @@ export const prepareAssetsFn = inngest.createFunction(
         brandKitId: row.project.brandKitId,
         /** Only whether a channel logo will be drawn matters here (face guard); the render puts the file in. */
         hasChannelLogo: Boolean(row.project.logoChannelId),
+        /** Political story (fetch classification): only real pictures of the story, never stock footage or AI stills. */
+        political: row.project.political,
         title: row.project.title ?? s.title,
         articleTitle: row.article?.title ?? row.project.title ?? s.title,
         source: { name: row.article?.siteName ?? null, url: row.project.canonicalUrl ?? row.project.url },
         images: (row.article?.images ?? []).filter((im) => !/\.(gif|svg)(?:$|\?)/i.test(im.url) && (im.width ?? 1000) >= 600).slice(0, 12),
-        scenes: s.scenes.map((sc) => ({ id: sc.id, kind: sc.kind, voiceover: sc.voiceover, onScreenText: sc.onScreenText, brollTerms: sc.brollTerms, durationSec: sc.durationSec })),
+        // Scripts written before `newsTerms` existed have none: their tier-2 search is the story title alone.
+        scenes: s.scenes.map((sc) => ({ id: sc.id, kind: sc.kind, voiceover: sc.voiceover, onScreenText: sc.onScreenText, brollTerms: sc.brollTerms, newsTerms: sc.newsTerms ?? [], durationSec: sc.durationSec })),
       };
     });
     const media = (name: string) => r2Key.media(organizationId, projectId, name);
@@ -161,33 +164,39 @@ export const prepareAssetsFn = inngest.createFunction(
       return out;
     });
 
-    /* ---- tier 2 (one rank): other outlets' images of the same story ∥ same-story footage from video sites, only for the shots the article cannot fill ---- */
+    /* ---- tier 2 (one rank): other outlets' images ∥ footage from video sites, only for the shots the article cannot fill.
+     * "What you hear is what you see": every scene that needs pictures is searched for by what its voice-over names
+     * (`newsTerms`: the person, company, place, event…), plus the story title once for the rest. ---- */
     const tier2Missing = totalNeed - aroll.length;
+    const queries = tier2Queries(input.scenes, need, input.articleTitle);
+    const queryWant = (q: SceneQuery) => (q.sceneIds.length ? q.sceneIds.reduce((a, id) => a + (need[id] ?? 0), 0) : tier2Missing);
     const [related, webSearch] = await Promise.all([
       step.run("related-aroll", async () => {
-        await reportProgress(pctx, { label: tier2Missing > 0 ? `2/4 Tìm thêm ${tier2Missing} hình từ báo khác + video web cùng tin` : "2/4 Bài báo đủ ảnh, không cần báo khác", pct: 36 });
-        if (tier2Missing <= 0) return { assets: [] as ChosenAsset[], pages: 0, found: 0, errors: [] as string[], shortfall: tier2Missing };
-        const found = await findRelatedImages({ query: input.articleTitle, language: input.language, excludeUrls: [input.source.url], want: tier2Missing });
-        const stored = await storeRelatedImages(found.images, { buildId: input.buildId, max: tier2Missing + 2 }, pctx);
-        return { assets: stored.assets, pages: found.pages, found: found.images.length, errors: [...found.errors, ...stored.errors], shortfall: tier2Missing };
+        const perScene = queries.filter((q) => q.sceneIds.length).length;
+        await reportProgress(pctx, { label: tier2Missing > 0 ? `2/4 Tìm thêm ${tier2Missing} hình từ báo khác + video web (${perScene} cảnh theo lời bình + cả tin)` : "2/4 Bài báo đủ ảnh, không cần báo khác", pct: 36 });
+        if (tier2Missing <= 0) return { assets: [] as RelatedAsset[], pages: 0, found: 0, errors: [] as string[], shortfall: tier2Missing, queries };
+        const found = await findRelatedImagesFor(queries.map((q) => ({ ...q, want: queryWant(q) })), { language: input.language, excludeUrls: [input.source.url] });
+        // Room for one extra picture per scene search on top of the shortfall, so every scene's own search gets stored.
+        const stored = await storeRelatedImages(found.images, { buildId: input.buildId, max: tier2Missing + 2 + perScene }, pctx);
+        return { assets: stored.assets, pages: found.pages, found: found.images.length, errors: [...found.errors, ...stored.errors], shortfall: tier2Missing, queries };
       }),
       step.run("web-video-search", async () => {
-        const off = (reason: string) => ({ enabled: false, reason, candidates: [] as WebVideoCandidate[], searched: 0, errors: [] as string[] });
+        const off = (reason: string) => ({ enabled: false, reason, candidates: [] as FoundWebVideo[], searched: 0, errors: [] as string[] });
         if (tier2Missing <= 0) return off("đủ ảnh");
         if (!(await webVideoEnabled())) return off("cờ web_video_downloader tắt");
-        const r = await findWebVideos({ query: input.articleTitle, language: input.language, limit: 8 });
-        return { enabled: true, reason: null as string | null, candidates: r.candidates.slice(0, 8), searched: r.searched, errors: r.errors };
+        const r = await findWebVideosFor(queries, { language: input.language });
+        return { enabled: true, reason: null as string | null, candidates: r.candidates, searched: r.searched, errors: r.errors };
       }),
     ]);
 
     /* ---- candidate pool in priority order; a web video counts for as many shots as its usable 5 s segments ---- */
-    type PoolItem = { tier: VisualTier; asset: ChosenAsset | null; video: WebVideoCandidate | null; capacity: number; thumbnailUrl: string | null; hint: string };
+    type PoolItem = { tier: VisualTier; asset: ChosenAsset | null; video: FoundWebVideo | null; capacity: number; thumbnailUrl: string | null; hint: string };
     const pool: PoolItem[] = [
       ...aroll.map((a): PoolItem => ({ tier: "article", asset: a, video: null, capacity: 1, thumbnailUrl: a.thumbnailUrl, hint: "source article" })),
-      ...related.assets.map((a): PoolItem => ({ tier: "related", asset: a, video: null, capacity: 1, thumbnailUrl: a.thumbnailUrl, hint: "other outlet" })),
+      ...related.assets.map((a): PoolItem => ({ tier: "related", asset: a, video: null, capacity: 1, thumbnailUrl: a.thumbnailUrl, hint: `other outlet${foundForHint(a)}` })),
       ...webSearch.candidates.map((c): PoolItem => {
         const seg = videoSegments(c.durationSec);
-        return { tier: "web_video", asset: null, video: c, capacity: seg.capacity, thumbnailUrl: c.thumbnailUrl, hint: webVideoHint(c, seg.capacity) };
+        return { tier: "web_video", asset: null, video: c, capacity: seg.capacity, thumbnailUrl: c.thumbnailUrl, hint: `${webVideoHint(c, seg.capacity)}${foundForHint(c)}` };
       }),
     ];
     const wanting = input.scenes.map((sc) => ({ id: sc.id, voiceover: sc.voiceover, onScreenText: sc.onScreenText, want: need[sc.id] }));
@@ -224,7 +233,7 @@ export const prepareAssetsFn = inngest.createFunction(
           caption: brand.brand.caption,
           headlineStyle: brand.brand.headline,
           hasCaptions: Boolean(sc?.voiceover.trim()),
-          showSource: brand.brand.showSource && Boolean(input.source.name),
+          showSource: brand.brand.showSource,
           hasLogo: Boolean(brand.brand.logoSrc) || input.hasChannelLogo,
         });
         f = frameStill(faceScan.frames[index] ?? null, zones);
@@ -293,20 +302,22 @@ export const prepareAssetsFn = inngest.createFunction(
       return [{ videoId, url: c.url, title: c.title, uploader: c.uploader, thumbnailUrl: c.thumbnailUrl, startSec: videoSegments(c.durationSec).startSec, segments: videoUse.get(d.index) ?? 1, scenes, error: d.error ?? "" }];
     });
 
-    /* ---- tier 3: stock B-roll per scene (parallel), only as many clips as the scene still lacks ---- */
-    const stockScenes = input.scenes.filter((sc) => sc.kind !== "cta" && sc.brollTerms.length && afterStills[sc.id] > 0);
+    /* ---- tier 3: stock B-roll per scene (parallel), only as many clips as the scene still lacks; never for a political story ---- */
+    const stockAllowed = tierAllowed("stock", input.political);
+    const stockScenes = stockAllowed ? input.scenes.filter((sc) => sc.kind !== "cta" && sc.brollTerms.length && afterStills[sc.id] > 0) : [];
     const providers = await step.run("stock-providers", async () => {
-      const p = await stockProvidersAvailable();
+      const p = stockAllowed ? await stockProvidersAvailable() : { pexels: false, pixabay: false };
       const on = !skipStock && (p.pexels || p.pixabay);
       const missing = total(afterStills);
       await reportProgress(pctx, {
-        label: missing === 0 ? "3/4 Đủ ảnh, không cần stock" : on ? `3/4 Tìm ${missing} clip Pexels/Pixabay, Haiku xếp hạng (${stockScenes.length} cảnh)` : skipStock ? "3/4 Bỏ qua stock theo yêu cầu" : "3/4 Chưa có key Pexels/Pixabay",
+        label:
+          missing === 0 ? "3/4 Đủ ảnh, không cần stock" : !stockAllowed ? `3/4 Tin chính trị: không dùng stock (thiếu ${missing} hình)` : on ? `3/4 Tìm ${missing} clip Pexels/Pixabay, Haiku xếp hạng (${stockScenes.length} cảnh)` : skipStock ? "3/4 Bỏ qua stock theo yêu cầu" : "3/4 Chưa có key Pexels/Pixabay",
         pct: 48,
         total: stockScenes.length,
       });
       return p;
     });
-    const stockEnabled = !skipStock && (providers.pexels || providers.pixabay);
+    const stockEnabled = stockAllowed && !skipStock && (providers.pexels || providers.pixabay);
     const stock: Record<string, SceneStock> = {};
     if (stockEnabled && stockScenes.length) {
       const results = await Promise.all(
@@ -324,13 +335,17 @@ export const prepareAssetsFn = inngest.createFunction(
     const stockCount: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, stock[sc.id] ? (stock[sc.id].selected ? 1 : 0) + stock[sc.id].alternates.length : 0]));
     const afterStock = shortfall(need, Object.fromEntries(input.scenes.map((sc) => [sc.id, placedCount[sc.id] + stockCount[sc.id]])));
 
-    /* ---- tier 4: AI stills (Gemini on Vertex) for whatever is still missing, within flag, spend cap and daily quota ---- */
-    const aiScenes = input.scenes.filter((sc) => sc.kind !== "cta" && afterStock[sc.id] > 0);
+    /* ---- tier 4: AI stills (Gemini on Vertex) for whatever is still missing, within flag, spend cap and daily quota; never for a political story ---- */
+    const aiScenes = tierAllowed("ai", input.political) ? input.scenes.filter((sc) => sc.kind !== "cta" && afterStock[sc.id] > 0) : [];
     const aiPlan = await step.run("ai-plan", async () => {
       const missing = total(afterStock);
       if (missing === 0) {
         await reportProgress(pctx, { label: "4/4 Đủ hình, không cần AI", pct: 64 });
         return { enabled: false, reason: null as string | null, counts: {} as Record<string, number>, projectId: null as string | null };
+      }
+      if (!tierAllowed("ai", input.political)) {
+        await reportProgress(pctx, { label: `4/4 Tin chính trị: không tạo ảnh AI (thiếu ${missing} hình, cảnh sẽ dùng nền màu)`, pct: 64 });
+        return { enabled: false, reason: "tin chính trị: không dùng ảnh AI", counts: {} as Record<string, number>, projectId: null as string | null };
       }
       const a = await aiImagesAvailable(requestedBy);
       if (!a.enabled) {
@@ -401,6 +416,7 @@ export const prepareAssetsFn = inngest.createFunction(
           onScreenText: sc.onScreenText,
           voiceover: v?.spokenText ?? sc.voiceover,
           brollTerms: sc.brollTerms,
+          newsTerms: sc.newsTerms,
           durationSec: sc.durationSec,
           voice: v ? { key: v.key, durationMs: v.durationMs, words: v.words } : null,
           visual,
@@ -441,6 +457,10 @@ export const prepareAssetsFn = inngest.createFunction(
         /** Sourcing order and what each tier contributed per scene. */
         visuals: {
           order: VISUAL_TIERS,
+          /** Political story: the stock and AI tiers were not consulted. */
+          political: input.political,
+          /** Tier-2 searches: one per scene for what its voice-over names, plus the story title. */
+          queries,
           need,
           perScene: Object.fromEntries(
             input.scenes.map((sc) => {
@@ -453,8 +473,8 @@ export const prepareAssetsFn = inngest.createFunction(
         stock: Object.fromEntries(Object.entries(stock).map(([id, s]) => [id, { selected: s.selected, alternates: s.alternates, searched: s.searched, errors: s.errors, rankCostUsd: s.rankCostUsd }])),
         stockEnabled,
         aroll: aroll.map((a) => ({ assetId: a.assetId, key: a.key })),
-        related: { assets: related.assets.map((a) => ({ assetId: a.assetId, key: a.key })), pages: related.pages, found: related.found, shortfall: related.shortfall, errors: related.errors },
-        webVideo: { enabled: webSearch.enabled, reason: webSearch.reason, searched: webSearch.searched, candidates: webSearch.candidates.map((c) => ({ url: c.url, title: c.title, site: c.site, durationSec: c.durationSec })), assets: webVideoAssets.map((a) => ({ assetId: a.assetId, key: a.key, durationSec: a.durationSec })), pending: pendingCaptures, errors: [...webSearch.errors, ...downloads.flatMap((d) => (d.error ? [d.error] : []))] },
+        related: { assets: related.assets.map((a) => ({ assetId: a.assetId, key: a.key, query: a.query, sceneIds: a.sceneIds })), pages: related.pages, found: related.found, shortfall: related.shortfall, errors: related.errors },
+        webVideo: { enabled: webSearch.enabled, reason: webSearch.reason, searched: webSearch.searched, candidates: webSearch.candidates.map((c) => ({ url: c.url, title: c.title, site: c.site, durationSec: c.durationSec, query: c.query, sceneIds: c.sceneIds })), assets: webVideoAssets.map((a) => ({ assetId: a.assetId, key: a.key, durationSec: a.durationSec })), pending: pendingCaptures, errors: [...webSearch.errors, ...downloads.flatMap((d) => (d.error ? [d.error] : []))] },
         ai: { enabled: aiPlan.enabled, reason: aiPlan.reason, assets: aiAssets.map((a) => ({ assetId: a.assetId, key: a.key })), errors: Object.values(ai).flatMap((r) => r.errors), costUsd: aiCostUsd },
         /** Face guard: what was scanned, which stills were turned down for which scene and why, and which had to be used anyway. */
         framing: {

@@ -14,7 +14,7 @@
  * guard may enlarge it (≤ `MAX_ZOOM`) to gain vertical travel, and turns Ken
  * Burns off when the zoom alone would push a face out.
  */
-import { HEADLINE_BAR, headlinePadding, OUTPUT, SAFE_ZONES, textLayout, type Focus, type TextLayoutInput } from "@ai-news/video/schema";
+import { CREDIT_MAX_WIDTH, HEADLINE_BAR, headlinePadding, OUTPUT, SAFE_ZONES, textLayout, type Focus, type TextLayoutInput } from "@ai-news/video/schema";
 
 /** Face box normalised to the source picture (0–1, origin top-left). */
 export type FaceBox = { x: number; y: number; w: number; h: number; confidence: number };
@@ -90,6 +90,7 @@ export function overlayZones(scene: {
   caption: TextLayoutInput["caption"];
   headlineStyle?: TextLayoutInput["headline"];
   hasCaptions: boolean;
+  /** The kit draws each shot's media credit (`brand.showSource`); the still being framed usually has one. */
   showSource: boolean;
   hasLogo: boolean;
 }): Zone[] {
@@ -108,7 +109,8 @@ export function overlayZones(scene: {
   // Chunks hold up to 26 characters, which wrap to two lines at the default size.
   if (scene.hasCaptions) zones.push({ name: "captions", x0: at.captions.x0, y0: at.captions.y0, x1: at.captions.x1, y1: at.captions.y1 });
   if (scene.kind === "cta") zones.push({ name: "outro", x0: left, y0: at.outro.y0, x1: right, y1: at.outro.y1 });
-  if (scene.showSource) zones.push({ name: "source", x0: left, y0: H - (SAFE_ZONES.bottom - 60) - 56, x1: left + 500, y1: H - (SAFE_ZONES.bottom - 60) });
+  // The shot's media credit pill (`CreditLine` in News.tsx); its width depends on the credit text, so keep the whole strip.
+  if (scene.showSource) zones.push({ name: "source", x0: left, y0: H - (SAFE_ZONES.bottom - 60) - 56, x1: left + CREDIT_MAX_WIDTH, y1: H - (SAFE_ZONES.bottom - 60) });
   if (scene.hasLogo) zones.push({ name: "logo", x0: W - (SAFE_ZONES.right - 60) - 300, y0: SAFE_ZONES.top - 120, x1: W - (SAFE_ZONES.right - 60), y1: SAFE_ZONES.top - 30 });
   zones.push({ name: "platform_bottom", x0: 0, y0: H - SAFE_ZONES.bottom, x1: W, y1: H });
   zones.push({ name: "platform_right", x0: right, y0: H / 2, x1: W, y1: H });

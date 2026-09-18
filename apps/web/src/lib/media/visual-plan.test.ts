@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocate, allocateChecked, orderByTier, shortfall, splitBudget, TIER_RANK, total, videoSegments, VISUAL_TIERS, youtubeId } from "./visual-plan";
+import { allocate, allocateChecked, formatTimecode, manualSection, MAX_MANUAL_SECTION_SEC, MAX_TIER2_QUERIES, parseTimecode, webVideoPageUrl, orderByTier, shortfall, splitBudget, TIER_RANK, tier2Queries, tierAllowed, total, videoSegments, VISUAL_TIERS, youtubeId } from "./visual-plan";
 
 describe("visual sourcing priority", () => {
   it("is article → (related = web video) → stock → AI", () => {
@@ -114,5 +114,68 @@ describe("allocateChecked", () => {
   it("equals allocate when everything is accepted, capacities included", () => {
     const wanting = [{ id: "s1", want: 3 }, { id: "s2", want: 1 }];
     expect(allocateChecked(wanting, 2, { s1: [1] }, [1, 2], () => true)).toEqual({ ...allocate(wanting, 2, { s1: [1] }, [1, 2]), rejected: [] });
+  });
+});
+
+describe("tier2Queries (what you hear is what you see)", () => {
+  const sc = (id: string, newsTerms: string[], kind: "hook" | "body" | "cta" = "body") => ({ id, kind, newsTerms });
+  it("searches each needy scene by what its voice-over names, then the story once", () => {
+    const q = tier2Queries([sc("s1", ["Thủ tướng Phạm Minh Chính"]), sc("s2", ["VinFast VF 3", "VinFast"]), sc("s3", [], "cta")], { s1: 1, s2: 2, s3: 1 }, "VinFast bàn giao VF 3");
+    expect(q).toEqual([
+      { query: "Thủ tướng Phạm Minh Chính", sceneIds: ["s1"] },
+      { query: "VinFast VF 3", sceneIds: ["s2"] },
+      { query: "VinFast bàn giao VF 3", sceneIds: [] },
+    ]);
+  });
+  it("skips scenes that are full or name nothing, merges equal queries and keeps the title once", () => {
+    const q = tier2Queries([sc("s1", [" VinFast  VF 3 "]), sc("s2", ["vinfast vf 3"]), sc("s3", []), sc("s4", ["Hà Nội"])], { s1: 1, s2: 1, s3: 1, s4: 0 }, "VinFast VF 3");
+    expect(q).toEqual([{ query: "VinFast VF 3", sceneIds: ["s1", "s2"] }]);
+  });
+  it("caps the number of searches, dropping the story query last", () => {
+    const scenes = Array.from({ length: 10 }, (_, i) => sc(`s${i + 1}`, [`Người ${i + 1}`]));
+    const need = Object.fromEntries(scenes.map((s) => [s.id, 1]));
+    const q = tier2Queries(scenes, need, "Tin");
+    expect(q).toHaveLength(MAX_TIER2_QUERIES);
+    expect(q[q.length - 1]).toEqual({ query: "Tin", sceneIds: [] });
+    expect(tier2Queries([], {}, "  ")).toEqual([]);
+  });
+});
+
+describe("political stories", () => {
+  it("never use stock footage or AI stills", () => {
+    expect(VISUAL_TIERS.filter((t) => tierAllowed(t, true))).toEqual(["article", "related", "web_video"]);
+    expect(VISUAL_TIERS.filter((t) => tierAllowed(t, false))).toEqual([...VISUAL_TIERS]);
+  });
+});
+
+describe("manual web-video import", () => {
+  it("recognises video pages, not direct files or other sites, and upgrades to https", () => {
+    expect(webVideoPageUrl(" http://www.youtube.com/watch?v=dQw4w9WgXcQ ")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(webVideoPageUrl("https://youtu.be/dQw4w9WgXcQ")).toBe("https://youtu.be/dQw4w9WgXcQ");
+    expect(webVideoPageUrl("https://www.tiktok.com/@vnexpress/video/7300000000000000000")).toContain("tiktok.com");
+    expect(webVideoPageUrl("https://www.facebook.com/reel/1234567890")).toContain("facebook.com/reel");
+    expect(webVideoPageUrl("https://fb.watch/abc123/")).toContain("fb.watch");
+    expect(webVideoPageUrl("https://cdn.example.com/clip.mp4")).toBeNull();
+    expect(webVideoPageUrl("https://www.youtube.com/@channel")).toBeNull();
+  });
+  it("reads timecodes", () => {
+    expect(parseTimecode("20")).toBe(20);
+    expect(parseTimecode("0:20")).toBe(20);
+    expect(parseTimecode("1:02")).toBe(62);
+    expect(parseTimecode("1:02:03")).toBe(3723);
+    expect(parseTimecode("20.5")).toBe(20.5);
+    expect(parseTimecode("")).toBeNull();
+    expect(parseTimecode("1:75")).toBeNull();
+    expect(parseTimecode("abc")).toBeNull();
+    expect(formatTimecode(62)).toBe("1:02");
+    expect(formatTimecode(3723)).toBe("1:02:03");
+  });
+  it("cuts the section to the video and the cap, and defaults to a 20 s window", () => {
+    expect(manualSection({ startSec: 20, endSec: 40, durationSec: 300 })).toEqual({ ok: true, startSec: 20, endSec: 40 });
+    expect(manualSection({ startSec: null, endSec: null, durationSec: 300 })).toEqual({ ok: true, startSec: 0, endSec: 20 });
+    expect(manualSection({ startSec: 290, endSec: null, durationSec: 300 })).toEqual({ ok: true, startSec: 290, endSec: 300 });
+    expect(manualSection({ startSec: 10, endSec: 8, durationSec: null })).toMatchObject({ ok: false });
+    expect(manualSection({ startSec: 400, endSec: 410, durationSec: 300 })).toMatchObject({ ok: false, error: expect.stringContaining("5:00") });
+    expect(manualSection({ startSec: 0, endSec: MAX_MANUAL_SECTION_SEC + 1, durationSec: null })).toMatchObject({ ok: false });
   });
 });

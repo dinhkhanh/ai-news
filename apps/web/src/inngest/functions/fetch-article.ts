@@ -88,11 +88,11 @@ export const fetchArticleFn = inngest.createFunction(
       const { extracted } = fetched;
       try {
         const c = await classifyArticle({ title: extracted.title, text: extracted.text }, { ...ctx, projectId });
-        return { language: c.language === "other" ? heuristicLanguage(extracted.text) : c.language, sensitiveTopic: c.sensitiveTopic, categories: c.sensitiveCategories, isNewsArticle: c.isNewsArticle, reason: c.reason, model: true };
+        return { language: c.language === "other" ? heuristicLanguage(extracted.text) : c.language, sensitiveTopic: c.sensitiveTopic, political: c.political, categories: c.sensitiveCategories, isNewsArticle: c.isNewsArticle, reason: c.reason, model: true };
       } catch (e) {
         console.warn("[fetch-article] classification failed, using heuristic", e);
         const lang = extracted.lang === "vi" || extracted.lang === "en" ? extracted.lang : heuristicLanguage(extracted.text);
-        return { language: lang, sensitiveTopic: false, categories: [] as string[], isNewsArticle: true, reason: "heuristic", model: false };
+        return { language: lang, sensitiveTopic: false, political: false, categories: [] as string[], isNewsArticle: true, reason: "heuristic", model: false };
       }
     });
 
@@ -150,6 +150,7 @@ export const fetchArticleFn = inngest.createFunction(
             canonicalUrl,
             language: classification.language,
             sensitiveTopic: classification.sensitiveTopic,
+            political: classification.political,
             ...(kit ? { brandKitId: kit.id, brandKitSource: kit.id ? ("auto" as const) : null, brandKitReason: kit.reason } : {}),
             state: "fetched",
             busyStep: null, busyProgress: null,
@@ -169,6 +170,7 @@ export const fetchArticleFn = inngest.createFunction(
           flags: extracted.flags,
           language: classification.language,
           sensitiveTopic: classification.sensitiveTopic,
+          political: classification.political,
           categories: classification.categories,
           brandKit: kit ? { id: kit.id, name: kit.name, method: kit.method, reason: kit.reason } : null,
           attempts: fetched.attempts,

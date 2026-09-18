@@ -124,6 +124,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     canApprove: canApprove(ws),
     approvedTimelineId: project.approvedTimelineId,
     sensitiveTopic: project.sensitiveTopic,
+    political: project.political,
     version: { id: selected.id, version: selected.version, kind: selected.kind, changes: selected.changes, note: selected.note, createdAt: selected.createdAt.toISOString(), createdByName: selected.createdBy ? (data.authors.get(selected.createdBy) ?? null) : null, isLatest: selected.id === timelines[0].id },
     versions: timelines.map((t) => ({ id: t.id, version: t.version, kind: t.kind, changes: t.changes, createdAt: t.createdAt.toISOString(), createdByName: t.createdBy ? (data.authors.get(t.createdBy) ?? null) : null })),
     doc,

@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { boxShadowCss, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { boxShadowCss, CREDIT_MAX_WIDTH, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -64,21 +64,21 @@ const ShotPunch: React.FC<{ first: boolean; children: React.ReactNode }> = ({ fi
   return <AbsoluteFill style={{ transform: `scale(${scale})` }}>{children}</AbsoluteFill>;
 };
 
-/** A scene's shots in sequence; a scene without explicit shots is one shot of its `visual`. */
-const SceneShots: React.FC<{ scene: TimelineScene; brand: Brand }> = ({ scene, brand }) => {
-  const shots: Shot[] = scene.shots.length ? scene.shots : [{ from: 0, durationFrames: scene.durationFrames, visual: scene.visual, credit: scene.credit }];
-  return (
-    <>
-      {shots.map((shot, i) => (
-        <Sequence key={i} from={shot.from} durationInFrames={shot.durationFrames} name={`${scene.id} shot ${i + 1}`}>
-          <ShotPunch first={i === 0}>
-            <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} />
-          </ShotPunch>
-        </Sequence>
-      ))}
-    </>
-  );
-};
+/** The shots of a scene; a scene without explicit shots is one shot of its `visual`. Tolerates timelines stored before `shots` existed. */
+const sceneShots = (scene: TimelineScene): Shot[] => (scene.shots?.length ? scene.shots : [{ from: 0, durationFrames: scene.durationFrames, visual: scene.visual, credit: scene.credit ?? null }]);
+
+/** A scene's shots in sequence. */
+const SceneShots: React.FC<{ scene: TimelineScene; brand: Brand }> = ({ scene, brand }) => (
+  <>
+    {sceneShots(scene).map((shot, i) => (
+      <Sequence key={i} from={shot.from} durationInFrames={shot.durationFrames} name={`${scene.id} shot ${i + 1}`}>
+        <ShotPunch first={i === 0}>
+          <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} />
+        </ShotPunch>
+      </Sequence>
+    ))}
+  </>
+);
 
 /* --------------------------------------------------------------- overlays */
 
@@ -122,26 +122,48 @@ const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Bra
   );
 };
 
-const SourceLine: React.FC<{ name: string | null; brand: Brand }> = ({ name, brand }) => {
-  if (!brand.showSource || !name) return null;
+/** Where the picture on screen comes from ("Ảnh: VnExpress", "Video: … / Pexels"), bottom-left, for the length of the shot. */
+const CreditLine: React.FC<{ text: string; brand: Brand }> = ({ text, brand }) => {
+  const frame = useCurrentFrame();
   return (
     <div
       style={{
         position: "absolute",
         bottom: SAFE_ZONES.bottom - 60,
         left: SAFE_ZONES.left,
+        maxWidth: CREDIT_MAX_WIDTH,
+        boxSizing: "border-box",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
         fontFamily: fontFamily(brand.fonts.body),
         fontSize: 30,
         fontWeight: 500,
         color: brand.colours.text,
-        opacity: 0.85,
+        opacity: 0.85 * interpolate(frame, [0, FADE_FRAMES], [0, 1], { extrapolateRight: "clamp" }),
         background: "rgba(0,0,0,.45)",
         padding: "8px 16px",
         borderRadius: 8,
       }}
     >
-      Nguồn: {name}
+      {text}
     </div>
+  );
+};
+
+/** Each shot's own credit while that shot is on screen; the article itself is credited in the outro. */
+const ShotCredits: React.FC<{ scene: TimelineScene; brand: Brand }> = ({ scene, brand }) => {
+  if (brand.showSource === false) return null;
+  return (
+    <>
+      {sceneShots(scene).map((shot, i) =>
+        shot.credit ? (
+          <Sequence key={i} from={shot.from} durationInFrames={shot.durationFrames} name={`${scene.id} credit ${i + 1}`}>
+            <CreditLine text={shot.credit} brand={brand} />
+          </Sequence>
+        ) : null,
+      )}
+    </>
   );
 };
 
@@ -243,15 +265,27 @@ const Captions: React.FC<{ captions: Caption[]; brand: Brand }> = ({ captions, b
 
 /* ------------------------------------------------------------------ outro */
 
+/**
+ * Closing block of the last scene: the channel line, the article the story
+ * comes from (name + URL – the only place the article is credited) and the
+ * remaining credits (music).
+ */
 const Outro: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const enter = spring({ frame, fps, config: { damping: 200 } });
   const { brand } = timeline;
+  const source = sourceDisplay(timeline.source);
+  const credits = timeline.attribution ?? [];
   return (
     <div style={{ position: "absolute", left: SAFE_ZONES.left, right: SAFE_ZONES.right, bottom: OUTPUT.height - textLayout(brand, "cta").outro.y1, opacity: enter, fontFamily: fontFamily(brand.fonts.body), color: brand.colours.text }}>
-      {brand.outroText ? <div style={{ fontSize: 44, fontWeight: 700 }}>{brand.outroText}</div> : null}
-      {timeline.attribution.length ? <div style={{ fontSize: 26, opacity: 0.8, marginTop: 12, lineHeight: 1.4 }}>{timeline.attribution.join(" · ")}</div> : null}
+      {brand.outroText ? <div style={{ fontSize: 44, fontWeight: 700, lineHeight: 1.2 }}>{brand.outroText}</div> : null}
+      <div style={{ fontSize: 30, fontWeight: 700, marginTop: brand.outroText ? 14 : 0, lineHeight: 1.3 }}>
+        {timeline.language === "en" ? "Source" : "Nguồn"}: {source.name}
+      </div>
+      {/* Two lines at most; a long URL is cut, the outlet name above still says where the story is from. */}
+      <div style={{ fontSize: 24, opacity: 0.8, marginTop: 4, lineHeight: 1.35, maxHeight: 24 * 1.35 * 2, overflow: "hidden", wordBreak: "break-all" }}>{source.url}</div>
+      {credits.length ? <div style={{ fontSize: 24, opacity: 0.8, marginTop: 8, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{credits.join(" · ")}</div> : null}
     </div>
   );
 };
@@ -300,11 +334,11 @@ export const News: React.FC<Timeline> = (timeline) => {
           </SceneFade>
           {scene.overlay !== false && brand.overlaySrc && brand.overlayLayer !== "top" ? <BrandOverlay src={brand.overlaySrc} /> : null}
           <Headline text={scene.headline} kind={scene.kind} brand={brand} />
+          <ShotCredits scene={scene} brand={brand} />
           {scene.kind === "cta" && scene.id === last?.id ? <Outro timeline={timeline} /> : null}
         </Sequence>
       ))}
       <Captions captions={captions} brand={brand} />
-      <SourceLine name={timeline.source.name} brand={brand} />
       <Logo brand={brand} />
       <Progress brand={brand} />
       {brand.overlaySrc && brand.overlayLayer === "top"

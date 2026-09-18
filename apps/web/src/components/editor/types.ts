@@ -61,6 +61,8 @@ export type EditorProps = {
   canApprove: boolean;
   approvedTimelineId: string | null;
   sensitiveTopic: boolean;
+  /** Political story: the editor offers no stock footage or AI stills for it (`visual-plan.ts`). */
+  political: boolean;
   version: VersionRow & { note: string | null; isLatest: boolean };
   versions: VersionRow[];
   doc: EditorDoc;

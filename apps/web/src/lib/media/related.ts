@@ -17,7 +17,16 @@ import { downloadToR2 } from "./stock";
  * Search: Firecrawl (if enabled) → Bing News RSS (free). Pages are fetched
  * with plain HTTP only, so this never spends Browser Rendering or scrape credits.
  */
-export type RelatedImage = ArticleImage & { pageUrl: string; pageTitle: string | null; siteName: string | null };
+export type RelatedImage = ArticleImage & {
+  pageUrl: string;
+  pageTitle: string | null;
+  siteName: string | null;
+  /** The search that found the page, and the scenes that search was run for ([] = the story as a whole). */
+  query: string;
+  sceneIds: string[];
+};
+/** A stored related image, still knowing which scenes it was searched for (the placement model prefers it there). */
+export type RelatedAsset = ChosenAsset & { query: string; sceneIds: string[] };
 
 const MIN_WIDTH = 600;
 const MAX_PAGES = 6;
@@ -33,9 +42,14 @@ const host = (u: string) => {
 
 const usableImage = (im: ArticleImage) => !/\.(gif|svg)(?:$|\?)/i.test(im.url) && (im.width ?? 1000) >= MIN_WIDTH && !/logo|icon|avatar|sprite|placeholder|\/ads?\//i.test(im.url);
 
-/** Search other outlets for the same story and return their article images, best first. */
-export async function findRelatedImages(input: { query: string; language: "vi" | "en"; excludeUrls: string[]; want: number }): Promise<{ images: RelatedImage[]; pages: number; errors: string[] }> {
+/**
+ * Search other outlets for one query – the story title, or what one scene's
+ * voice-over names (`newsTerms`, "what you hear is what you see") – and return
+ * their article images, best first.
+ */
+export async function findRelatedImages(input: { query: string; sceneIds?: string[]; language: "vi" | "en"; excludeUrls: string[]; want: number }): Promise<{ images: RelatedImage[]; pages: number; errors: string[] }> {
   const errors: string[] = [];
+  const sceneIds = input.sceneIds ?? [];
   const skipHosts = new Set(input.excludeUrls.map(host).filter(Boolean));
   let hits: SearchHit[] = [];
   try {
@@ -71,7 +85,7 @@ export async function findRelatedImages(input: { query: string; language: "vi" |
         for (const im of list) {
           if (seenUrl.has(im.url)) continue;
           seenUrl.add(im.url);
-          images.push({ ...im, pageUrl: finalUrl, pageTitle: ex.title ?? p.title, siteName: ex.siteName ?? host(finalUrl) });
+          images.push({ ...im, pageUrl: finalUrl, pageTitle: ex.title ?? p.title, siteName: ex.siteName ?? host(finalUrl), query: input.query, sceneIds });
         }
       } catch (e) {
         errors.push(`${host(p.url)}: ${(e as Error).message.slice(0, 120)}`);
@@ -86,6 +100,30 @@ export async function findRelatedImages(input: { query: string; language: "vi" |
   return { images: interleaved.slice(0, Math.max(input.want, 0) + 4), pages: pages.length, errors };
 }
 
+/**
+ * All tier-2 image searches of a build at once (`tier2Queries` in
+ * visual-plan.ts): one `findRelatedImages` per query in parallel, the results
+ * merged round-robin so every scene's search keeps a share under the caller's
+ * cap, a picture found by two searches credited to both.
+ */
+export async function findRelatedImagesFor(
+  queries: Array<{ query: string; sceneIds: string[]; want: number }>,
+  opts: { language: "vi" | "en"; excludeUrls: string[] },
+): Promise<{ images: RelatedImage[]; pages: number; errors: string[] }> {
+  const results = await Promise.all(queries.map((q) => findRelatedImages({ query: q.query, sceneIds: q.sceneIds, language: opts.language, excludeUrls: opts.excludeUrls, want: q.want })));
+  const byUrl = new Map<string, RelatedImage>();
+  for (let i = 0; results.some((r) => r.images[i]); i++) {
+    for (const r of results) {
+      const im = r.images[i];
+      if (!im) continue;
+      const cur = byUrl.get(im.url);
+      if (cur) cur.sceneIds = [...new Set([...cur.sceneIds, ...im.sceneIds])];
+      else byUrl.set(im.url, { ...im });
+    }
+  }
+  return { images: [...byUrl.values()], pages: results.reduce((a, r) => a + r.pages, 0), errors: results.flatMap((r) => r.errors) };
+}
+
 const ext = (url: string, fallback: string) => {
   const m = /\.(jpe?g|png|webp)(?:$|\?)/i.exec(url);
   return m ? m[1].toLowerCase().replace("jpeg", "jpg") : fallback;
@@ -96,9 +134,9 @@ export async function storeRelatedImages(
   images: RelatedImage[],
   opts: { buildId: string; max: number },
   ctx: { userId: string; organizationId: string; projectId: string },
-): Promise<{ assets: ChosenAsset[]; errors: string[] }> {
+): Promise<{ assets: RelatedAsset[]; errors: string[] }> {
   const { organizationId, projectId } = ctx;
-  const out: ChosenAsset[] = [];
+  const out: RelatedAsset[] = [];
   const errors: string[] = [];
   for (const [i, im] of images.entries()) {
     if (out.length >= opts.max) break;
@@ -120,10 +158,10 @@ export async function storeRelatedImages(
       const [row] = await withOrgContext(ctx, (tx) =>
         tx
           .insert(schema.assets)
-          .values({ organizationId, projectId, origin: "article", provider: "related", sourceUrl: im.url, r2Path: key, hash: dl.hash, mime: dl.contentType, width: im.width ?? null, height: im.height ?? null, sizeBytes: dl.sizeBytes, licence: "related article (editorial)", attribution: credit, thumbnailUrl: im.url, meta: { buildId: opts.buildId, pageUrl: im.pageUrl, pageTitle: im.pageTitle, alt: im.alt ?? null } })
+          .values({ organizationId, projectId, origin: "article", provider: "related", sourceUrl: im.url, r2Path: key, hash: dl.hash, mime: dl.contentType, width: im.width ?? null, height: im.height ?? null, sizeBytes: dl.sizeBytes, licence: "related article (editorial)", attribution: credit, thumbnailUrl: im.url, searchTerm: im.query, meta: { buildId: opts.buildId, pageUrl: im.pageUrl, pageTitle: im.pageTitle, alt: im.alt ?? null, sceneIds: im.sceneIds } })
           .returning({ id: schema.assets.id }),
       );
-      out.push({ assetId: row.id, key, kind: "image", durationSec: null, credit, provider: "related", thumbnailUrl: im.url });
+      out.push({ assetId: row.id, key, kind: "image", durationSec: null, credit, provider: "related", thumbnailUrl: im.url, query: im.query, sceneIds: im.sceneIds });
     } catch (e) {
       errors.push(`${host(im.url)}: ${(e as Error).message.slice(0, 120)}`);
     }

@@ -19,6 +19,41 @@ export const TIER_RANK: Record<VisualTier, number> = { article: 0, related: 1, w
 
 export const tierRank = (t: VisualTier) => TIER_RANK[t];
 
+/** Tiers a political story may not use: only real pictures of the story itself, never stock footage or AI stills. */
+export const POLITICAL_EXCLUDED_TIERS: readonly VisualTier[] = ["stock", "ai"];
+export const tierAllowed = (t: VisualTier, political: boolean) => !political || !POLITICAL_EXCLUDED_TIERS.includes(t);
+
+/** Most tier-2 searches (other outlets' images / web video) one build runs, the story query included. */
+export const MAX_TIER2_QUERIES = 7;
+
+/**
+ * What tier 2 searches for: "what you hear is what you see". Every scene that
+ * still needs pictures searches for what its own voice-over names (its first
+ * `newsTerms`: the person, company, place, event…), and the story as a whole
+ * is searched once by the article title as the fallback for the rest. A query
+ * two scenes share runs once and is credited to both. Scenes come first, in
+ * order, so the cap drops the story query last.
+ */
+export type SceneQuery = { query: string; sceneIds: string[] };
+
+export function tier2Queries(scenes: Array<{ id: string; kind: "hook" | "body" | "cta"; newsTerms?: string[] }>, need: Record<string, number>, articleTitle: string): SceneQuery[] {
+  const norm = (q: string) => q.trim().replace(/\s+/g, " ");
+  const byKey = new Map<string, SceneQuery>();
+  const add = (query: string, sceneId: string | null) => {
+    const q = norm(query);
+    if (!q) return;
+    const k = q.toLowerCase();
+    const cur = byKey.get(k) ?? { query: q, sceneIds: [] };
+    if (sceneId && !cur.sceneIds.includes(sceneId)) cur.sceneIds.push(sceneId);
+    byKey.set(k, cur);
+  };
+  for (const sc of scenes) if (sc.kind !== "cta" && (need[sc.id] ?? 0) > 0) add(sc.newsTerms?.[0] ?? "", sc.id);
+  const perScene = [...byKey.values()].slice(0, MAX_TIER2_QUERIES - 1);
+  const title = norm(articleTitle);
+  const story = title && !perScene.some((q) => q.query.toLowerCase() === title.toLowerCase()) ? [{ query: title, sceneIds: [] }] : [];
+  return [...perScene, ...story];
+}
+
 /** Stable sort by tier so a scene shows its most authentic picture first. */
 export function orderByTier<T extends { tier: VisualTier }>(items: T[]): T[] {
   return items.map((it, i) => ({ it, i })).sort((a, b) => tierRank(a.it.tier) - tierRank(b.it.tier) || a.i - b.i).map(({ it }) => it);
@@ -134,6 +169,8 @@ export type PendingCapture = {
   videoId: string;
   url: string;
   title: string;
+  /** Pasted by hand in the inspector for one shot (`importWebVideo`): the recording replaces that shot as one clip instead of filling planned segments. */
+  manual?: { sceneId: string; shot: number };
   uploader: string | null;
   thumbnailUrl: string | null;
   /** Section the build planned to use: `segments` shots of SHOT_SEC from `startSec`. */
@@ -154,4 +191,66 @@ export function youtubeId(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Longest section of a web video the editor fetches by hand (the NAS API refuses more than 120 s; a shot needs far less). */
+export const MAX_MANUAL_SECTION_SEC = 60;
+/** Section fetched when the editor pastes a video page without an end time. */
+export const DEFAULT_MANUAL_SECTION_SEC = 20;
+
+/**
+ * Video pages the editor may paste instead of a direct file link: YouTube
+ * (watch / shorts / youtu.be), TikTok, Facebook watch / reels / videos,
+ * fb.watch, Vimeo, Dailymotion. Mirrors `VIDEO_PAGE` of the media Lambda's
+ * `server-validate.ts`, which insists on https (`webVideoPageUrl` upgrades).
+ */
+export const WEB_VIDEO_PAGE = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?|shorts\/)|youtu\.be\/|tiktok\.com\/@[^/]+\/video\/|facebook\.com\/(?:watch|reel|[^/]+\/videos)|fb\.watch\/|vimeo\.com\/\d|dailymotion\.com\/video\/)/i;
+
+/** The pasted text as the video page URL the downloader accepts (https, trimmed), or null when it is not a supported video page. */
+export function webVideoPageUrl(text: string): string | null {
+  const u = text.trim();
+  if (!WEB_VIDEO_PAGE.test(u)) return null;
+  return u.replace(/^http:\/\//i, "https://");
+}
+
+/**
+ * "20", "0:20", "1:02", "1:02:03" or "20.5" → seconds; null when unreadable or
+ * negative. Blank is null too, so callers can apply a default.
+ */
+export function parseTimecode(text: string): number | null {
+  const t = text.trim();
+  if (!t) return null;
+  const parts = t.split(":");
+  if (parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) return null;
+  const nums = parts.map(Number);
+  if (nums.slice(1).some((n) => n >= 60)) return null;
+  return nums.reduce((acc, n) => acc * 60 + n, 0);
+}
+
+/** Seconds → "m:ss" (or "h:mm:ss"), whole seconds. */
+export function formatTimecode(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
+}
+
+/**
+ * The section of a web video to fetch: `[start, end)` from the user's
+ * timecodes, a `DEFAULT_MANUAL_SECTION_SEC` window when there is no end, cut
+ * to the video's length when known and to `MAX_MANUAL_SECTION_SEC`. Returns
+ * an error message (Vietnamese, for the editor) when the range makes no sense.
+ */
+export function manualSection(input: { startSec: number | null; endSec: number | null; durationSec: number | null }): { ok: true; startSec: number; endSec: number } | { ok: false; error: string } {
+  const start = Math.max(0, input.startSec ?? 0);
+  let end = input.endSec ?? start + DEFAULT_MANUAL_SECTION_SEC;
+  if (input.durationSec != null && input.durationSec > 0) {
+    if (start >= input.durationSec) return { ok: false, error: `Video chỉ dài ${formatTimecode(input.durationSec)}` };
+    end = Math.min(end, input.durationSec);
+  }
+  if (end <= start) return { ok: false, error: "Mốc kết thúc phải sau mốc bắt đầu" };
+  if (end - start < 1) return { ok: false, error: "Đoạn cắt phải dài ít nhất 1 giây" };
+  if (end - start > MAX_MANUAL_SECTION_SEC) return { ok: false, error: `Đoạn cắt tối đa ${MAX_MANUAL_SECTION_SEC} giây (${formatTimecode(start)} → ${formatTimecode(start + MAX_MANUAL_SECTION_SEC)})` };
+  return { ok: true, startSec: Math.round(start * 10) / 10, endSec: Math.round(end * 10) / 10 };
 }

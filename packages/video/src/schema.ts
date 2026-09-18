@@ -9,8 +9,20 @@ export const SAFE_ZONES = { top: 220, bottom: 420, left: 60, right: 180 } as con
 /** Room kept for the caption block: a chunk wraps to two lines at most (line height 1.35 + padding). */
 export const captionBlockHeight = (fontSize: number) => 2 * fontSize * 1.35 + 28;
 
-/** Room kept for the outro (channel line + credits) of the closing scene. */
-export const OUTRO_HEIGHT = 160;
+/** Room kept for the outro (channel line + article source + music credit) of the closing scene. */
+export const OUTRO_HEIGHT = 220;
+/** Width of the per-shot credit pill ("Ảnh: VnExpress", "Video: … / Pexels"), bottom-left; longer credits are cut with an ellipsis. */
+export const CREDIT_MAX_WIDTH = 840;
+
+/**
+ * The article source as shown in the outro: the outlet's name (its host when
+ * the extractor found none) and the URL without scheme / `www.`.
+ */
+export function sourceDisplay(source: { name: string | null; url: string }) {
+  const url = source.url.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, "");
+  const host = url.split(/[/?#]/)[0];
+  return { name: source.name?.trim() || host, url };
+}
 /** The hook's headline is this much bigger than the kit's headline size. */
 export const HOOK_HEADLINE_SCALE = 66 / 54;
 /** Headlines ("tiêu đề") read bigger than captions ("phụ đề", default 64). */
@@ -175,6 +187,7 @@ export const brandSchema = z.object({
   overlaySrc: z.string().nullable().default(null),
   /** `under_text`: above the pictures, below headline / captions / logo. `top`: above everything. */
   overlayLayer: z.enum(OVERLAY_LAYERS).default("under_text"),
+  /** Show each shot's media credit (`shots[].credit`) on that shot. The article source in the outro is always shown. */
   showSource: z.boolean().default(true),
   /** Short label shown in the CTA/outro, e.g. the channel name. */
   outroText: z.string().nullable().default(null),
@@ -291,7 +304,11 @@ export const timelineSchema = z.object({
     musicSrc: z.string().nullable(),
     musicGainDb: z.number().default(-12),
   }),
-  /** Credits rendered in the outro, e.g. "Video: Pexels · Music: Mubert". */
+  /**
+   * Credits rendered in the outro besides the article source, e.g. "Nhạc: Mubert".
+   * Media credits sit on their own shots (`shots[].credit`); timelines built
+   * before 0.10.0 also list them here.
+   */
   attribution: z.array(z.string()).default([]),
   /** Cover frame chosen in the editor (seconds); null = automatic (~1.2 s in). */
   coverAtSec: z.number().nonnegative().nullable().default(null),

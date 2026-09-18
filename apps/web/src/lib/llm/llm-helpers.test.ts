@@ -27,9 +27,9 @@ describe("renderTemplate", () => {
 const raw: Script = {
   title: "  Metro số 2  ",
   scenes: [
-    { id: "x", kind: "hook", voiceover: " Mở đầu ", onScreenText: "Metro số 2", brollTerms: [" city aerial ", ""], durationSec: 4.26, supportingSentence: "  " },
-    { id: "y", kind: "body", voiceover: "Thân bài", onScreenText: "47.000 tỷ", brollTerms: ["construction site"], durationSec: 0.2, supportingSentence: "Tổng mức đầu tư hơn 47 nghìn tỷ đồng." },
-    { id: "z", kind: "cta", voiceover: "Theo dõi", onScreenText: "Theo VnExpress", brollTerms: [], durationSec: 3, supportingSentence: null },
+    { id: "x", kind: "hook", voiceover: " Mở đầu ", onScreenText: "Metro số 2", brollTerms: [" city aerial ", ""], newsTerms: [" Metro số 2 ", "", "a", "b", "c"], durationSec: 4.26, supportingSentence: "  " },
+    { id: "y", kind: "body", voiceover: "Thân bài", onScreenText: "47.000 tỷ", brollTerms: ["construction site"], newsTerms: [], durationSec: 0.2, supportingSentence: "Tổng mức đầu tư hơn 47 nghìn tỷ đồng." },
+    { id: "z", kind: "cta", voiceover: "Theo dõi", onScreenText: "Theo VnExpress", brollTerms: [], newsTerms: [], durationSec: 3, supportingSentence: null },
   ],
   estimatedDurationSec: 99,
   metadata: {
@@ -47,6 +47,7 @@ describe("normaliseScript", () => {
     expect(s.scenes.map((x) => x.id)).toEqual(["s1", "s2", "s3"]);
     expect(s.scenes[0].voiceover).toBe("Mở đầu");
     expect(s.scenes[0].brollTerms).toEqual(["city aerial"]);
+    expect(s.scenes[0].newsTerms).toEqual(["Metro số 2", "a", "b"]);
     expect(s.scenes[0].supportingSentence).toBeNull();
     expect(s.scenes[0].durationSec).toBe(4.3);
     expect(s.scenes[1].durationSec).toBe(1);

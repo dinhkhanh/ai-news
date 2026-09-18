@@ -10,7 +10,7 @@ import { ReviewPanel } from "@/components/review-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { audioSignature, buildFromDoc, replaceTailShots, sceneShots, shotsMissing, type EditorDoc, type EditorScene, type EditorVisual } from "@/lib/media/editor";
+import { audioSignature, buildFromDoc, replaceTailShots, sceneShots, setShot, shotsMissing, type EditorDoc, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 import { SHOT_SEC, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
 import { CommentsPanel } from "./comments-panel";
@@ -53,6 +53,9 @@ export function Editor(props: EditorProps) {
   // Uploads and linked files join the swap options (and get a presigned URL for the preview) without a reload.
   const [options, setOptions] = useState<VisualOption[]>(props.options);
   const [urls, setUrls] = useState<Record<string, string>>(props.urls);
+  // YouTube pages the server could not fetch: from the build, plus any pasted in the inspector meanwhile.
+  const [captures, setCaptures] = useState<PendingCapture[]>(props.captures);
+  const addCapture = (c: PendingCapture) => setCaptures((list) => [...list.filter((x) => x.videoId !== c.videoId), c]);
   const addOption = (o: VisualOption, url: string) => {
     setOptions((list) => [o, ...list.filter((x) => x.assetId !== o.assetId)]);
     setUrls((u) => ({ ...u, [o.key]: url }));
@@ -61,6 +64,14 @@ export function Editor(props: EditorProps) {
   // A YouTube section recorded in this browser: one clip, cut into the 5 s segments the build had planned, placed at the tail of those scenes.
   const placeCapture = (c: PendingCapture, o: VisualOption, url: string) => {
     addOption(o, url);
+    setCaptures((list) => list.filter((x) => x.videoId !== c.videoId));
+    // Pasted by hand for one shot: the whole recording becomes that shot.
+    if (c.manual) {
+      const { sceneId, shot } = c.manual;
+      setDoc((d) => ({ ...d, scenes: d.scenes.map((s) => (s.id === sceneId ? setShot(s, Math.min(shot, sceneShots(s).length - 1), { kind: "video", key: o.key, clipDurationSec: o.durationSec ?? c.segments * SHOT_SEC, trimStartSec: 0, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl }) : s)) }));
+      toast.success(`Đã ghi "${c.title.slice(0, 40)}" vào cảnh ${sceneId}. Xem lại rồi bấm Lưu.`);
+      return;
+    }
     const usable = Math.floor((o.durationSec ?? c.segments * SHOT_SEC) / SHOT_SEC);
     let segment = 0;
     setDoc((d) => ({
@@ -385,7 +396,7 @@ export function Editor(props: EditorProps) {
       </div>
 
       {/* ---------------- track + inspector ---------------- */}
-      <WebCapturePanel projectId={props.projectId} captures={props.captures} disabled={readOnly} onCaptured={placeCapture} />
+      <WebCapturePanel projectId={props.projectId} captures={captures} disabled={readOnly} onCaptured={placeCapture} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-2">
@@ -405,7 +416,7 @@ export function Editor(props: EditorProps) {
               index={selectedIndex}
               total={doc.scenes.length}
               options={options}
-              overlay={{ caption: doc.brand.caption, headlineStyle: doc.brand.headline, showSource: doc.brand.showSource && Boolean(doc.source.name), hasLogo: Boolean(doc.brand.logoSrc || props.previewLogo) }}
+              overlay={{ caption: doc.brand.caption, headlineStyle: doc.brand.headline, showSource: doc.brand.showSource, hasLogo: Boolean(doc.brand.logoSrc || props.previewLogo) }}
               hasOverlay={Boolean(doc.brand.overlaySrc)}
               urls={urls}
               usedKeys={usedKeys}
@@ -413,12 +424,14 @@ export function Editor(props: EditorProps) {
               disabled={readOnly}
               canRegenerate={canRegenerate}
               regenerateHint={regenerateHint}
+              political={props.political}
               onChange={updateScene}
               onRemove={() => removeScene(selected.id)}
               onRegenerate={(what, payload) => regenerate(what, { sceneId: selected.id, ...payload })}
               onSeek={() => seekToScene(selected.id)}
               onOptionAdded={addOption}
               onOptionFramed={(assetId, frame) => setOptions((list) => list.map((o) => (o.assetId === assetId ? { ...o, frame } : o)))}
+              onCaptureNeeded={addCapture}
             />
           ) : (
             <p className="text-sm text-muted-foreground">Chọn một cảnh.</p>

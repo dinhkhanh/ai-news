@@ -9,11 +9,11 @@ export const sampleTimeline: Timeline = {
   durationFrames: 12 * 30,
   language: "vi",
   title: "Metro số 1 mở rộng",
-  source: { name: "VnExpress", url: "https://vnexpress.net" },
+  source: { name: "VnExpress", url: "https://vnexpress.net/metro-so-1-keo-dai-them-12-km-4712345.html" },
   brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {}, outroText: "Theo dõi để cập nhật tin mới" }),
   scenes: [
-    { id: "s1", kind: "hook", from: 0, durationFrames: 120, headline: "Metro số 1 kéo dài thêm 12 km", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
-    { id: "s2", kind: "body", from: 120, durationFrames: 150, headline: "Khởi công quý ba năm 2027", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
+    { id: "s1", kind: "hook", from: 0, durationFrames: 120, headline: "Metro số 1 kéo dài thêm 12 km", visual: { kind: "solid" }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true },
+    { id: "s2", kind: "body", from: 120, durationFrames: 150, headline: "Khởi công quý ba năm 2027", visual: { kind: "solid" }, shots: [], credit: "Video: Quang Nguyen / Pexels", voiceSrc: null, overlay: true },
     { id: "s3", kind: "cta", from: 270, durationFrames: 90, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
   ],
   captions: [
@@ -21,6 +21,6 @@ export const sampleTimeline: Timeline = {
     { text: "công bố kế hoạch mở rộng metro", startMs: 2300, endMs: 4200, words: [] },
   ],
   audio: { mixSrc: null, voiceSrc: null, musicSrc: null, musicGainDb: -12 },
-  attribution: ["Video: Pexels", "Nhạc: Mubert"],
+  attribution: ["Nhạc: Mubert"],
   coverAtSec: null,
 };
