@@ -7,5 +7,7 @@ import { Inngest } from "inngest";
  */
 export const inngest = new Inngest({
   id: "ai-news",
+  // Dev mode skips request signature checks. Never let a stray INNGEST_DEV switch that on in production.
+  isDev: process.env.NODE_ENV !== "production" && !!process.env.INNGEST_DEV && process.env.INNGEST_DEV !== "0",
   checkpointing: { maxRuntime: "250s" },
 });

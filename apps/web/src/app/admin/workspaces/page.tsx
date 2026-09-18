@@ -6,10 +6,13 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { loadAdminWorkspaces } from "@/lib/admin-data";
 import { ORG_ROLE_NAMES } from "@/lib/permissions";
 import { removeMember, setMemberRole } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function WorkspacesPage() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const { orgs, members, users } = await loadAdminWorkspaces();
 
   return (

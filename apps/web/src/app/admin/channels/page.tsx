@@ -7,10 +7,13 @@ import { loadAdminChannels } from "@/lib/admin-data";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { checkChannel, disconnectChannel, grantChannel, pullAnalyticsNow, revokeChannel, setChannelEnabled, setChannelLogo } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChannelsPage({ searchParams }: { searchParams: Promise<{ connected?: string; error?: string }> }) {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const sp = await searchParams;
   // One round-trip: admin_channels_page() (migration 0013) reads across workspaces.
   const { orgs, channels, members, grants, metaReady, tiktokReady, flags } = await loadAdminChannels();

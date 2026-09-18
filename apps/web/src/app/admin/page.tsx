@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,8 @@ async function loadStats(): Promise<Stats> {
 }
 
 export default async function AdminOverview() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const s = await loadStats();
 
   const tiles: Array<[string, string | number]> = [

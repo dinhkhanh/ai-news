@@ -7,10 +7,13 @@ import { Label } from "@/components/ui/label";
 import { loadAdminIntegrations } from "@/lib/admin-data";
 import { FEATURE_FLAGS, flagDefault, INTEGRATIONS } from "@/lib/integrations";
 import { clearIntegrationSecret, saveIntegration, setFeatureFlag } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function IntegrationsPage() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   // One round-trip: admin_integrations_page() (migration 0013) also masks the Vault secrets in the database.
   const { integrations: rows, flags } = await loadAdminIntegrations();
   const byProvider = new Map(rows.map((r) => [r.provider, r]));

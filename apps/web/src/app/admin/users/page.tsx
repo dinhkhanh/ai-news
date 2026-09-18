@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NativeSelect } from "@/components/ui/native-select";
-import { getSession } from "@/lib/session";
+import { getSession, requireAdmin } from "@/lib/session";
 import { banUser, impersonate, setPlatformRole, unbanUser } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const me = await getSession();
   const users = await db.select().from(schema.user).orderBy(desc(schema.user.createdAt)).limit(500);
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalizeUrl, displayHost, isPrivateHost } from "./url";
+import { canonicalizeUrl, displayHost, isPrivateHost, safeNextPath } from "./url";
 
 describe("canonicalizeUrl", () => {
   it("strips tracking params, fragments and default ports; sorts the rest", () => {
@@ -31,5 +31,18 @@ describe("helpers", () => {
     expect(isPrivateHost("http://10.1.2.3/")).toBe(true);
     expect(isPrivateHost("http://192.168.1.1/")).toBe(true);
     expect(isPrivateHost("https://vnexpress.net/")).toBe(false);
+  });
+});
+
+describe("safeNextPath", () => {
+  it("keeps paths inside the app", () => {
+    expect(safeNextPath("/app/projects/1?tab=script")).toBe("/app/projects/1?tab=script");
+    expect(safeNextPath("/admin")).toBe("/admin");
+  });
+
+  it("falls back for anything a browser would take off-site", () => {
+    for (const next of ["//evil.tld", "/\\evil.tld", "https://evil.tld", "javascript:alert(1)", "evil.tld", "/\tevil", "", null, undefined]) {
+      expect(safeNextPath(next), String(next)).toBe("/app");
+    }
   });
 });

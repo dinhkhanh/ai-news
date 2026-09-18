@@ -43,6 +43,14 @@ export function displayHost(url: string) {
   }
 }
 
+/**
+ * A `next` parameter is only followed when it is a path inside the app. "//host" and "/\\host" are
+ * protocol-relative URLs to browsers, so a leading slash alone does not make a value local.
+ */
+export function safeNextPath(next: string | null | undefined, fallback = "/app") {
+  return next && /^\/(?![/\\])/.test(next) && !/[\u0000-\u001f]/.test(next) ? next : fallback;
+}
+
 export function isPrivateHost(url: string) {
   try {
     const h = new URL(url).hostname;

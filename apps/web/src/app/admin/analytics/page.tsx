@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { loadAdminAnalytics } from "@/lib/admin-data";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { dayStart } from "@/lib/quota";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,8 @@ function loadStats() {
 
 /** Admin analytics (docs/PLAN.md §6 "produced, published, platform performance"; §7 YouTube quota). */
 export default async function AnalyticsPage() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const { produced, published, byPlatform, byDay, byStatus: statusMap, ytUnitsToday, topPosts, channels, unhealthyChannels } = await loadStats();
   const tiles: Array<[string, string]> = [
     ["Renders done (30 d)", n(produced)],

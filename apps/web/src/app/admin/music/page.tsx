@@ -9,10 +9,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { TONE_MOODS } from "@/lib/media/music";
 import { presignGet } from "@/lib/r2";
 import { deleteTrack, uploadTrack } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function MusicPage() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const rows = await db.select().from(schema.musicLibrary).orderBy(desc(schema.musicLibrary.createdAt));
   const links = new Map<string, string>();
   for (const r of rows) {

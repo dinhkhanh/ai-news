@@ -7,10 +7,13 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { loadAdminQuotas } from "@/lib/admin-data";
 import { QUOTA_RESOURCES } from "@/lib/integrations";
 import { deleteQuota, saveQuota } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function QuotasPage() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const { quotas: rows, users, orgs } = await loadAdminQuotas();
   const defaults = rows.filter((r) => r.scopeId === "*");
   const overrides = rows.filter((r) => r.scopeId !== "*");

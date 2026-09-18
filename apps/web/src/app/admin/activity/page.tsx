@@ -2,10 +2,13 @@ import { loadAdminActivity } from "@/lib/admin-data";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function ActivityPage({ searchParams }: { searchParams: Promise<{ type?: string; actor?: string; page?: string }> }) {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
   const pageSize = 100;

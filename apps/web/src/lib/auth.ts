@@ -64,6 +64,9 @@ async function ensurePersonalOrg(u: { id: string; name: string; email: string })
   return org;
 }
 
+/** Organization plugin endpoints that stay reachable: switching / listing one's own workspaces, and create (platform admins only, see allowUserToCreateOrganization). */
+const ORG_ENDPOINTS_OPEN = ["/organization/set-active", "/organization/list", "/organization/create"];
+
 export const auth = betterAuth({
   appName: "ai-news",
   baseURL: e.APP_URL,
@@ -158,6 +161,12 @@ export const auth = betterAuth({
       if (ctx.path === "/sign-in/social" && ctx.body?.provider !== "google") {
         throw new APIError("BAD_REQUEST", { message: "Only Google sign-in is supported." });
       }
+      // Workspaces and their members are managed in /admin/workspaces (logged, platform admins only). The
+      // organization plugin's own endpoints would let every owner of a personal workspace invite members,
+      // change roles or edit the workspace outside of that, so only the harmless ones stay open.
+      if (ctx.path.startsWith("/organization/") && !ORG_ENDPOINTS_OPEN.includes(ctx.path)) {
+        throw new APIError("FORBIDDEN", { message: "Workspaces are managed by a platform admin." });
+      }
     }),
   },
   plugins: [
@@ -169,12 +178,15 @@ export const auth = betterAuth({
       schema: {
         organization: {
           additionalFields: {
-            kind: { type: "string", required: false, input: true, defaultValue: "personal" },
+            kind: { type: "string", required: false, input: false, defaultValue: "personal" },
             ownerUserId: { type: "string", required: false, input: false },
           },
         },
       },
       organizationHooks: {
+        // `kind` is not client input: personal workspaces are inserted by ensurePersonalOrg, so whatever a
+        // platform admin creates through the API is a team workspace.
+        beforeCreateOrganization: async ({ organization: org }) => ({ data: { ...org, kind: "team" } }),
         afterCreateOrganization: async ({ organization: org, user: u }) => {
           await logActivity({
             actorId: u.id,

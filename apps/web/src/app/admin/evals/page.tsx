@@ -12,10 +12,13 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { loadAdminEvals } from "@/lib/admin-data";
 import type { EvalArticleResult, EvalSummary } from "@/lib/eval-summary";
 import { addEvalArticle, deleteEvalArticle, importEvalArticleFromProject, toggleEvalArticle } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function EvalsPage({ searchParams }: { searchParams: Promise<{ run?: string }> }) {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const sp = await searchParams;
   // One round-trip: admin_evals_page() (migration 0013). Article texts stay in the database (only the word
   // count is shown) and `results` comes back for the run on screen only.

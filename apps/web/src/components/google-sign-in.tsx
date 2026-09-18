@@ -3,6 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
+import { safeNextPath } from "@/lib/url";
 
 export function GoogleSignIn({ next }: { next?: string }) {
   const [busy, setBusy] = useState(false);
@@ -14,7 +15,7 @@ export function GoogleSignIn({ next }: { next?: string }) {
         setBusy(true);
         const { error } = await authClient.signIn.social({
           provider: "google",
-          callbackURL: next && next.startsWith("/") ? next : "/app",
+          callbackURL: safeNextPath(next),
           errorCallbackURL: "/?error=" + encodeURIComponent("Đăng nhập thất bại. Tài khoản hoặc tên miền chưa được phép."),
         });
         if (error) {

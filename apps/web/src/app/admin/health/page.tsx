@@ -9,6 +9,7 @@ import { STEP_LABEL } from "@/lib/project-state";
 import { findStalledQueue, inngestStatus } from "@/lib/queue-health";
 import { headObject, presignGet } from "@/lib/r2";
 import { triggerTestRender } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,8 @@ const ENV_CHECKS: Array<[string, string]> = [
 ];
 
 export default async function HealthPage() {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   // The R2 probe is a network call: run it next to the (single) database round-trip, not after it.
   // The queue checks ride along with the R2 probe: one more service read in parallel does not lengthen the page.
   const [renders, stalled, inngest, r2Status] = await Promise.all([

@@ -16,6 +16,7 @@ import { KNOWN_PLACEHOLDERS } from "@/lib/llm/render";
 import { defaultTemplate, DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { runPromptEval } from "../evals/actions";
 import { createPromptVersion, promotePromptVersion } from "./actions";
+import { requireAdmin } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,8 @@ function EvalBadge({ evalJson }: { evalJson: Record<string, unknown> | null }) {
 }
 
 export default async function PromptsPage({ searchParams }: { searchParams: Promise<{ purpose?: string; language?: string }> }) {
+  // The layout's check is not enough: a request for this segment alone renders the page without the layout.
+  await requireAdmin();
   const sp = await searchParams;
   const purpose = PROMPT_PURPOSES.includes(sp.purpose as never) ? (sp.purpose as (typeof PROMPT_PURPOSES)[number]) : "script";
   const language = sp.language === "en" ? "en" : "vi";

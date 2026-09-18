@@ -154,6 +154,9 @@ export async function registerUpload(input: { projectId: string; key: string; fi
     if (!kind) throw new Error("Unsupported file type");
     const prefix = r2Key.media(ws.organizationId, input.projectId, "uploads/");
     if (!input.key.startsWith(prefix)) throw new Error("Khoá tệp không hợp lệ");
+    // The foreign key on assets.project_id is checked without RLS, so make sure the project is in this workspace.
+    const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, input.projectId), columns: { id: true } }));
+    if (!project) throw new Error("Project not found in this workspace");
     const head = await headObject(input.key);
     if (!head.exists || head.size === 0) throw new Error("Tệp chưa được tải lên xong");
     if (head.size > UPLOAD_MAX_BYTES) {
