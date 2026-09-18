@@ -1,7 +1,15 @@
-/** Signed OAuth `state` for channel connections: binds the callback to the admin, workspace and platform that started it. Pure (node:crypto only). */
+/** Signed OAuth `state` for channel connections: binds the callback to the user, workspace and platform that started it. Pure (node:crypto only). */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type OAuthState = { orgId: string; userId: string; provider: "youtube" | "meta" | "tiktok"; nonce: string; exp: number };
+export type OAuthState = {
+  orgId: string;
+  userId: string;
+  provider: "youtube" | "meta" | "tiktok";
+  nonce: string;
+  exp: number;
+  /** Where the flow started and goes back to: a member's /app/channels (default for states without it: the admin page). */
+  from?: "app" | "admin";
+};
 
 const b64 = (s: string | Buffer) => Buffer.from(s).toString("base64url");
 

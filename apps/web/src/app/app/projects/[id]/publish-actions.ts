@@ -27,7 +27,7 @@ async function assertPublisher(ws: Workspace, channelId: string) {
   if (!canApprove(ws)) throw new Error("Chỉ publisher hoặc admin workspace mới được đăng");
   const channel = await withOrgContext(ws, (tx) => tx.query.channels.findFirst({ where: eq(schema.channels.id, channelId) }));
   if (!channel) throw new Error("Kênh không thuộc workspace này");
-  if (!channel.enabled || !channel.vaultRef) throw new Error("Kênh đang tạm dừng hoặc chưa kết nối; nhờ admin kiểm tra /admin/channels");
+  if (!channel.enabled || !channel.vaultRef) throw new Error("Kênh đang tạm dừng hoặc chưa kết nối; kiểm tra ở /app/channels");
   if (!ws.isAdmin) {
     const grant = await withOrgContext(ws, (tx) => tx.query.channelGrants.findFirst({ where: and(eq(schema.channelGrants.channelId, channelId), eq(schema.channelGrants.userId, ws.userId)) }));
     if (!grant) throw new Error("Bạn chưa được cấp quyền đăng lên kênh này");

@@ -214,9 +214,9 @@ export async function storeChannelToken(channelId: string, token: ChannelToken) 
 }
 
 export async function loadChannelToken(channel: { id: string; vaultRef: string | null }): Promise<ChannelToken> {
-  if (!channel.vaultRef) throw new Error("Channel has no stored token; reconnect it in /admin/channels");
+  if (!channel.vaultRef) throw new Error("Channel has no stored token; reconnect it in /app/channels");
   const raw = await readSecret(channel.vaultRef);
-  if (!raw) throw new Error("Channel token missing from Vault; reconnect it in /admin/channels");
+  if (!raw) throw new Error("Channel token missing from Vault; reconnect it in /app/channels");
   return JSON.parse(raw) as ChannelToken;
 }
 
