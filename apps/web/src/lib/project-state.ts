@@ -1,6 +1,22 @@
 /** A pipeline step is considered stuck after this long without a project update (docs/PLAN.md §4: any step can be re-run). */
 export const BUSY_STALE_MS = 15 * 60 * 1000;
 
+/**
+ * The queue (Inngest) normally picks a step up within seconds. A step still waiting after this long means the
+ * queue is slow or down: the page says so and offers to run short steps directly (src/lib/pipeline/direct.ts).
+ */
+export const QUEUE_SLOW_MS = 90 * 1000;
+
+/** Steps short enough to run inside the app when the queue does not pick them up. */
+export const DIRECT_STEPS = ["fetch", "script"] as const;
+export type DirectStep = (typeof DIRECT_STEPS)[number];
+
+/** `projects.inngest_run_id` after a failed direct fetch: the page then offers the direct re-fetch buttons as well. Cleared by the next stored article. */
+export const DIRECT_RUN_ID = "direct";
+
+/** Fired by <ActionForm> after a successful submit so watchers re-poll at once instead of waiting for the next tick. */
+export const ACTION_EVENT = "ai-news:action";
+
 /** Live progress of the running step (projects.busy_progress), merged by src/lib/progress.ts. */
 export type BusyProgress = {
   /** When the step was queued (set by the server action / auto mode). */
@@ -14,6 +30,8 @@ export type BusyProgress = {
   /** Counter for parallel work ("Giọng đọc 3/8"). */
   done?: number;
   total?: number;
+  /** The step runs inside the app (a direct run), not in the queue. */
+  direct?: boolean;
 };
 
 export type PipelineStep = "fetch" | "script" | "assets" | "render" | "regenerate";
@@ -60,6 +78,37 @@ export function busyStep(p: { busyStep: string | null; updatedAt: Date }, now = 
 
 export function busyIsStale(p: { busyStep: string | null; updatedAt: Date }, now = Date.now()) {
   return Boolean(p.busyStep) && busyStep(p, now) === null;
+}
+
+/**
+ * How long a step has been waiting for the queue, or null once something runs it: `startProgress` writes
+ * `at` = `startedAt`, and the first `reportProgress` of the function moves `at` on.
+ */
+export function queuedForMs(progress: BusyProgress | null | undefined, now = Date.now()) {
+  if (!progress?.startedAt || progress.direct || progress.at !== progress.startedAt) return null;
+  const startedAt = Date.parse(progress.startedAt);
+  return Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : null;
+}
+
+/** A requested step may be taken over by a direct run when the queue never started it, or when it went quiet. */
+export function directRunAllowed(p: { busyStep: string | null; busyProgress: BusyProgress | null; updatedAt: Date }, step: DirectStep, now = Date.now()) {
+  if (p.busyStep !== step) return false;
+  if (busyIsStale(p, now)) return true;
+  const waited = queuedForMs(p.busyProgress, now);
+  return waited != null && waited >= QUEUE_SLOW_MS;
+}
+
+/**
+ * A queued event is obsolete when the step it asks for produced a result after the event was sent (a direct
+ * run, or an earlier duplicate that drained first), or when a direct run started later still holds the project.
+ * Checked in the first step of every pipeline function, so a backlog that drains after an outage redoes nothing.
+ */
+export function eventSuperseded(eventTs: number | undefined, p: { latestResultAt?: Date | string | null; progress?: BusyProgress | null }) {
+  if (!eventTs) return false;
+  const resultAt = p.latestResultAt ? new Date(p.latestResultAt).getTime() : NaN;
+  if (Number.isFinite(resultAt) && resultAt > eventTs) return true;
+  const directAt = p.progress?.direct && p.progress.startedAt ? Date.parse(p.progress.startedAt) : NaN;
+  return Number.isFinite(directAt) && directAt > eventTs;
 }
 
 /** Progress value written when a step is queued, before the Inngest function reports anything. */

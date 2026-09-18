@@ -6,6 +6,7 @@ import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { PipelineStatus } from "@/components/pipeline-status";
+import { DirectFetchButtons } from "@/components/queue-rescue";
 import { ProjectStateIcon, stateLabel } from "@/components/project-state";
 import { SectionTabs, StickyToolbar, type SectionTab } from "@/components/sticky-toolbar";
 import { VideoButton } from "@/components/video-dialog";
@@ -25,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { StoredFaithfulness, StoredScript } from "@/lib/llm/schemas";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { flagsEnabled } from "@/lib/flags";
-import { buildStatus, busyStep } from "@/lib/project-state";
+import { buildStatus, busyStep, DIRECT_RUN_ID } from "@/lib/project-state";
 import { buildMetadata, PLATFORM_SPEC, type Analytics } from "@/lib/publish/platforms";
 import { presignGet } from "@/lib/r2";
 import { canApprove, needsFaithfulnessOverride } from "@/lib/review";
@@ -44,6 +45,8 @@ import {
 } from "./actions";
 
 export const dynamic = "force-dynamic";
+/** Server actions of this page run direct pipeline steps in `after()` (queue outage fallback, manual paste): a script takes 1–3 minutes. */
+export const maxDuration = 300;
 
 const KIND_LABEL: Record<string, string> = { built: "dựng", edited: "sửa", regenerated: "tạo lại" };
 const RENDER_LABEL: Record<string, string> = {
@@ -394,9 +397,7 @@ export default async function ProjectPage({
             </Link>{" "}
             / {displayHost(project.url)}
           </div>
-          <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">
-            {project.title ?? project.url}
-          </h1>
+          <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">{project.title ?? project.url}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
             <Badge
               variant={
@@ -478,7 +479,7 @@ export default async function ProjectPage({
         ) : null}
       </StickyToolbar>
 
-      <PipelineStatus initial={status} />
+      <PipelineStatus initial={status} canRun={writer} />
       {sp.duplicate ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
           Bài này đã có dự án trong workspace; bạn đang xem dự án đó.
@@ -509,7 +510,9 @@ export default async function ProjectPage({
                     : "Thử lấy lại, dùng Firecrawl, hoặc dán nội dung bài thủ công bên dưới."}
                 </CardDescription>
               </CardHeader>
-              {!busy && writer ? <CardContent>{fallbackForms(project.id)}</CardContent> : null}
+              {!busy && writer ? (
+                <CardContent>{fallbackForms(project.id, project.inngestRunId === DIRECT_RUN_ID)}</CardContent>
+              ) : null}
             </Card>
           ) : !article.confirmedAt ? (
             <Card id="article" className="scroll-mt-3">
@@ -721,7 +724,7 @@ export default async function ProjectPage({
                       <label className="flex min-h-9 items-center gap-2 text-xs text-muted-foreground">
                         <input type="checkbox" name="skipStock" /> bỏ qua stock
                       </label>
-                      <Button type="submit" disabled={busy}>
+                      <Button type="submit" disabled={busy} className="self-auto sm:self-start">
                         <Clapperboard />{" "}
                         {timelines.length
                           ? `Dựng lại từ kịch bản v${selected?.version ?? scripts[0].version}`
@@ -1095,10 +1098,21 @@ function pasteForm(projectId: string, busy: boolean) {
   );
 }
 
-function fallbackForms(projectId: string) {
+/** `direct`: the last attempt was a direct run that failed, so the queue is probably still down: offer the other providers the same way. */
+function fallbackForms(projectId: string, direct: boolean) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">{refetchButtons(projectId, false)}</div>
+      {direct ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Hàng đợi xử lý có thể vẫn đang chậm. Chạy ngay trong ứng dụng, mỗi nút chỉ thử đúng một cách:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <DirectFetchButtons projectId={projectId} />
+          </div>
+        </div>
+      ) : null}
       {pasteForm(projectId, false)}
     </div>
   );

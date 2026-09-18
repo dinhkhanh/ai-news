@@ -32,6 +32,11 @@ describe("fetchOrder", () => {
     expect(fetchOrder("http")).toEqual(["http", "browser_rendering", "firecrawl"]);
     expect(fetchOrder("firecrawl")).toEqual(["firecrawl", "browser_rendering", "http"]);
   });
+
+  it("only: a direct run tries the picked provider and nothing else", () => {
+    expect(fetchOrder("http", true)).toEqual(["http"]);
+    expect(fetchOrder(undefined, true)).toEqual(["browser_rendering", "http", "firecrawl"]);
+  });
 });
 
 describe("fetchArticle fall-through", () => {

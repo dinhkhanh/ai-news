@@ -5,6 +5,7 @@ import { inngest } from "../client";
 import { projectAssetsRequested } from "../events";
 import { autoAfterAssets } from "../auto-pipeline";
 import { reportProgress, tickProgress } from "@/lib/progress";
+import { eventSuperseded } from "@/lib/project-state";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -75,10 +76,12 @@ export const prepareAssetsFn = inngest.createFunction(
     const pctx = { ...ctx, projectId };
 
     const input = await step.run("load", async () => {
-      await reportProgress(pctx, { label: "Đọc kịch bản", pct: 2 });
       const row = await withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
+        // A backlog draining after a queue outage: a build requested twice is built once (`eventSuperseded`).
+        const built = await tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.kind, "built")), orderBy: desc(schema.timelines.createdAt), columns: { createdAt: true } });
+        if (eventSuperseded(event.ts, { latestResultAt: built?.createdAt })) return null;
         const script = scriptId
           ? await tx.query.scripts.findFirst({ where: and(eq(schema.scripts.projectId, projectId), eq(schema.scripts.id, scriptId)) })
           : await tx.query.scripts.findFirst({ where: eq(schema.scripts.projectId, projectId), orderBy: desc(schema.scripts.version) });
@@ -87,6 +90,8 @@ export const prepareAssetsFn = inngest.createFunction(
         await tx.update(schema.projects).set({ busyStep: "assets", lastError: null }).where(eq(schema.projects.id, projectId));
         return { project, script, article };
       });
+      if (!row) return null;
+      await reportProgress(pctx, { label: "Đọc kịch bản", pct: 2 });
       const s = row.script.scenesJson as unknown as StoredScript;
       return {
         buildId: nanoid(8),
@@ -107,6 +112,7 @@ export const prepareAssetsFn = inngest.createFunction(
         scenes: s.scenes.map((sc) => ({ id: sc.id, kind: sc.kind, voiceover: sc.voiceover, onScreenText: sc.onScreenText, brollTerms: sc.brollTerms, newsTerms: sc.newsTerms ?? [], durationSec: sc.durationSec })),
       };
     });
+    if (!input) return { projectId, skipped: "superseded" as const };
     const media = (name: string) => r2Key.media(organizationId, projectId, name);
 
     // The timeline embeds the kit with the kit's own logo; the channel's logo is put in at render time (render-project) and in the editor preview, so one version renders for any channel.

@@ -2,7 +2,7 @@
 import { startTransition, useActionState, useEffect } from "react";
 import { toast } from "sonner";
 import type { ActionState } from "@/lib/admin";
-import { ACTION_EVENT } from "@/components/pipeline-status";
+import { ACTION_EVENT } from "@/lib/project-state";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -43,7 +43,7 @@ export function ActionForm({ action, children, className, id, resetOnSuccess }: 
         if (resetOnSuccess) queueMicrotask(() => setTimeout(() => form.reset(), 0));
       }}
     >
-      <fieldset disabled={pending} className="contents space-y-4">
+      <fieldset disabled={pending} className="contents sm:space-x-4 sm:space-y-4">
         {children}
       </fieldset>
     </form>

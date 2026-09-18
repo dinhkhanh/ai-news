@@ -3,11 +3,10 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { formatElapsed, STEP_ETA, STEP_LABEL, type ProjectStatus } from "@/lib/project-state";
+import { QueueRescue } from "@/components/queue-rescue";
+import { ACTION_EVENT, formatElapsed, QUEUE_SLOW_MS, queuedForMs, STEP_ETA, STEP_LABEL, type ProjectStatus } from "@/lib/project-state";
 import { cn } from "@/lib/utils";
 
-/** Fired by <ActionForm> after a successful submit so watchers re-poll at once instead of waiting for the next tick. */
-export const ACTION_EVENT = "ai-news:action";
 
 const BUSY_MS = 2500;
 const WATCH_MS = 10000;
@@ -102,7 +101,7 @@ function useNow(active: boolean) {
  * Replaces the old "refresh the whole page every 4 s" loop: the page reloads
  * once, when the run has actually changed something.
  */
-export function PipelineStatus({ initial, variant = "card", className }: { initial: ProjectStatus; variant?: "card" | "inline"; className?: string }) {
+export function PipelineStatus({ initial, variant = "card", canRun = true, className }: { initial: ProjectStatus; variant?: "card" | "inline"; /** Writers get the direct-run buttons when the queue is slow. */ canRun?: boolean; className?: string }) {
   const [status] = useProjectStatuses([initial]);
   const now = useNow(Boolean(status?.step));
   if (!status) return null;
@@ -113,14 +112,19 @@ export function PipelineStatus({ initial, variant = "card", className }: { initi
   const startedAt = progress?.startedAt ? Date.parse(progress.startedAt) : NaN;
   const elapsed = Number.isFinite(startedAt) ? formatElapsed(now - startedAt) : null;
   const pct = typeof progress?.pct === "number" ? Math.max(0, Math.min(100, progress.pct)) : null;
+  // Requested, but the queue has not started it: normal for a few seconds, a queue problem after QUEUE_SLOW_MS.
+  const queueSlow = Boolean(step) && (queuedForMs(progress, now) ?? 0) >= QUEUE_SLOW_MS;
 
   if (stale) {
     return (
-      <div role="status" className={cn("flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm", className)}>
-        <AlertTriangle className="size-4 shrink-0 text-destructive" />
-        <span>
-          Bước <b>{STEP_LABEL[status.staleStep ?? ""] ?? status.staleStep ?? "đang chạy"}</b> không phản hồi hơn 15 phút. Bạn có thể chạy lại bước đó.
-        </span>
+      <div role="status" className={cn("space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm", className)}>
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="size-4 shrink-0 text-destructive" />
+          <span>
+            Bước <b>{STEP_LABEL[status.staleStep ?? ""] ?? status.staleStep ?? "đang chạy"}</b> không phản hồi hơn 15 phút. Bạn có thể chạy lại bước đó.
+          </span>
+        </div>
+        {variant === "card" && status.staleStep ? <QueueRescue projectId={status.id} step={status.staleStep} stale canRun={canRun} /> : null}
       </div>
     );
   }
@@ -133,6 +137,7 @@ export function PipelineStatus({ initial, variant = "card", className }: { initi
         {progress?.label ? <span className="text-muted-foreground">· {progress.label}</span> : null}
         {pct != null ? <span className="tabular-nums text-muted-foreground">{pct}%</span> : null}
         {elapsed ? <span className="tabular-nums text-muted-foreground" suppressHydrationWarning>{elapsed}</span> : null}
+        {queueSlow ? <span className="text-amber-700 dark:text-amber-400">· hàng đợi chậm</span> : null}
       </span>
     );
   }
@@ -161,6 +166,7 @@ export function PipelineStatus({ initial, variant = "card", className }: { initi
         {pct != null ? <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span> : null}
       </div>
       <p className="text-xs text-muted-foreground">{progress?.label ?? "Đang xếp hàng…"}</p>
+      {queueSlow && step ? <QueueRescue projectId={status.id} step={step} canRun={canRun} /> : null}
     </div>
   );
 }
@@ -193,6 +199,7 @@ export function LiveStep({ id, children }: { id: string; children: React.ReactNo
         {Number.isFinite(startedAt) ? <span className="tabular-nums text-muted-foreground" suppressHydrationWarning>{formatElapsed(now - startedAt)}</span> : null}
       </span>
       {status.progress?.label ? <span className="truncate text-muted-foreground">{status.progress.label}</span> : null}
+      {(queuedForMs(status.progress, now) ?? 0) >= QUEUE_SLOW_MS ? <span className="text-amber-700 dark:text-amber-400">Hàng đợi chậm: mở dự án để chạy trực tiếp</span> : null}
     </span>
   );
 }

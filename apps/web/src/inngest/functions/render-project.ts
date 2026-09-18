@@ -1,9 +1,10 @@
 import { NonRetriableError } from "inngest";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Timeline } from "@ai-news/video/schema";
 import { inngest } from "../client";
 import { projectRenderRequested } from "../events";
 import { reportProgress } from "@/lib/progress";
+import { eventSuperseded } from "@/lib/project-state";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity, recordUsageCost } from "@/lib/activity";
@@ -49,17 +50,20 @@ export const renderProjectFn = inngest.createFunction(
     const pctx = { ...ctx, projectId };
 
     const input = await step.run("load", async () => {
-      await reportProgress(pctx, { label: "Chuẩn bị timeline", pct: 2 });
       // The kit is shared by every channel, the logo is the channel's: this render's choice, else the project's; "kit" or a channel without a logo = the logo embedded in the timeline.
       const wanted = logoChannelId === "kit" ? null : (logoChannelId ?? (await withOrgContext(ctx, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { logoChannelId: true } })))?.logoChannelId ?? null);
       const logo = await channelLogo(ctx, wanted);
-      return withOrgContext(ctx, async (tx) => {
+      const loaded = await withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
         const timeline = timelineId
           ? await tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.id, timelineId)) })
           : await tx.query.timelines.findFirst({ where: eq(schema.timelines.projectId, projectId), orderBy: desc(schema.timelines.version) });
         if (!timeline) throw new NonRetriableError("Build the timeline first");
+        // A backlog draining after a queue outage: the same version + logo requested twice is rendered once (`eventSuperseded`).
+        const sameLogo = logo?.id ? eq(schema.renders.logoChannelId, logo.id) : isNull(schema.renders.logoChannelId);
+        const newer = await tx.query.renders.findFirst({ where: and(eq(schema.renders.projectId, projectId), eq(schema.renders.timelineId, timeline.id), sameLogo), orderBy: desc(schema.renders.createdAt), columns: { createdAt: true } });
+        if (eventSuperseded(event.ts, { latestResultAt: newer?.createdAt })) return null;
         await tx.update(schema.projects).set({ busyStep: "render", lastError: null }).where(eq(schema.projects.id, projectId));
         const [render] = await tx
           .insert(schema.renders)
@@ -78,7 +82,10 @@ export const renderProjectFn = inngest.createFunction(
           approved: project.approvedTimelineId === timeline.id,
         };
       });
+      if (loaded) await reportProgress(pctx, { label: "Chuẩn bị timeline", pct: 2 });
+      return loaded;
     });
+    if (!input) return { projectId, skipped: "superseded" as const };
     const rawKey = r2Key.tmp(organizationId, projectId, `render-${input.renderId}-raw.mp4`);
     const outKey = r2Key.render(organizationId, projectId, `${input.renderId}.mp4`);
     const coverKey = r2Key.render(organizationId, projectId, `${input.renderId}-cover.jpg`);

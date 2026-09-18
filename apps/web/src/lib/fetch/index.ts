@@ -26,8 +26,12 @@ export const FETCH_METHOD_LABEL: Record<FetchMethod, string> = { browser_renderi
 
 export const FETCH_CHAIN: readonly FetchProvider[] = ["browser_rendering", "http", "firecrawl"];
 
-/** The chain with `preferred` moved to the front; nothing is ever dropped, so a blocked provider always has a successor. */
-export const fetchOrder = (preferred?: FetchProvider): FetchProvider[] => (preferred ? [preferred, ...FETCH_CHAIN.filter((m) => m !== preferred)] : [...FETCH_CHAIN]);
+/**
+ * The chain with `preferred` moved to the front; nothing is ever dropped, so a blocked provider always has a successor.
+ * `only` = that one provider and nothing else: a direct run (queue outage) stays short and reports its own error.
+ */
+export const fetchOrder = (preferred?: FetchProvider, only = false): FetchProvider[] =>
+  preferred ? (only ? [preferred] : [preferred, ...FETCH_CHAIN.filter((m) => m !== preferred)]) : [...FETCH_CHAIN];
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
@@ -40,13 +44,13 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slic
  */
 export async function fetchArticle(
   url: string,
-  opts: { preferred?: FetchProvider; screenshot?: boolean; onAttempt?: (next: FetchProvider, previous: FetchAttempt | null) => void | Promise<void> } = {},
+  opts: { preferred?: FetchProvider; only?: boolean; screenshot?: boolean; onAttempt?: (next: FetchProvider, previous: FetchAttempt | null) => void | Promise<void> } = {},
 ): Promise<FetchOutcome> {
   if (isPrivateHost(url)) throw new Error("Refusing to fetch a private or local address");
   const attempts: FetchAttempt[] = [];
   let best: { method: FetchMethod; extracted: Extracted; rawHtml: string | null } | null = null;
 
-  for (const method of fetchOrder(opts.preferred)) {
+  for (const method of fetchOrder(opts.preferred, opts.only)) {
     await opts.onAttempt?.(method, attempts.at(-1) ?? null);
     const t0 = Date.now();
     try {

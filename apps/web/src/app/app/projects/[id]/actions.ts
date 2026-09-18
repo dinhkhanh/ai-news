@@ -1,13 +1,16 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
 import { projectAssetsRequested, projectFetchRequested, projectScriptRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
+import { FETCH_METHOD_LABEL } from "@/lib/fetch";
 import { countWords } from "@/lib/fetch/readability";
+import { claimDirectRun, runFetchDirect, runScriptDirect } from "@/lib/pipeline/direct";
 import { parsePreset } from "@/lib/presets";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
@@ -66,20 +69,58 @@ export async function refetchArticle(_: ActionState, fd: FormData): Promise<Acti
   });
 }
 
-/** Manual paste fallback (last link of the extraction chain). */
+/**
+ * Manual paste fallback (last link of the extraction chain). Always a direct run: there is no network fetch to
+ * retry, and a paste is what is left when the providers failed, so it must not wait for the queue either.
+ */
 export async function pasteArticle(_: ActionState, fd: FormData): Promise<ActionState> {
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
-    await loadProject(ws, projectId);
     const title = str(fd, "title");
     const text = String(fd.get("text") ?? "").trim();
     if (countWords(text) < 40) throw new Error("Paste at least 40 words of article text");
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
-    await inngest.send(projectFetchRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
+    await claimDirectRun(ws, projectId, "fetch", "Lưu nội dung dán…", { allowIdle: true });
+    after(() => runFetchDirect({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
     await log("article.pasted", { words: countWords(text) }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
     return "Saving pasted text…";
+  });
+}
+
+/**
+ * Queue outage fallback: run the extraction inside the app with one provider (no chain, so it stays short and
+ * says why it failed). Offered by <QueueRescue> when the queue has not picked the fetch up after `QUEUE_SLOW_MS`
+ * or it went stale, and on the fallback card after a failed direct run. The queued event is dropped later by
+ * `eventSuperseded`.
+ */
+export async function fetchDirect(_: ActionState, fd: FormData): Promise<ActionState> {
+  return run(async () => {
+    const { ws, log } = await assertWorkspaceWriter();
+    const projectId = str(fd, "projectId");
+    const method = str(fd, "method");
+    if (method !== "browser_rendering" && method !== "http" && method !== "firecrawl") throw new Error("Pick a fetch method");
+    const project = await claimDirectRun(ws, projectId, "fetch", `Chạy trực tiếp: ${FETCH_METHOD_LABEL[method]}`, { allowIdle: true });
+    after(() => runFetchDirect({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, method }));
+    await log("article.fetch_direct", { method, queuedStep: project.busyStep, queuedSince: project.busyProgress?.startedAt ?? null }, projectId);
+    revalidatePath(`/app/projects/${projectId}`);
+    return `Fetching directly via ${FETCH_METHOD_LABEL[method]}, without the queue…`;
+  });
+}
+
+/**
+ * Queue outage fallback for a script that was requested (quota and article checks already done by
+ * `requestScript` / auto mode, preset already on the project) but never picked up. Not offered from idle.
+ */
+export async function scriptDirect(_: ActionState, fd: FormData): Promise<ActionState> {
+  return run(async () => {
+    const { ws, log } = await assertWorkspaceWriter();
+    const projectId = str(fd, "projectId");
+    const project = await claimDirectRun(ws, projectId, "script", "Chạy trực tiếp: viết kịch bản");
+    after(() => runScriptDirect({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, durationSec: project.durationSec, tone: project.tone }));
+    await log("script.direct", { durationSec: project.durationSec, tone: project.tone, queuedSince: project.busyProgress?.startedAt ?? null }, projectId);
+    revalidatePath(`/app/projects/${projectId}`);
+    return `Writing the ${project.durationSec}s script directly, without the queue…`;
   });
 }
 
