@@ -26,7 +26,8 @@ type Props = {
 
 /**
  * "Xem MP4" button that opens the render in a modal player on the same page,
- * portrait 9:16, sized to the viewport. The download link stays beside it for
+ * portrait 9:16, sized to the *visible* viewport (`portrait-modal`: `dvh`, so mobile browser
+ * bars never cover it). The download link stays beside it for
  * anyone who does want the file.
  */
 export function VideoButton({ src, title, description, poster, label = "Xem MP4", size = "xs", variant = "outline", className }: Props) {
@@ -41,7 +42,7 @@ export function VideoButton({ src, title, description, poster, label = "Xem MP4"
           <Download />
         </Button>
       </span>
-      <DialogContent showCloseButton={false} className="w-[min(100vw-1rem,440px,calc(92vh*9/16))] max-w-none grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden bg-card p-0">
+      <DialogContent showCloseButton={false} className="portrait-modal w-(--portrait-modal-w) max-w-none grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden bg-card p-0">
         <div className="flex items-start gap-2 px-3 py-2">
           <div className="min-w-0 flex-1">
             <DialogTitle className="truncate text-sm font-medium">{title}</DialogTitle>

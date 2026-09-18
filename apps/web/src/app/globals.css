@@ -230,6 +230,23 @@
   }
 }
 
+/*
+ * Width of a portrait (9:16) player modal, derived from the height that is really visible.
+ * `vh` on phones is the viewport with the browser bars retracted, so a modal sized from it slides
+ * under the address bar and the bottom toolbar; `dvh` follows the bars. The video may use what is
+ * left after the modal's title row (`--modal-chrome`), a small margin and the notch / home indicator.
+ * Sets `--portrait-modal-w` only; apply it with `w-(--portrait-modal-w)`, a width class tailwind-merge
+ * recognises, so it replaces the dialog's own `w-full` instead of losing to it.
+ */
+@utility portrait-modal {
+  --modal-chrome: 3.5rem;
+  --modal-room: calc(100vh - var(--modal-chrome) - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  --portrait-modal-w: min(100vw - 1rem, 440px, var(--modal-room) * 9 / 16);
+  @supports (height: 100dvh) {
+    --modal-room: calc(100dvh - var(--modal-chrome) - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+}
+
 @utility pb-safe {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
