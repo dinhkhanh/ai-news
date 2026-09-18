@@ -213,7 +213,7 @@ export default async function ProjectPage({
   const logoSelect = (id: string) =>
     logoChannels.length ? (
       <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor={id}>
-        logo
+        Logo
         <NativeSelect
           id={id}
           name="logoChannelId"
