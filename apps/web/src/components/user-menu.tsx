@@ -19,10 +19,10 @@ export function UserMenu({ name, email, impersonated }: { name: string; email: s
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="ghost" size="sm" className="h-10 gap-2 rounded-full pr-2 pl-1 pointer-coarse:h-11" aria-label={`Tài khoản ${name}`} />}>
-        <span className="flex size-8 items-center justify-center rounded-full bg-primary/12 text-xs font-semibold text-primary" aria-hidden>
+        <span className="flex size-8 items-center justify-center rounded-full bg-muted text-xs font-medium text-foreground" aria-hidden>
           {initials(name) || "?"}
         </span>
-        <span className="hidden max-w-32 truncate text-sm font-medium sm:inline">{name}</span>
+        <span className="hidden max-w-32 truncate text-sm font-normal sm:inline">{name}</span>
         <ChevronDownIcon className="size-4 text-muted-foreground" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-56">

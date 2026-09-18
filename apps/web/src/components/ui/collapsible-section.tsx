@@ -43,11 +43,11 @@ export function CollapsibleSection({ title, summary, summaryAlways, defaultOpen 
       <summary
         className={cn(
           "flex min-h-11 cursor-pointer items-center gap-2 select-none rounded-xl px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/40",
-          variant === "card" ? "hover:bg-muted/60 group-open/section:rounded-b-none" : "px-0",
+          variant === "card" ? "hover:bg-sidebar group-open/section:rounded-b-none" : "px-0",
         )}
       >
         <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-open/section:rotate-90" aria-hidden />
-        <span className="min-w-0 truncate font-semibold">{title}</span>
+        <span className="min-w-0 truncate font-medium">{title}</span>
         {summary ? <span className={cn("ml-auto min-w-0 truncate text-right text-xs text-muted-foreground", !summaryAlways && "group-open/section:hidden")}>{summary}</span> : null}
         {actions ? <span className={cn("flex shrink-0 items-center gap-1", !summary && "ml-auto")}>{actions}</span> : null}
       </summary>

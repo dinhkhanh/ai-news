@@ -65,7 +65,7 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
   return (
     <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Kênh</h1>
+        <h1 className="sr-only">Kênh</h1>
         <p className="text-sm text-muted-foreground">
           Workspace {ws.name}. Kết nối kênh YouTube, trang Facebook, tài khoản Instagram hoặc TikTok của bạn để đăng video thẳng từ dự án. Kênh bạn kết nối do bạn quản lý: bạn được cấp quyền
           đăng ngay, và có thể cho đồng nghiệp trong workspace đăng cùng. Khoá truy cập được mã hoá, tự làm mới mỗi 6 giờ và không bao giờ hiển thị lại.

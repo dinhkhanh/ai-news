@@ -56,7 +56,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
     <div className="space-y-6">
       <AutoRefresh active={Boolean(running)} everyMs={6000} />
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Prompt templates</h1>
+        <h1 className="sr-only">Prompt templates</h1>
         <p className="text-sm text-muted-foreground">
           One promoted version per purpose and language is used by the pipeline. Every save creates a new version; run an eval on it, then promote.
           Promoting an older version rolls back. Without any promoted version the built-in default is used.{" "}

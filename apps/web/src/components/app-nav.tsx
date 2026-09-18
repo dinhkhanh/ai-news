@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FolderKanban, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
+import { NavRail } from "@/components/nav-rail";
 import { cn } from "@/lib/utils";
 
 type Item = { href: string; label: string; icon: LucideIcon; exact?: boolean };
@@ -21,30 +22,16 @@ function isActive(pathname: string, item: Item) {
   return pathname === item.href || pathname.startsWith(item.href + "/");
 }
 
-/** Header links (desktop and tablet): icon + label, the current section in blue. */
-export function AppNav({ admin }: { admin: boolean }) {
+/** The section an `/app` path belongs to (the top bar names it). */
+export function currentAppItem(pathname: string, admin: boolean) {
+  return appNavItems(admin).find((item) => isActive(pathname, item));
+}
+
+/** Icon rail (`sm` and up). The admin area is reached from the top bar's segmented control, so it has no tile here. */
+export function AppNav() {
   const pathname = usePathname();
-  return (
-    <nav aria-label="Chính" className="hidden items-center gap-1 sm:flex">
-      {appNavItems(admin).map((item) => {
-        const active = isActive(pathname, item);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-              active && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
-            )}
-          >
-            <item.icon className="size-4" aria-hidden />
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
+  const [projects, publications, channels, brand] = appNavItems(false);
+  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand]]} isActive={(item) => isActive(pathname, item)} />;
 }
 
 /**
@@ -56,7 +43,7 @@ export function MobileNav({ admin }: { admin: boolean }) {
   if (/^\/app\/projects\/[^/]+\/edit/.test(pathname)) return null;
   const items = appNavItems(admin);
   return (
-    <nav aria-label="Chính" className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 sm:hidden pb-safe">
+    <nav aria-label="Chính" className="fixed inset-x-0 bottom-0 z-40 border-t bg-sidebar/95 backdrop-blur supports-[backdrop-filter]:bg-sidebar/85 sm:hidden pb-safe">
       <ul className="flex items-stretch">
         {items.map((item) => {
           const active = isActive(pathname, item);
@@ -65,10 +52,10 @@ export function MobileNav({ admin }: { admin: boolean }) {
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground", active && "text-primary")}
+                className={cn("flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground", active && "text-foreground")}
               >
-                <span className={cn("flex h-7 w-12 items-center justify-center rounded-full transition-colors", active && "bg-primary/12")}>
-                  <item.icon className="size-5" aria-hidden />
+                <span className={cn("flex h-8 w-11 items-center justify-center rounded-lg transition-colors", active && "bg-sidebar-accent shadow-xs ring-1 ring-sidebar-border")}>
+                  <item.icon className="size-[18px]" strokeWidth={1.75} aria-hidden />
                 </span>
                 {item.label}
               </Link>

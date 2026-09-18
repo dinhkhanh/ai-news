@@ -163,7 +163,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="band-head relative flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">
             <Link href="/app" className="hover:underline">
@@ -175,7 +175,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
             </Link>{" "}
             / trình chỉnh sửa
           </div>
-          <h1 className="line-clamp-2 text-base font-semibold tracking-tight sm:text-lg">{project.title ?? project.url}</h1>
+          <h1 className="line-clamp-2 text-base font-medium tracking-tight sm:text-lg">{project.title ?? project.url}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="outline">timeline v{selected.version}</Badge>

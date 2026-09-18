@@ -13,7 +13,7 @@ export default async function DomainsPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Allowed sign-in domains</h1>
+        <h1 className="sr-only">Allowed sign-in domains</h1>
         <p className="text-sm text-muted-foreground">
           Only Google Workspace accounts from these domains can sign in. Existing users lose access when their domain is removed.
         </p>

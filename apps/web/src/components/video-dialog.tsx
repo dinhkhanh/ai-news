@@ -44,7 +44,7 @@ export function VideoButton({ src, title, description, poster, label = "Xem MP4"
       <DialogContent showCloseButton={false} className="w-[min(100vw-1rem,440px,calc(92vh*9/16))] max-w-none grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden bg-card p-0">
         <div className="flex items-start gap-2 px-3 py-2">
           <div className="min-w-0 flex-1">
-            <DialogTitle className="truncate text-sm font-semibold">{title}</DialogTitle>
+            <DialogTitle className="truncate text-sm font-medium">{title}</DialogTitle>
             <DialogDescription className="truncate text-xs">{description ?? "Phát trực tiếp từ kho; chỉ tải phần đang xem."}</DialogDescription>
           </div>
           <DialogClose render={<Button variant="ghost" size="icon-sm" aria-label="Đóng" />}>

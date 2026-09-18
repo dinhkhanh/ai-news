@@ -28,7 +28,7 @@ export default async function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Analytics</h1>
+        <h1 className="sr-only">Analytics</h1>
         <p className="text-sm text-muted-foreground">Produced vs published, platform performance from the daily analytics pull, YouTube Data API units used today (1,600 per upload; default quota 10,000/day).</p>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
@@ -37,7 +37,7 @@ export default async function AnalyticsPage() {
             <CardHeader className="pb-1">
               <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
             </CardHeader>
-            <CardContent className="text-2xl font-semibold tabular-nums">{value}</CardContent>
+            <CardContent className="text-[1.375rem] font-medium tabular-nums">{value}</CardContent>
           </Card>
         ))}
       </div>

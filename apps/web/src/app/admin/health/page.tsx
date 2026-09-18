@@ -46,7 +46,7 @@ export default async function HealthPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold tracking-tight">Health</h1>
+      <h1 className="sr-only">Health</h1>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>

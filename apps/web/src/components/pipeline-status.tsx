@@ -132,7 +132,7 @@ export function PipelineStatus({ initial, variant = "card", className }: { initi
         <span className="font-medium">{stepLabel}</span>
         {progress?.label ? <span className="text-muted-foreground">· {progress.label}</span> : null}
         {pct != null ? <span className="tabular-nums text-muted-foreground">{pct}%</span> : null}
-        {elapsed ? <span className="tabular-nums text-muted-foreground">{elapsed}</span> : null}
+        {elapsed ? <span className="tabular-nums text-muted-foreground" suppressHydrationWarning>{elapsed}</span> : null}
       </span>
     );
   }
@@ -190,7 +190,7 @@ export function LiveStep({ id, children }: { id: string; children: React.ReactNo
         <Loader2 className="size-3 animate-spin" />
         {STEP_LABEL[status.step] ?? status.step}
         {pct != null ? <span className="tabular-nums text-muted-foreground">{pct}%</span> : null}
-        {Number.isFinite(startedAt) ? <span className="tabular-nums text-muted-foreground">{formatElapsed(now - startedAt)}</span> : null}
+        {Number.isFinite(startedAt) ? <span className="tabular-nums text-muted-foreground" suppressHydrationWarning>{formatElapsed(now - startedAt)}</span> : null}
       </span>
       {status.progress?.label ? <span className="truncate text-muted-foreground">{status.progress.label}</span> : null}
     </span>

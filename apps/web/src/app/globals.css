@@ -4,40 +4,41 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Reference look: soft grey canvas, white surfaces, hairline borders, one friendly blue. */
-  --radius: 0.75rem;
-  --background: oklch(0.977 0.003 255);
-  --foreground: oklch(0.23 0.02 262);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.23 0.02 262);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.23 0.02 262);
-  --primary: oklch(0.6 0.2 258);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.955 0.005 255);
-  --secondary-foreground: oklch(0.3 0.02 262);
-  --muted: oklch(0.955 0.005 255);
-  --muted-foreground: oklch(0.52 0.02 262);
-  --accent: oklch(0.955 0.005 255);
-  --accent-foreground: oklch(0.23 0.02 262);
-  --destructive: oklch(0.6 0.22 27);
-  --success: oklch(0.6 0.17 155);
-  --border: oklch(0.91 0.006 255);
-  --input: oklch(0.89 0.008 255);
-  --ring: oklch(0.6 0.2 258);
-  --chart-1: oklch(0.6 0.2 258);
-  --chart-2: oklch(0.6 0.17 155);
-  --chart-3: oklch(0.72 0.17 60);
-  --chart-4: oklch(0.62 0.2 300);
-  --chart-5: oklch(0.6 0.22 27);
-  --sidebar: oklch(0.977 0.003 255);
-  --sidebar-foreground: oklch(0.23 0.02 262);
-  --sidebar-primary: oklch(0.6 0.2 258);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(1 0 0);
-  --sidebar-accent-foreground: oklch(0.23 0.02 262);
-  --sidebar-border: oklch(0.91 0.006 255);
-  --sidebar-ring: oklch(0.6 0.2 258);
+  /* Reference look, measured from the design: grey rail (#f7f8fa), white inset panel, #fafafa content floor,
+     hairline borders, slate chips (#f1f5f8), near-black text (#25262b), grey labels (#73757b), one blue (#3386fc). */
+  --radius: 0.5rem;
+  --background: #fafafa;
+  --foreground: #25262b;
+  --card: #ffffff;
+  --card-foreground: #25262b;
+  --popover: #ffffff;
+  --popover-foreground: #25262b;
+  --primary: #3386fc;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f8;
+  --secondary-foreground: #282b33;
+  --muted: #f1f5f8;
+  --muted-foreground: #73757b;
+  --accent: #f1f5f8;
+  --accent-foreground: #25262b;
+  --destructive: #e5484d;
+  --success: #12a150;
+  --border: #eceef1;
+  --input: #e3e6ea;
+  --ring: #3386fc;
+  --chart-1: #4f9bfd;
+  --chart-2: #12a150;
+  --chart-3: #f5a524;
+  --chart-4: #8b5cf6;
+  --chart-5: #e5484d;
+  --sidebar: #f7f8fa;
+  --sidebar-foreground: #25262b;
+  --sidebar-primary: #3386fc;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffffff;
+  --sidebar-accent-foreground: #25262b;
+  --sidebar-border: #e6e8ec;
+  --sidebar-ring: #3386fc;
 }
 
 .dark {
@@ -76,10 +77,13 @@
 }
 
 @theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Reference radii: chips 6 px, buttons and rail tiles 8 px, cards and the segmented track 10 px, the panel corner 14 px. */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 2px);
+  --radius-2xl: calc(var(--radius) + 6px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -126,6 +130,8 @@
   body {
     @apply bg-background text-foreground;
     overflow-wrap: anywhere;
+    /* Inter as in the reference: set a touch tight. */
+    letter-spacing: -0.006em;
   }
   /* Touch: no 300 ms tap delay, no grey tap flash, no double-tap zoom on controls. */
   a,
@@ -189,6 +195,39 @@
 /* Scrollable rows: fade the right edge so it reads as "more to the side". */
 @utility fade-x {
   mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
+}
+
+/*
+ * The reference's page header: the title block and the tab row are one white band of the panel,
+ * edge to edge, while the content below sits on the grey floor. The band is painted by a
+ * pseudo-element that runs past both sides; <main> clips it (`overflow-x-clip`, which unlike
+ * `hidden` leaves `position: sticky` alone). The element must be positioned (relative / sticky).
+ *  - `band`      white + the hairline under it (the sticky toolbar / tab row)
+ *  - `band-head` white, stretched up over <main>'s top padding and down over the gap to the toolbar
+ */
+@utility band {
+  isolation: isolate;
+  &::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline: -100vw;
+    z-index: -1;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@utility band-head {
+  isolation: isolate;
+  &::before {
+    content: "";
+    position: absolute;
+    inset-block: -1.5rem;
+    inset-inline: -100vw;
+    z-index: -1;
+    background: var(--card);
+  }
 }
 
 @utility pb-safe {

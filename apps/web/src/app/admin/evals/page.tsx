@@ -27,7 +27,7 @@ export default async function EvalsPage({ searchParams }: { searchParams: Promis
     <div className="space-y-8">
       <AutoRefresh active={anyRunning} everyMs={5000} />
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Eval set & runs</h1>
+        <h1 className="sr-only">Eval set & runs</h1>
         <p className="text-sm text-muted-foreground">
           Target: ~20 articles, mostly Vietnamese (docs/PLAN.md §9). Enabled now: {counts.vi} vi · {counts.en} en. Runs are started from{" "}
           <Link href="/admin/prompts" className="underline">
@@ -115,7 +115,7 @@ export default async function EvalsPage({ searchParams }: { searchParams: Promis
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold">Articles ({articles.length})</h2>
+        <h2 className="text-lg font-medium">Articles ({articles.length})</h2>
         <Table>
           <TableHeader>
             <TableRow>
@@ -168,7 +168,7 @@ export default async function EvalsPage({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Runs</h2>
+        <h2 className="text-lg font-medium">Runs</h2>
         <div className="flex flex-wrap gap-1 text-xs">
           {runs.map((r) => (
             <Link key={r.id} href={`/admin/evals?run=${r.id}`} className={`rounded-full border px-2 py-0.5 ${active?.id === r.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
@@ -213,7 +213,7 @@ function RunDetail({ run }: { run: { id: string; status: string; purpose: string
             ].map(([k, v]) => (
               <div key={k} className="rounded-md border p-2">
                 <div className="text-xs text-muted-foreground">{k}</div>
-                <div className="font-semibold tabular-nums">{v}</div>
+                <div className="font-medium tabular-nums">{v}</div>
               </div>
             ))}
           </div>

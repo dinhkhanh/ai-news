@@ -24,7 +24,7 @@ export default async function MusicPage() {
   }
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold tracking-tight">Music library</h1>
+      <h1 className="sr-only">Music library</h1>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Add a track</CardTitle>

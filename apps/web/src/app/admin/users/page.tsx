@@ -17,7 +17,7 @@ export default async function UsersPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Users</h1>
+        <h1 className="sr-only">Users</h1>
         <p className="text-sm text-muted-foreground">
           Platform role <code>admin</code> unlocks this CMS. Workspace roles (viewer/editor/publisher/admin) are set per workspace.
         </p>

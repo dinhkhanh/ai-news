@@ -82,8 +82,8 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Bộ nhận diện</h1>
+      <div className="band-head relative">
+        <h1 className="sr-only">Bộ nhận diện</h1>
         <p className="text-sm text-muted-foreground">
           Workspace {ws.name}. Mỗi bộ là một “diện mạo” cho một loại tin: màu, font (hỗ trợ tiếng Việt), logo, lớp phủ PNG, kiểu phụ đề. Khi tạo dự án, hệ thống tự chọn bộ khớp nội dung bài
           (theo mô tả + từ khoá) hoặc bạn chọn tay; không bộ nào khớp thì dùng bộ mặc định. Thay đổi áp dụng cho các lần dựng timeline tiếp theo.
@@ -196,7 +196,7 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
                 </p>
               </div>
               <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tiêu đề (headline) – thẻ chữ lớn của mỗi cảnh</div>
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tiêu đề (headline) – thẻ chữ lớn của mỗi cảnh</div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Px name="headlineFontSize" label={`Cỡ chữ tiêu đề (${HEADLINE_FONT_RANGE.min}–${HEADLINE_FONT_RANGE.max})`} min={HEADLINE_FONT_RANGE.min} max={HEADLINE_FONT_RANGE.max} value={Math.max(HEADLINE_FONT_RANGE.min, brand.headline.fontSize)} hint="Nên lớn hơn phụ đề. Tiêu đề cảnh mở đầu tự lớn hơn 22%." />
                   <Px name="headlineX" label="X: mép trái thẻ" min={0} max={1080} value={brand.headline.x} placeholder="tự động (60)" />
@@ -205,7 +205,7 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
                 <ShadowFields prefix="headlineShadow" label="Bóng đổ của thẻ tiêu đề" value={brand.headline.shadow} />
               </div>
               <div className="space-y-2 border-t pt-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Phụ đề (captions) – lời đọc chạy theo giọng</div>
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Phụ đề (captions) – lời đọc chạy theo giọng</div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Px name="captionFontSize" label={`Cỡ chữ phụ đề (${CAPTION_FONT_RANGE.min}–${CAPTION_FONT_RANGE.max})`} min={CAPTION_FONT_RANGE.min} max={CAPTION_FONT_RANGE.max} value={brand.caption.fontSize} />
                   <Px name="captionX" label="X: tâm khối / mép trái" min={0} max={1080} value={brand.caption.x} placeholder="tự động (480 / 60)" hint="Căn giữa: X là tâm khối. Căn trái: X là mép trái." />

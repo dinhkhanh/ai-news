@@ -385,7 +385,7 @@ export default async function ProjectPage({
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-4 sm:space-y-6">
-      <div className="flex items-start gap-3">
+      <div className="band-head relative flex items-start gap-3">
         <ProjectStateIcon state={project.state} className="mt-0.5 hidden sm:flex" />
         <div className="min-w-0 flex-1">
           <div className="text-xs text-muted-foreground">
@@ -394,7 +394,7 @@ export default async function ProjectPage({
             </Link>{" "}
             / {displayHost(project.url)}
           </div>
-          <h1 className="line-clamp-2 text-lg font-semibold tracking-tight sm:text-xl">
+          <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">
             {project.title ?? project.url}
           </h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">

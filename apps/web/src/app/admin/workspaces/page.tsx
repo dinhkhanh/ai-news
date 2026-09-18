@@ -15,7 +15,7 @@ export default async function WorkspacesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Workspaces</h1>
+        <h1 className="sr-only">Workspaces</h1>
         <p className="text-sm text-muted-foreground">
           One personal workspace per user is created on first sign-in. Team workspaces come in phase 6; members can still be added here
           for testing.

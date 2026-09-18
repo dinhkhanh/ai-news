@@ -49,7 +49,7 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-base font-semibold">{script.title}</div>
+            <div className="text-base font-medium">{script.title}</div>
             <div className="text-xs text-muted-foreground">
               v{meta.version} · {script.generation.model}
               {script.generation.servedBy ? ` (served by ${script.generation.servedBy})` : ""} · template v{script.generation.templateVersion} ·{" "}
@@ -123,7 +123,7 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
           <div className="grid gap-3 pb-2 md:grid-cols-3">
             {(["youtube", "facebook", "tiktok"] as const).map((p) => (
               <div key={p} className="space-y-1 text-xs">
-                <div className="font-semibold uppercase text-muted-foreground">{p}</div>
+                <div className="font-medium uppercase text-muted-foreground">{p}</div>
                 <div className="font-medium">{script.metadata[p].title}</div>
                 <div>{script.metadata[p].description}</div>
                 <div className="text-muted-foreground">{script.metadata[p].hashtags.map((h) => `#${h}`).join(" ")}</div>
@@ -147,7 +147,7 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
           {activeScene ? (range ? "Căn cứ được tô sáng trong bài." : "Không tìm thấy câu căn cứ nguyên văn trong bài.") : "Chọn một cảnh để xem căn cứ trong bài báo."}
         </div>
         <article className="rounded-lg border p-4 text-sm leading-relaxed">
-          <h3 className="mb-2 text-base font-semibold">{article.title}</h3>
+          <h3 className="mb-2 text-base font-medium">{article.title}</h3>
           <p className="mb-3 text-xs text-muted-foreground">
             {article.siteName ? `${article.siteName} · ` : ""}
             <a href={article.url} target="_blank" rel="noreferrer" className="underline">

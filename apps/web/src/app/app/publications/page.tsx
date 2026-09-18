@@ -63,7 +63,7 @@ export default async function PublicationsPage() {
     <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
       <AutoRefresh active={active} everyMs={15000} />
       <div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Đã đăng</h1>
+        <h1 className="sr-only">Đã đăng</h1>
         <p className="text-sm text-muted-foreground">Workspace: {ws.name} · số liệu được kéo về hằng ngày lúc 02:30 (giờ Việt Nam).</p>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
@@ -78,7 +78,7 @@ export default async function PublicationsPage() {
             <CardHeader className="pb-1">
               <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
             </CardHeader>
-            <CardContent className="text-2xl font-semibold tabular-nums">{value}</CardContent>
+            <CardContent className="text-[1.375rem] font-medium tabular-nums">{value}</CardContent>
           </Card>
         ))}
       </div>

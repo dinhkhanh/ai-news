@@ -20,7 +20,7 @@ export default async function ChannelsPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Channels</h1>
+        <h1 className="sr-only">Channels</h1>
         <p className="text-sm text-muted-foreground">
           Members connect and manage their own channels at <code className="text-xs">/app/channels</code> (docs/PLAN.md §7); this page is the cross-workspace view, where an admin can also
           connect for any workspace, grant, pause or disconnect. Tokens live in Supabase Vault; a cron refreshes them

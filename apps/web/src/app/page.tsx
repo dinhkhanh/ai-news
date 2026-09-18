@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { LogoMark } from "@/components/logo-mark";
 import { GoogleSignIn } from "@/components/google-sign-in";
 import { getSession } from "@/lib/session";
 
@@ -7,13 +8,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ n
   const { next, error } = await searchParams;
   if (session) redirect(next && next.startsWith("/") ? next : "/app");
   return (
-    <main className="flex flex-1 items-center justify-center p-4 sm:p-6">
+    <main className="flex flex-1 items-center justify-center bg-sidebar p-4 sm:p-6">
       <div className="w-full max-w-sm space-y-6 rounded-2xl bg-card p-6 shadow-xs ring-1 ring-border sm:p-8">
         <div className="space-y-2">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground" aria-hidden>
-            ai
-          </span>
-          <h1 className="text-2xl font-semibold tracking-tight">ai-news</h1>
+          <LogoMark className="size-8" />
+          <h1 className="text-2xl font-medium tracking-tight">ai-news</h1>
           <p className="text-sm text-muted-foreground">Bài báo → video dọc ngắn → Reels, TikTok, Shorts.</p>
         </div>
         <GoogleSignIn next={next} />

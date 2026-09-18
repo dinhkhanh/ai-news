@@ -63,7 +63,7 @@ export default async function AppHome() {
       <div className="mx-auto max-w-5xl space-y-5 sm:space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Dự án</h1>
+            <h1 className="sr-only">Dự án</h1>
             <p className="text-sm text-muted-foreground">
               {ws.name} · vai trò {ws.role} · kịch bản hôm nay {used}/{limit}
             </p>

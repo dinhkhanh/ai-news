@@ -35,14 +35,14 @@ export default async function AdminOverview() {
   ];
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
+      <h1 className="sr-only">Overview</h1>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         {tiles.map(([label, value]) => (
           <Card key={label}>
             <CardHeader className="pb-1">
               <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
             </CardHeader>
-            <CardContent className="text-2xl font-semibold tabular-nums">{value}</CardContent>
+            <CardContent className="text-[1.375rem] font-medium tabular-nums">{value}</CardContent>
           </Card>
         ))}
       </div>

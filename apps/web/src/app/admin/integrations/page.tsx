@@ -18,7 +18,7 @@ export default async function IntegrationsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Integrations</h1>
+        <h1 className="sr-only">Integrations</h1>
         <p className="text-sm text-muted-foreground">
           Shared API keys. Secrets are written to Supabase Vault; only a masked preview is shown here. Deployment credentials (AWS, Google
           service account, Inngest, R2) stay in Vercel env vars.
@@ -92,7 +92,7 @@ export default async function IntegrationsPage() {
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold">Feature flags</h2>
+        <h2 className="text-lg font-medium">Feature flags</h2>
         <div className="mt-3 divide-y rounded-md border">
           {FEATURE_FLAGS.map((f) => {
             const on = flags[f.key] ?? flagDefault(f.key);
