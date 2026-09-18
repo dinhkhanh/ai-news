@@ -75,7 +75,18 @@ export type MediaResult = {
 
 let client: LambdaClient | undefined;
 
-export async function invokeMediaLambda(payload: MediaAction): Promise<MediaResult> {
+/**
+ * Direct call of the media Lambda. Video downloads (`web-video`, yt-dlp on
+ * YouTube / Facebook / TikTok…) are not accepted here: datacenter IPs are
+ * bot-checked, so every download goes through `invokeWebVideo`, which prefers
+ * the self-hosted box on an ISP line. Everything else (audio, probes, covers,
+ * transcodes, yt-dlp *searches*) works from the Lambda.
+ */
+export async function invokeMediaLambda(payload: Exclude<MediaAction, { action: "web-video" }>): Promise<MediaResult> {
+  return invokeLambdaRaw(payload);
+}
+
+async function invokeLambdaRaw(payload: MediaAction): Promise<MediaResult> {
   const e = env();
   client ??= new LambdaClient({
     region: e.AWS_REGION,
@@ -103,7 +114,7 @@ export async function invokeMediaLambda(payload: MediaAction): Promise<MediaResu
 }
 
 /**
- * Web-video downloads and page lookups go to the self-hosted API when one is configured
+ * The only way to download from a video site. Downloads and page lookups go to the self-hosted API when one is configured
  * (`WEB_VIDEO_API_URL`, see packages/media-lambda/src/server.ts): it runs the
  * same handler on a regular ISP line, which YouTube does not bot-check, and
  * writes to the same R2 bucket. If the box cannot be reached at all the
@@ -129,5 +140,5 @@ export async function invokeWebVideo(payload: Extract<MediaAction, { action: "we
       console.warn("[web-video] self-hosted API unreachable, using the Lambda", (err as Error).message, `${Date.now() - started} ms`);
     }
   }
-  return { ...(await invokeMediaLambda(payload)), via: "lambda" };
+  return { ...(await invokeLambdaRaw(payload)), via: "lambda" };
 }
