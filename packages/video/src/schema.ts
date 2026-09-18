@@ -298,9 +298,47 @@ export const captionSchema = z.object({
   text: z.string(),
   startMs: z.number().nonnegative(),
   endMs: z.number().positive(),
-  words: z.array(z.object({ w: z.string(), s: z.number(), e: z.number() })).default([]),
+  /** `j`: joined to the next word (compound word, name, figure): never a line break between the two. */
+  words: z.array(z.object({ w: z.string(), s: z.number(), e: z.number(), j: z.boolean().optional() })).default([]),
 });
 export type Caption = z.infer<typeof captionSchema>;
+
+const CAPTION_SENTENCE_END = /[.!?…]["'”’)\]]*$/;
+const CAPTION_CLAUSE_END = /[.,;:!?…]["'”’)\]]*$/;
+
+/**
+ * Where a caption may wrap: its words as one or two lines of units (word
+ * indexes; a unit = words joined by `j`, drawn unbreakable). The composition
+ * draws both lines side by side when they fit and wraps between them when
+ * they do not, so the break is never left to the browser:
+ * - no line of a single word (hence one line below four words);
+ * - the end of a sentence never shares a line with the start of the next:
+ *   a hand-edited caption holding two sentences breaks between them, always
+ *   (`hard`), even when that leaves a one-word sentence on its own line;
+ * - a unit is never split;
+ * and among the breaks left, the most even one, clause punctuation preferred.
+ */
+export function captionLines(words: Array<{ w: string; j?: boolean }>): { lines: number[][][]; hard: boolean } {
+  const units: number[][] = [];
+  for (let i = 0; i < words.length; i++) {
+    if (i > 0 && words[i - 1].j) units[units.length - 1].push(i);
+    else units.push([i]);
+  }
+  const chars = (line: number[][]) => line.flat().reduce((a, i) => a + words[i].w.length + 1, -1);
+  /** A sentence ends inside the line, before its last word. */
+  const mixes = (line: number[][]) => line.flat().slice(0, -1).some((i) => CAPTION_SENTENCE_END.test(words[i].w));
+  let best: { at: number; cost: number; hard: boolean } | null = null;
+  for (let at = 1; at < units.length; at++) {
+    const a = units.slice(0, at);
+    const b = units.slice(at);
+    const lastOfA = words[a[a.length - 1][a[a.length - 1].length - 1]].w;
+    const hard = CAPTION_SENTENCE_END.test(lastOfA);
+    if (mixes(a) || mixes(b) || (!hard && (a.flat().length < 2 || b.flat().length < 2))) continue;
+    const cost = Math.abs(chars(a) - chars(b)) - (hard ? 1000 : CAPTION_CLAUSE_END.test(lastOfA) ? 4 : 0);
+    if (!best || cost < best.cost) best = { at, cost, hard };
+  }
+  return best ? { lines: [units.slice(0, best.at), units.slice(best.at)], hard: best.hard } : { lines: [units], hard: false };
+}
 
 export const timelineSchema = z.object({
   version: z.literal(1),

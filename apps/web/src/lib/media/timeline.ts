@@ -7,6 +7,7 @@
 import { MAX_SHOT_SEC, timelineSchema, type Brand, type Focus, type Shot, type Timeline, type Visual } from "@ai-news/video/schema";
 import type { TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
+import { markCompounds } from "./compounds";
 
 export type SceneVoiceInput = { key: string; durationMs: number; words: TimedWord[] };
 export type SceneVisualInput =
@@ -108,8 +109,9 @@ export function buildTimeline(input: BuildInput): { timeline: Timeline; duration
   const captions = input.scenes.flatMap((s, i) => {
     if (!s.voice) return [];
     const off = Math.round(timings[i].atSec * 1000);
-    const chunks = s.captions ?? chunkCaptions(s.voice.words);
-    return chunks.map((c) => ({ text: c.text, startMs: c.startMs + off, endMs: c.endMs + off, words: c.words.map((w) => ({ w: w.w, s: w.s + off, e: w.e + off })) }));
+    // Hand-edited chunks keep their text; both kinds tell the composition which words are one compound (`j`).
+    const chunks = s.captions ? s.captions.map((c) => ({ ...c, words: markCompounds(c.words) })) : chunkCaptions(s.voice.words);
+    return chunks.map((c) => ({ text: c.text, startMs: c.startMs + off, endMs: c.endMs + off, words: c.words.map((w) => ({ w: w.w, s: w.s + off, e: w.e + off, ...(w.j ? { j: true } : {}) })) }));
   });
   if (input.music) credits.add(input.music.attribution);
   const timeline = timelineSchema.parse({

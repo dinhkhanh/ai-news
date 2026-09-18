@@ -22,7 +22,7 @@ export const sampleTimeline: Timeline = {
     { id: "s3", kind: "cta", from: 270, durationFrames: 90, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
   ],
   captions: [
-    { text: "Sáng nay, Thành phố Hồ Chí Minh", startMs: 200, endMs: 2200, words: [{ w: "Sáng", s: 200, e: 600 }, { w: "nay,", s: 600, e: 1000 }, { w: "Thành", s: 1000, e: 1300 }, { w: "phố", s: 1300, e: 1600 }, { w: "Hồ", s: 1600, e: 1900 }, { w: "Chí", s: 1900, e: 2050 }, { w: "Minh", s: 2050, e: 2200 }] },
+    { text: "Sáng nay, Thành phố Hồ Chí Minh", startMs: 200, endMs: 2200, words: [{ w: "Sáng", s: 200, e: 600 }, { w: "nay,", s: 600, e: 1000 }, { w: "Thành", s: 1000, e: 1300, j: true }, { w: "phố", s: 1300, e: 1600 }, { w: "Hồ", s: 1600, e: 1900, j: true }, { w: "Chí", s: 1900, e: 2050, j: true }, { w: "Minh", s: 2050, e: 2200 }] },
     { text: "công bố kế hoạch mở rộng metro", startMs: 2300, endMs: 4200, words: [] },
   ],
   audio: { mixSrc: null, voiceSrc: null, musicSrc: null, musicGainDb: -12 },

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { boxShadowCss, CREDIT_MAX_WIDTH, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { boxShadowCss, captionLines, CREDIT_MAX_WIDTH, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -309,8 +309,10 @@ const Captions: React.FC<{ captions: Caption[]; brand: Brand }> = ({ captions, b
   const current = captions.find((c) => ms >= c.startMs && ms < c.endMs);
   if (!current) return null;
   const family = fontFamily(brand.fonts.caption);
-  const text = brand.caption.uppercase ? current.text.toUpperCase() : current.text;
-  const words = current.words.length ? current.words : [{ w: current.text, s: current.startMs, e: current.endMs }];
+  // Captions without word timings: the words of the text, all lit for the length of the chunk.
+  const words: Caption["words"] = current.words.length ? current.words : current.text.split(/\s+/).filter(Boolean).map((w) => ({ w, s: current.startMs, e: current.endMs }));
+  // The line break is planned, never the browser's: no lone word on a line, compound words in one piece (`captionLines`).
+  const { lines, hard } = captionLines(words);
   const at = textLayout(brand, "body").captions;
   // Bottom-anchored blocks keep their lower edge while one / two lines alternate; mid-frame ones keep their upper edge.
   const top = at.anchor === "top" ? at.y0 : undefined;
@@ -332,13 +334,26 @@ const Captions: React.FC<{ captions: Caption[]; brand: Brand }> = ({ captions, b
           boxShadow: boxShadowCss(brand.caption.shadow ?? DEFAULT_CAPTION_SHADOW),
         }}
       >
-        {brand.caption.highlightWords
-          ? words.map((w, i) => (
-              <span key={i} style={{ color: ms >= w.s && ms < w.e ? brand.colours.captionHighlight : brand.colours.text, marginRight: i < words.length - 1 ? "0.28em" : 0 }}>
-                {brand.caption.uppercase ? w.w.toUpperCase() : w.w}
-              </span>
-            ))
-          : text}
+        {lines.map((line, l) => (
+          <React.Fragment key={l}>
+            {l > 0 ? hard ? <br /> : " " : null}
+            {/* Two planned lines share a row when both fit; when not, the row wraps between them. */}
+            <span style={{ display: "inline-block" }}>
+              {line.map((unit, u) => (
+                <React.Fragment key={u}>
+                  {u > 0 ? " " : null}
+                  <span style={{ display: "inline-block", whiteSpace: "nowrap" }}>
+                    {unit.map((i, k) => (
+                      <span key={i} style={{ color: brand.caption.highlightWords && ms >= words[i].s && ms < words[i].e ? brand.colours.captionHighlight : brand.colours.text }}>
+                        {(k > 0 ? " " : "") + (brand.caption.uppercase ? words[i].w.toUpperCase() : words[i].w)}
+                      </span>
+                    ))}
+                  </span>
+                </React.Fragment>
+              ))}
+            </span>
+          </React.Fragment>
+        ))}
       </div>
     </div>
   );

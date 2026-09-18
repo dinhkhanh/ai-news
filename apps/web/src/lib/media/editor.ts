@@ -11,9 +11,10 @@ import { brandSchema, focusSchema, type Timeline } from "@ai-news/video/schema";
 import { z } from "zod";
 import { proportionalTimings, type TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
+import { markCompounds } from "./compounds";
 import { buildTimeline, GAP_MS, LEAD_MS, shotsNeeded, TAIL_MS, type BuildInput, type SceneVisualInput } from "./timeline";
 
-const timedWordSchema = z.object({ w: z.string(), s: z.number(), e: z.number() });
+const timedWordSchema = z.object({ w: z.string(), s: z.number(), e: z.number(), j: z.boolean().optional() });
 const captionChunkSchema = z.object({ text: z.string().max(200), startMs: z.number(), endMs: z.number(), words: z.array(timedWordSchema) });
 
 export const editorVisualSchema = z.discriminatedUnion("kind", [
@@ -141,7 +142,7 @@ export function setCaptionText(chunk: CaptionChunk, text: string): CaptionChunk 
   const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
   if (words.length === 0) return { ...chunk, text: "", words: [] };
   const timed = proportionalTimings(words, Math.max(120, chunk.endMs - chunk.startMs), chunk.startMs);
-  return { text: words.join(" "), startMs: chunk.startMs, endMs: chunk.endMs, words: timed };
+  return { text: words.join(" "), startMs: chunk.startMs, endMs: chunk.endMs, words: markCompounds(timed) };
 }
 
 function toVisualInput(v: EditorVisual): SceneVisualInput {

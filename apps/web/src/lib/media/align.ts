@@ -6,7 +6,8 @@
  * between their matched neighbours. Falls back to a proportional spread when
  * the transcript is unusable.
  */
-export type TimedWord = { w: string; s: number; e: number };
+/** `j`: joined to the next word (compound word, name, figure; set by `markCompounds`), captions never break between the two. */
+export type TimedWord = { w: string; s: number; e: number; j?: boolean };
 export type SttWord = { word: string; startMs: number; endMs: number };
 
 export function normaliseToken(t: string) {

@@ -16,7 +16,8 @@ const SCENES = [
   { id: "s2", kind: "body" as const, sec: 3.5, headline: "Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa", credit: "Video: Quang Nguyen / Pexels" },
   { id: "s3", kind: "cta" as const, sec: 2.5, headline: "", credit: null },
 ];
-const CAPTIONS = ["Sáng nay, Thành phố Hồ Chí Minh", "công bố kế hoạch mở rộng", "tuyến metro đầu tiên.", "Gói hỗ trợ có hiệu lực", "từ tháng sau trên cả nước.", "Theo dõi để cập nhật."];
+/** "_" joins the words of a compound (`words[].j`), which the composition keeps on one line; the real pipeline marks them with `markCompounds`. */
+const CAPTIONS = ["Sáng nay,", "Thành_phố Hồ_Chí_Minh", "công_bố kế_hoạch mở_rộng", "tuyến metro đầu_tiên.", "Gói hỗ_trợ có hiệu_lực", "từ tháng sau trên cả_nước.", "Theo_dõi để cập_nhật."];
 
 function sampleTimeline(brand: Brand, photo: boolean): Timeline {
   let from = 0;
@@ -27,11 +28,13 @@ function sampleTimeline(brand: Brand, photo: boolean): Timeline {
     return scene;
   });
   const per = (from / FPS / CAPTIONS.length) * 1000;
-  const captions = CAPTIONS.map((text, i) => {
+  const captions = CAPTIONS.map((marked, i) => {
+    const text = marked.replaceAll("_", " ");
+    const joined = marked.split(" ").flatMap((unit) => unit.split("_").map((_, k, all) => k < all.length - 1));
     const words = text.split(" ");
     const startMs = Math.round(i * per) + 150;
     const span = per - 250;
-    return { text, startMs, endMs: Math.round(startMs + span), words: words.map((w, j) => ({ w, s: Math.round(startMs + (j * span) / words.length), e: Math.round(startMs + ((j + 1) * span) / words.length) })) };
+    return { text, startMs, endMs: Math.round(startMs + span), words: words.map((w, j) => ({ w, s: Math.round(startMs + (j * span) / words.length), e: Math.round(startMs + ((j + 1) * span) / words.length), ...(joined[j] ? { j: true } : {}) })) };
   });
   return timelineSchema.parse({ version: 1, fps: 30, width: 1080, height: 1920, durationFrames: from, language: "vi", title: "Xem trước", source: { name: "VnExpress", url: "https://vnexpress.net/metro-so-1-keo-dai-them-12-km-4712345.html" }, brand, scenes, captions, audio: { mixSrc: null, voiceSrc: null, musicSrc: null }, attribution: ["Nhạc: Mubert"] });
 }
