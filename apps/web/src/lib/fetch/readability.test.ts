@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countWords, extractFromHtml, markdownToText, normaliseText } from "./readability";
+import { countWords, decodeEntities, extractFromHtml, markdownToText, normaliseText } from "./readability";
 
 const para = (n: number) =>
   Array.from({ length: n }, (_, i) => `<p>Đoạn ${i + 1}: Ủy ban nhân dân Thành phố Hồ Chí Minh cho biết dự án đường sắt đô thị số hai sẽ khởi công vào năm sau, với tổng mức đầu tư hơn bốn mươi bảy nghìn tỷ đồng và dự kiến hoàn thành sau sáu năm thi công.</p>`).join("\n");
@@ -71,6 +71,13 @@ describe("extractFromHtml", () => {
     expect(video.flags.videoOnly).toBe(true);
   });
 
+  it("decodes HTML entities inside JSON-LD strings (baochinhphu.vn)", () => {
+    const html = ARTICLE.replace(/"headline":"[^"]*"/, '"headline":"Ph&#243; Thủ tướng hội đ&#224;m với &quot;đối t&aacute;c&quot; v&#xE0; b&#225;o ch&#237; &amp; c&#244;ng ch&#250;ng"').replace('"name":"Lê Tuyết"', '"name":"L&#234; Tuyết"');
+    const encoded = extractFromHtml(html, "https://baochinhphu.vn/x.htm");
+    expect(encoded.title).toBe('Phó Thủ tướng hội đàm với "đối tác" và báo chí & công chúng');
+    expect(encoded.byline).toBe("Lê Tuyết");
+  });
+
   it("survives garbage input", () => {
     const junk = extractFromHtml("<not html at all", "https://example.com/x");
     expect(junk.text).toBe("");
@@ -85,6 +92,10 @@ describe("text helpers", () => {
   });
   it("normaliseText collapses whitespace but keeps paragraphs", () => {
     expect(normaliseText("a  b\r\n\r\n\r\n\tc \n d")).toBe("a b\n\nc\nd");
+  });
+  it("decodeEntities leaves plain text, tags and bare ampersands as they are", () => {
+    expect(decodeEntities("Vàng & đô la: GDP < 5% <b>năm</b> nay")).toBe("Vàng & đô la: GDP < 5% <b>năm</b> nay");
+    expect(decodeEntities("GDP &lt; 5% &amp; l&#227;i suất <i>giảm</i>")).toBe("GDP < 5% & lãi suất <i>giảm</i>");
   });
   it("markdownToText strips markdown syntax", () => {
     expect(markdownToText("# Title\n\nSome **bold** and [a link](https://x.y) ![img](i.png)\n\n- item")).toBe("Title\n\nSome bold and a link\n\nitem");

@@ -58,8 +58,22 @@ function typesOf(ld: Ld): string[] {
   return (Array.isArray(t) ? t : [t]).filter((x): x is string => typeof x === "string");
 }
 
+/**
+ * Many CMSes HTML-encode the strings they put in JSON-LD ("Ph&#243; Thủ tướng"). `JSON.parse` leaves entities
+ * alone, unlike the DOM for attributes and text, so such a headline would be stored and shown literally.
+ */
+export function decodeEntities(s: string) {
+  if (!/&(#\d+|#x[\da-f]+|[a-z][\da-z]*);/i.test(s)) return s;
+  const { document } = parseHTML("<!doctype html><html><body><p></p></body></html>");
+  const p = document.querySelector("p");
+  if (!p) return s;
+  // Only entities are to be read as HTML: a literal "<" must not start a tag.
+  p.innerHTML = s.replace(/</g, "&lt;");
+  return p.textContent ?? s;
+}
+
 function ldString(v: unknown): string | null {
-  if (typeof v === "string") return v.trim() || null;
+  if (typeof v === "string") return decodeEntities(v).trim() || null;
   if (Array.isArray(v)) return ldString(v[0]);
   if (v && typeof v === "object") {
     const o = v as Ld;
