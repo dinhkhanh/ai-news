@@ -4,7 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { approveTimeline, requestChanges, submitForReview, withdrawReview } from "@/app/app/projects/[id]/review-actions";
+import {
+  approveTimeline,
+  requestChanges,
+  submitForReview,
+  withdrawReview,
+} from "@/app/app/projects/[id]/review-actions";
 
 export type ReviewPanelProps = {
   projectId: string;
@@ -18,29 +23,55 @@ export type ReviewPanelProps = {
   needsOverride: boolean;
   faithfulnessCounts: { supported: number; partial: number; unsupported: number; unchecked: number } | null;
   sensitiveTopic: boolean;
-  reviews: Array<{ id: string; action: "submitted" | "approved" | "changes_requested" | "withdrawn"; note: string | null; timelineVersion: number | null; faithfulnessOverride: boolean; createdAt: string; actorName: string | null }>;
+  reviews: Array<{
+    id: string;
+    action: "submitted" | "approved" | "changes_requested" | "withdrawn";
+    note: string | null;
+    timelineVersion: number | null;
+    faithfulnessOverride: boolean;
+    createdAt: string;
+    actorName: string | null;
+  }>;
 };
 
-const ACTION_LABEL: Record<ReviewPanelProps["reviews"][number]["action"], string> = { submitted: "gửi duyệt", approved: "đã duyệt", changes_requested: "yêu cầu sửa", withdrawn: "rút lại" };
+const ACTION_LABEL: Record<ReviewPanelProps["reviews"][number]["action"], string> = {
+  submitted: "gửi duyệt",
+  approved: "đã duyệt",
+  changes_requested: "yêu cầu sửa",
+  withdrawn: "rút lại",
+};
 
 /** Approval flow UI (docs/PLAN.md §4.8): editor submits, publisher approves or requests changes; every step is logged. */
 export function ReviewPanel(p: ReviewPanelProps) {
   const approvedIsLatest = Boolean(p.latestTimeline && p.approvedTimelineId === p.latestTimeline.id);
   const status =
-    p.state === "in_review" ? { label: "Chờ duyệt", variant: "secondary" as const } : approvedIsLatest ? { label: p.state === "rendered" ? "Đã duyệt · đã kết xuất" : "Đã duyệt · chờ kết xuất", variant: "default" as const } : { label: "Bản nháp", variant: "outline" as const };
-  const canSubmit = p.canEdit && p.latestTimeline && ["composed", "rendered", "approved"].includes(p.state) && !approvedIsLatest;
-  const canDecide = p.canApprove && p.latestTimeline && ["composed", "in_review", "rendered"].includes(p.state) && !approvedIsLatest;
+    p.state === "in_review"
+      ? { label: "Chờ duyệt", variant: "secondary" as const }
+      : approvedIsLatest
+        ? {
+            label: p.state === "rendered" ? "Đã duyệt · đã kết xuất" : "Đã duyệt · chờ kết xuất",
+            variant: "default" as const,
+          }
+        : { label: "Bản nháp", variant: "outline" as const };
+  const canSubmit =
+    p.canEdit && p.latestTimeline && ["composed", "rendered", "approved"].includes(p.state) && !approvedIsLatest;
+  const canDecide =
+    p.canApprove && p.latestTimeline && ["composed", "in_review", "rendered"].includes(p.state) && !approvedIsLatest;
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={status.variant}>{status.label}</Badge>
-        {p.latestTimeline ? <span className="text-xs text-muted-foreground">timeline v{p.latestTimeline.version}</span> : null}
+        {p.latestTimeline ? (
+          <span className="text-xs text-muted-foreground">timeline v{p.latestTimeline.version}</span>
+        ) : null}
         {p.sensitiveTopic ? <Badge variant="destructive">chủ đề nhạy cảm</Badge> : null}
         {p.faithfulnessCounts ? (
           <span className="text-xs text-muted-foreground">
             kiểm chứng: {p.faithfulnessCounts.supported} ok
             {p.faithfulnessCounts.partial ? ` · ${p.faithfulnessCounts.partial} một phần` : ""}
-            {p.faithfulnessCounts.unsupported + p.faithfulnessCounts.unchecked ? ` · ${p.faithfulnessCounts.unsupported + p.faithfulnessCounts.unchecked} không căn cứ` : ""}
+            {p.faithfulnessCounts.unsupported + p.faithfulnessCounts.unchecked
+              ? ` · ${p.faithfulnessCounts.unsupported + p.faithfulnessCounts.unchecked} không căn cứ`
+              : ""}
           </span>
         ) : (
           <span className="text-xs text-muted-foreground">chưa có kiểm chứng</span>
@@ -50,8 +81,13 @@ export function ReviewPanel(p: ReviewPanelProps) {
       {canSubmit ? (
         <ActionForm action={submitForReview} className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <input type="hidden" name="projectId" value={p.projectId} />
-          <Input name="note" placeholder="Ghi chú cho publisher (tuỳ chọn)" className="min-w-0 flex-1" aria-label="Ghi chú cho publisher" />
-          <Button type="submit" variant="outline" disabled={p.busy} className="sm:shrink-0">
+          <Input
+            name="note"
+            placeholder="Ghi chú cho publisher (tuỳ chọn)"
+            className="min-w-0 flex-1"
+            aria-label="Ghi chú cho publisher"
+          />
+          <Button type="submit" variant="outline" disabled={p.busy} className="sm:shrink-0 sm:self-start">
             Gửi duyệt v{p.latestTimeline?.version}
           </Button>
         </ActionForm>
@@ -74,7 +110,8 @@ export function ReviewPanel(p: ReviewPanelProps) {
             <Textarea name="note" rows={2} placeholder="Ghi chú (tuỳ chọn)" className="text-sm" />
             {p.needsOverride ? (
               <label className="flex items-start gap-2 py-1 text-xs">
-                <input type="checkbox" name="override" className="mt-0.5" /> Duyệt dù có cảnh không căn cứ / chưa kiểm chứng (được ghi log)
+                <input type="checkbox" name="override" className="mt-0.5" /> Duyệt dù có cảnh không căn cứ / chưa kiểm
+                chứng (được ghi log)
               </label>
             ) : null}
             <Button type="submit" disabled={p.busy}>
@@ -91,7 +128,9 @@ export function ReviewPanel(p: ReviewPanelProps) {
           </ActionForm>
         </div>
       ) : null}
-      {!p.canApprove && p.state === "in_review" ? <p className="text-xs text-muted-foreground">Đang chờ publisher duyệt.</p> : null}
+      {!p.canApprove && p.state === "in_review" ? (
+        <p className="text-xs text-muted-foreground">Đang chờ publisher duyệt.</p>
+      ) : null}
 
       {p.reviews.length ? (
         <ul className="space-y-1 text-xs text-muted-foreground">

@@ -496,9 +496,10 @@ export default async function ProjectPage({
         </p>
       ))}
 
-      {/* Wide screens: the pipeline (article → script → build) on the left, review / publish / renders beside it, so the page stays short. */}
-      <div className="grid gap-4 sm:gap-6 xl:grid-cols-[minmax(0,1fr)_440px] xl:items-start">
-        <div className="min-w-0 space-y-4 sm:space-y-6">
+      {/* Wide screens: the pipeline (article → script → build → publish) on the left, review / renders beside it, so the page stays short.
+          Narrower: the two columns dissolve (`contents`) into one list, ordered build → review → publish → renders. */}
+      <div className="flex flex-col gap-4 sm:gap-6 xl:grid xl:grid-cols-[minmax(0,1fr)_440px] xl:items-start">
+        <div className="contents xl:block xl:min-w-0 xl:space-y-6">
           {/* ---------------- Article ---------------- */}
           {!article ? (
             <Card id="article" className="scroll-mt-3">
@@ -827,46 +828,10 @@ export default async function ProjectPage({
               </CardContent>
             </Card>
           ) : null}
-        </div>
-
-        <aside className="min-w-0 space-y-4 sm:space-y-6">
-          {/* ---------------- Review / approval (phase 4) ---------------- */}
-          {timelines.length ? (
-            <Card id="review" className="scroll-mt-3">
-              <CardHeader>
-                <CardTitle>Duyệt</CardTitle>
-                <CardDescription>
-                  Người dựng gửi phiên bản mới nhất; publisher duyệt hoặc trả lại. Mọi bước được ghi log; cảnh không căn
-                  cứ cần publisher xác nhận bỏ qua.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ReviewPanel
-                  projectId={project.id}
-                  state={project.state}
-                  latestTimeline={{ id: timelines[0].id, version: timelines[0].version }}
-                  approvedTimelineId={project.approvedTimelineId}
-                  canEdit={writer}
-                  canApprove={canApprove(ws)}
-                  busy={busy}
-                  needsOverride={needsFaithfulnessOverride(
-                    scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0],
-                  )}
-                  faithfulnessCounts={(() => {
-                    const f = (scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0])?.faithfulnessJson as
-                      StoredFaithfulness | null | undefined;
-                    return f && "counts" in f ? f.counts : null;
-                  })()}
-                  sensitiveTopic={project.sensitiveTopic}
-                  reviews={reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
-                />
-              </CardContent>
-            </Card>
-          ) : null}
 
           {/* ---------------- Publish (phase 5) ---------------- */}
           {timelines.length && (project.approvedTimelineId || publications.length) ? (
-            <Card id="publish" className="scroll-mt-3">
+            <Card id="publish" className="scroll-mt-3 max-xl:order-2">
               <CardHeader>
                 <CardTitle>Đăng</CardTitle>
                 <CardDescription>
@@ -904,10 +869,46 @@ export default async function ProjectPage({
               </CardContent>
             </Card>
           ) : null}
+        </div>
+
+        <aside className="contents xl:block xl:min-w-0 xl:space-y-6">
+          {/* ---------------- Review / approval (phase 4) ---------------- */}
+          {timelines.length ? (
+            <Card id="review" className="scroll-mt-3 max-xl:order-1">
+              <CardHeader>
+                <CardTitle>Duyệt</CardTitle>
+                <CardDescription>
+                  Người dựng gửi phiên bản mới nhất; publisher duyệt hoặc trả lại. Mọi bước được ghi log; cảnh không căn
+                  cứ cần publisher xác nhận bỏ qua.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ReviewPanel
+                  projectId={project.id}
+                  state={project.state}
+                  latestTimeline={{ id: timelines[0].id, version: timelines[0].version }}
+                  approvedTimelineId={project.approvedTimelineId}
+                  canEdit={writer}
+                  canApprove={canApprove(ws)}
+                  busy={busy}
+                  needsOverride={needsFaithfulnessOverride(
+                    scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0],
+                  )}
+                  faithfulnessCounts={(() => {
+                    const f = (scripts.find((s) => s.id === timelines[0].scriptId) ?? scripts[0])?.faithfulnessJson as
+                      StoredFaithfulness | null | undefined;
+                    return f && "counts" in f ? f.counts : null;
+                  })()}
+                  sensitiveTopic={project.sensitiveTopic}
+                  reviews={reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* ---------------- Renders ---------------- */}
           {renders.length || project.busyStep === "render" ? (
-            <Card id="renders" className="scroll-mt-3 mb-36">
+            <Card id="renders" className="scroll-mt-3 mb-36 max-xl:order-3">
               <CardHeader>
                 <CardTitle>Kết xuất</CardTitle>
                 <CardDescription>

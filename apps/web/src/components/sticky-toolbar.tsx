@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -47,9 +47,16 @@ export type SectionTab = { id: string; label: string; icon?: React.ReactNode };
  * Icon + label jump links to page sections (`id`s), with the reference's blue
  * underline on the section currently in view. Plain anchors: they work before
  * hydration, and `scroll-padding-top` in globals.css keeps the target clear of the bar.
+ *
+ * Sections can sit side by side (a narrow column beside the main one), where the scroll
+ * position cannot tell them apart. So the scroll position follows the widest column only,
+ * and a tab that was clicked keeps the underline for as long as its section is on screen
+ * and the scroll position has not moved on to another section.
  */
 export function SectionTabs({ tabs, className }: { tabs: SectionTab[]; className?: string }) {
   const [active, setActive] = useState<string | null>(tabs[0]?.id ?? null);
+  const nav = useRef<HTMLElement>(null);
+  const hashRead = useRef(false);
   const ids = tabs.map((t) => t.id).join(",");
   useEffect(() => {
     const els = ids
@@ -57,31 +64,79 @@ export function SectionTabs({ tabs, className }: { tabs: SectionTab[]; className
       .map((id) => document.getElementById(id))
       .filter((el): el is HTMLElement => Boolean(el));
     if (!els.length) return;
-    const update = () => {
+    // The bar sits at the top edge; the top bar above it is not sticky on these pages.
+    const line = 128;
+    const derive = () => {
+      const rects = els.map((el) => el.getBoundingClientRect());
+      // A section beside a wider one (review next to the script) is a side column: it only wins when the main column has nothing.
+      const side = rects.map((r, i) =>
+        rects.some((o, j) => j !== i && o.width > r.width + 1 && o.top < r.bottom && r.top < o.bottom),
+      );
+      // At the end of the page the last sections cannot reach the line any more: whatever is on screen counts.
+      const atEnd =
+        window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      const limit = atEnd ? window.innerHeight : line;
       // The section whose top is closest above the bar wins; the first one before anything scrolled.
-      // The bar sits at the top edge; the top bar above it is not sticky on these pages.
-      const line = 128;
-      let best: string | null = null;
-      let bestTop = -Infinity;
-      for (const el of els) {
-        const top = el.getBoundingClientRect().top;
-        if (top <= line && top > bestTop) {
-          best = el.id;
-          bestTop = top;
-        }
-      }
-      setActive(best ?? els[0].id);
+      let best = -1;
+      rects.forEach((r, i) => {
+        if ((!r.width && !r.height) || r.top > limit) return;
+        if (best < 0 || (side[best] && !side[i]) || (side[i] === side[best] && r.top > rects[best].top)) best = i;
+      });
+      return els[Math.max(best, 0)].id;
     };
+    // The clicked tab, and the section the scroll position pointed at once the jump had settled (null = still scrolling there).
+    let picked: { id: string; over: string | null } | null = null;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const update = () => {
+      const derived = derive();
+      if (picked) {
+        const r = document.getElementById(picked.id)?.getBoundingClientRect();
+        const onScreen = Boolean(r && r.bottom > line && r.top < window.innerHeight);
+        if (picked.over === null || (onScreen && picked.over === derived)) return setActive(picked.id);
+        picked = null;
+      }
+      setActive(derived);
+    };
+    const arm = () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        if (picked?.over === null) picked.over = derive();
+        update();
+      }, 150);
+    };
+    const pick = (id: string) => {
+      if (!els.some((el) => el.id === id)) return;
+      picked = { id, over: null };
+      arm();
+    };
+    const onScroll = () => {
+      if (picked?.over === null) arm();
+      update();
+    };
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element).closest?.("a[href^='#']");
+      if (a) pick(a.getAttribute("href")!.slice(1));
+      update();
+    };
+    // Arriving with a #section in the URL counts as a click on that tab.
+    if (!hashRead.current) {
+      hashRead.current = true;
+      pick(window.location.hash.slice(1));
+    }
     update();
-    window.addEventListener("scroll", update, { passive: true });
+    const navEl = nav.current;
+    navEl?.addEventListener("click", onClick);
+    window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", update);
     return () => {
-      window.removeEventListener("scroll", update);
+      clearTimeout(settle);
+      navEl?.removeEventListener("click", onClick);
+      window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", update);
     };
   }, [ids]);
   return (
-    <nav aria-label="Mục trong trang" className={cn("flex min-w-max items-stretch gap-3", className)}>
+    <nav ref={nav} aria-label="Mục trong trang" className={cn("flex min-w-max items-stretch gap-3", className)}>
       {tabs.map((t) => (
         <a
           key={t.id}
