@@ -96,6 +96,11 @@ describe("migrations", () => {
     }
   });
 
+  it("switch on the flags that are on by default (face_guard 0018, web_video_downloader 0020)", async () => {
+    const { rows } = await pg.query<{ key: string; enabled: boolean }>("select key, enabled from feature_flags where key in ('face_guard','web_video_downloader') order by key");
+    expect(rows).toEqual([{ key: "face_guard", enabled: true }, { key: "web_video_downloader", enabled: true }]);
+  });
+
   it("add the phase 2 columns", async () => {
     const { rows } = await pg.query<{ table_name: string; column_name: string }>(
       "select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='projects' and column_name in ('busy_step','duration_sec','tone')) or (table_name='articles' and column_name in ('confirmed_at','confirmed_by','word_count','updated_at')))",

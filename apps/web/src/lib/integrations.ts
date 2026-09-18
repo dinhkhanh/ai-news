@@ -20,7 +20,7 @@ export const isIntegrationProvider = (p: string): p is IntegrationProvider =>
 
 /** `defaultOn`: the state of a flag nobody has set yet (no `feature_flags` row); everything else starts off. */
 export const FEATURE_FLAGS = [
-  { key: "web_video_downloader", label: "Web-video downloader (yt-dlp)", description: "Visual tier 2 (same rank as other outlets' images): search YouTube / video pages about the story, download only the picked sections through the media Lambda." },
+  { key: "web_video_downloader", defaultOn: true, label: "Web-video downloader (yt-dlp)", description: "On by default. Visual tier 2 (same rank as other outlets' images): search YouTube / video pages about the story, download only the picked sections through the media Lambda." },
   { key: "ai_media", label: "AI media (Gemini image on Vertex)", description: "Last tier of the visual priority: generate stills only for shots the article, other outlets and stock could not fill. Subject to the daily ai_media quota and the Vertex spend cap." },
   { key: "face_guard", defaultOn: true, label: "Face guard (Cloud Vision)", description: "On by default. Face detection and automatic alignment of stills before they enter a video: faces must not be cropped by the 9:16 frame, must not sit under text overlays or platform UI, and are centred on the upper-third line. Needs the Cloud Vision API on the Google service account's project." },
   { key: "scheduling", label: "Scheduled publishing", description: "Allow publish-at-time via delayed events." },
