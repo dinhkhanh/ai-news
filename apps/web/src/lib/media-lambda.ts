@@ -103,14 +103,14 @@ export async function invokeMediaLambda(payload: MediaAction): Promise<MediaResu
 }
 
 /**
- * Web-video downloads go to the self-hosted API when one is configured
+ * Web-video downloads and page lookups go to the self-hosted API when one is configured
  * (`WEB_VIDEO_API_URL`, see packages/media-lambda/src/server.ts): it runs the
  * same handler on a regular ISP line, which YouTube does not bot-check, and
  * writes to the same R2 bucket. If the box cannot be reached at all the
  * Lambda is used, so a NAS outage degrades to the old behaviour instead of
  * failing the build; a yt-dlp error from the box is returned as is.
  */
-export async function invokeWebVideo(payload: Extract<MediaAction, { action: "web-video" }>): Promise<MediaResult & { via: "nas" | "lambda" }> {
+export async function invokeWebVideo(payload: Extract<MediaAction, { action: "web-video" | "web-video-search" }>): Promise<MediaResult & { via: "nas" | "lambda" }> {
   const e = env();
   if (e.WEB_VIDEO_API_URL && e.WEB_VIDEO_API_TOKEN) {
     const started = Date.now();
@@ -123,7 +123,7 @@ export async function invokeWebVideo(payload: Extract<MediaAction, { action: "we
       });
       const json = (await res.json().catch(() => null)) as (MediaResult & { error?: string }) | null;
       if (res.status === 429 || res.status >= 500 || !json) throw new Error(`HTTP ${res.status}`);
-      if (!res.ok) return { ok: false, action: "web-video", passed: false, error: `web-video API: ${json.error ?? `HTTP ${res.status}`}`, via: "nas" };
+      if (!res.ok) return { ok: false, action: payload.action, passed: false, error: `web-video API: ${json.error ?? `HTTP ${res.status}`}`, via: "nas" };
       return { ...json, billedMs: 0, via: "nas" };
     } catch (err) {
       console.warn("[web-video] self-hosted API unreachable, using the Lambda", (err as Error).message, `${Date.now() - started} ms`);

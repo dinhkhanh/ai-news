@@ -8,7 +8,7 @@ import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
 import { projectSceneRegenerateRequested } from "@/inngest/events";
 import { recordUsageCost } from "@/lib/activity";
-import { invokeMediaLambda } from "@/lib/media-lambda";
+import { invokeMediaLambda, invokeWebVideo } from "@/lib/media-lambda";
 import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
 import { storedFrame, type FrameFaces } from "@/lib/media/framing";
 import { downloadToR2 } from "@/lib/media/stock";
@@ -211,8 +211,8 @@ export type WebVideoAdded = VisualAdded | { ok: false; message: string; capture:
 /**
  * Fetch one section of a video page (YouTube, TikTok, Facebook reels / watch,
  * Vimeo, Dailymotion) pasted in the inspector: yt-dlp resolves the page
- * (metadata only), then only `[startSec, endSec)` is downloaded through the
- * web-video route (self-hosted API, else the media Lambda) and stored as a
+ * (metadata only) and only `[startSec, endSec)` is downloaded, both through the
+ * web-video route (the self-hosted API on an ISP line, else the media Lambda) and stored as a
  * `web_video` asset with the uploader's credit. A YouTube page the server
  * cannot fetch (datacenter IPs are bot-checked) comes back as a `capture` for
  * the in-browser recorder, aimed at the shot the user was filling.
@@ -227,7 +227,7 @@ export async function importWebVideo(input: { projectId: string; url: string; st
     if (!project) throw new Error("Project not found in this workspace");
     const first = manualSection({ startSec: input.startSec, endSec: input.endSec, durationSec: null });
     if (!first.ok) throw new Error(first.error);
-    const meta = await invokeMediaLambda({ action: "web-video-search", input: { urls: [url], limit: 1 } });
+    const meta = await invokeWebVideo({ action: "web-video-search", input: { urls: [url], limit: 1 } });
     const c = meta.ok ? meta.videos?.[0] : undefined;
     if (!c) throw new Error(`Không đọc được trang video${meta.error ? `: ${meta.error}` : meta.warnings?.[0] ? `: ${meta.warnings[0]}` : ""}`);
     const section = manualSection({ startSec: input.startSec, endSec: input.endSec, durationSec: c.durationSec });
