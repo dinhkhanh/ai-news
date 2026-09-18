@@ -14,59 +14,75 @@ const PUNCH_FRAMES = 6;
 
 /* ---------------------------------------------------------------- visuals */
 
-type ImageSize = { width: number; height: number };
-const imageSizes = new Map<string, ImageSize | null>();
+type MediaSize = { width: number; height: number };
+const mediaSizes = new Map<string, MediaSize | null>();
 
 /**
- * Natural size of a still, so the layout can tell landscape from portrait.
- * The render waits for it (`delayRender`); sizes are cached per URL so a
- * shot that mounts again (Player scrubbing, the next chunk) does not reload.
- * A picture that fails to load counts as unknown → cover fit, as before.
+ * Natural size of a still or a clip, so the layout can tell landscape from
+ * portrait. The render waits for it (`delayRender`); sizes are cached per URL
+ * so a shot that mounts again (Player scrubbing, the next chunk) does not
+ * reload. Media that fails to load counts as unknown → cover fit, as before.
+ * A clip only loads its metadata (`preload="metadata"`), not the file.
  */
-function useImageSize(src: string): ImageSize | null | undefined {
-  const [size, setSize] = useState<ImageSize | null | undefined>(() => imageSizes.get(src));
-  const [handle] = useState(() => (imageSizes.has(src) ? null : delayRender(`image size ${src.slice(0, 80)}`, { timeoutInMilliseconds: 90_000 })));
+function useMediaSize(src: string, kind: "image" | "video"): MediaSize | null | undefined {
+  const [size, setSize] = useState<MediaSize | null | undefined>(() => mediaSizes.get(src));
+  const [handle] = useState(() => (mediaSizes.has(src) ? null : delayRender(`${kind} size ${src.slice(0, 80)}`, { timeoutInMilliseconds: 90_000 })));
   useEffect(() => {
-    if (imageSizes.has(src)) {
-      setSize(imageSizes.get(src));
+    if (mediaSizes.has(src)) {
+      setSize(mediaSizes.get(src));
       if (handle !== null) continueRender(handle);
       return;
     }
-    const img = new Image();
-    const done = (s: ImageSize | null) => {
-      imageSizes.set(src, s);
+    const done = (s: MediaSize | null) => {
+      mediaSizes.set(src, s);
       setSize(s);
       if (handle !== null) continueRender(handle);
     };
-    img.onload = () => done(img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null);
-    img.onerror = () => done(null);
-    img.src = src;
+    if (kind === "image") {
+      const img = new Image();
+      img.onload = () => done(img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null);
+      img.onerror = () => done(null);
+      img.src = src;
+    } else {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.muted = true;
+      v.onloadedmetadata = () => done(v.videoWidth > 0 && v.videoHeight > 0 ? { width: v.videoWidth, height: v.videoHeight } : null);
+      v.onerror = () => done(null);
+      v.src = src;
+    }
     return () => {
       // Unmounted before the load ended: never leave the render waiting.
       if (handle !== null) continueRender(handle);
     };
-  }, [src, handle]);
+  }, [src, kind, handle]);
   return size;
 }
 
-/** A landscape still: full width on the upper-third line over a blurred, darkened copy of itself. Nothing is cropped. */
-const LandscapeStill: React.FC<{ src: string; size: ImageSize; durationFrames: number; kenBurns: boolean; variant: number; brand: Brand }> = ({ src, size, durationFrames, kenBurns, variant, brand }) => {
-  const frame = useCurrentFrame();
+/**
+ * Landscape media is never cover-cropped to 9:16: it is drawn full width on
+ * the upper-third line (`landscapeLayout`) over a blurred, darkened copy of
+ * itself. `render(style)` draws the medium once for the backdrop and once for
+ * the foreground; `scale` is the gentle Ken Burns of the shot (1 = none).
+ */
+const LandscapeFrame: React.FC<{ size: MediaSize; scale: number; brand: Brand; render: (layer: "backdrop" | "front") => React.ReactNode }> = ({ size, scale, brand, render }) => {
   const at = landscapeLayout(size.width, size.height);
-  const range = variant % 2 === 1 ? LANDSCAPE_KEN_BURNS.out : LANDSCAPE_KEN_BURNS.in;
-  const scale = kenBurns ? interpolate(frame, [0, durationFrames], [range[0], range[1]], { extrapolateRight: "clamp" }) : 1;
   return (
     <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
-      {/* Backdrop: the same picture, cover-fitted and blurred; enlarged so the blur has no soft edges, dimmed so text stays readable. */}
-      <AbsoluteFill style={{ transform: `scale(${1.12 * (kenBurns ? scale : 1)})` }}>
-        <Img src={src} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(36px) saturate(1.1)" }} />
-      </AbsoluteFill>
+      {/* Backdrop: enlarged so the blur has no soft edges, dimmed so text stays readable. */}
+      <AbsoluteFill style={{ transform: `scale(${1.12 * scale})`, filter: "blur(36px) saturate(1.1)" }}>{render("backdrop")}</AbsoluteFill>
       <AbsoluteFill style={{ background: "rgba(0,0,0,.42)" }} />
-      <div style={{ position: "absolute", left: 0, top: at.top, width: OUTPUT.width, height: at.height, transform: `scale(${scale})`, transformOrigin: "50% 50%", boxShadow: "0 24px 60px rgba(0,0,0,.45)" }}>
-        <Img src={src} style={{ display: "block", width: "100%", height: "100%", objectFit: "fill" }} />
-      </div>
+      <div style={{ position: "absolute", left: 0, top: at.top, width: OUTPUT.width, height: at.height, transform: `scale(${scale})`, transformOrigin: "50% 50%", boxShadow: "0 24px 60px rgba(0,0,0,.45)" }}>{render("front")}</div>
     </AbsoluteFill>
   );
+};
+
+/** A landscape still in the `LandscapeFrame`, with the gentle Ken Burns. */
+const LandscapeStill: React.FC<{ src: string; size: MediaSize; durationFrames: number; kenBurns: boolean; variant: number; brand: Brand }> = ({ src, size, durationFrames, kenBurns, variant, brand }) => {
+  const frame = useCurrentFrame();
+  const range = variant % 2 === 1 ? LANDSCAPE_KEN_BURNS.out : LANDSCAPE_KEN_BURNS.in;
+  const scale = kenBurns ? interpolate(frame, [0, durationFrames], [range[0], range[1]], { extrapolateRight: "clamp" }) : 1;
+  return <LandscapeFrame size={size} scale={scale} brand={brand} render={(layer) => <Img src={src} style={layer === "backdrop" ? { width: "100%", height: "100%", objectFit: "cover" } : { display: "block", width: "100%", height: "100%", objectFit: "fill" }} />} />;
 };
 
 /** A portrait or square still: cover-fitted, anchored on the faces by the face guard (`focus`), with the Ken Burns move. */
@@ -93,32 +109,33 @@ const CoverStill: React.FC<{ visual: Extract<Visual, { kind: "image" }>; duratio
 };
 
 const StillVisual: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durationFrames: number; brand: Brand; variant: number }> = (props) => {
-  const size = useImageSize(props.visual.src);
+  const size = useMediaSize(props.visual.src, "image");
   if (size && isLandscape(size.width, size.height)) return <LandscapeStill src={props.visual.src} size={size} durationFrames={props.durationFrames} kenBurns={props.visual.kenBurns !== false} variant={props.variant} brand={props.brand} />;
   return <CoverStill {...props} />;
 };
 
 const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand; variant?: number }> = ({ visual, durationFrames, brand, variant = 0 }) => {
-  const { fps } = useVideoConfig();
   if (visual.kind === "solid") {
     return <AbsoluteFill style={{ background: `linear-gradient(160deg, ${brand.colours.primary}, ${brand.colours.background})` }} />;
   }
   if (visual.kind === "image") return <StillVisual visual={visual} durationFrames={durationFrames} brand={brand} variant={variant} />;
+  return <ClipVisual visual={visual} durationFrames={durationFrames} brand={brand} />;
+};
+
+/** A clip: cover-fitted when portrait or square; a landscape clip plays full width in the `LandscapeFrame` (no Ken Burns on footage). */
+const ClipVisual: React.FC<{ visual: Extract<Visual, { kind: "video" }>; durationFrames: number; brand: Brand }> = ({ visual, durationFrames, brand }) => {
+  const { fps } = useVideoConfig();
+  const size = useMediaSize(visual.src, "video");
   const clipFrames = Math.max(1, Math.round(visual.clipDurationSec * fps));
-  const video = (
-    <OffthreadVideo
-      src={visual.src}
-      muted={visual.muted}
-      trimBefore={Math.round(visual.trimStartSec * fps)}
-      style={{ width: "100%", height: "100%", objectFit: visual.fit }}
-      delayRenderTimeoutInMilliseconds={90_000}
-    />
-  );
-  return (
-    <AbsoluteFill style={{ backgroundColor: brand.colours.background }}>
-      {clipFrames < durationFrames ? <Loop durationInFrames={clipFrames}>{video}</Loop> : video}
-    </AbsoluteFill>
-  );
+  const clip = (style: React.CSSProperties) => <OffthreadVideo src={visual.src} muted={visual.muted} trimBefore={Math.round(visual.trimStartSec * fps)} style={style} delayRenderTimeoutInMilliseconds={90_000} />;
+  const body =
+    size && isLandscape(size.width, size.height) ? (
+      <LandscapeFrame size={size} scale={1} brand={brand} render={(layer) => clip(layer === "backdrop" ? { width: "100%", height: "100%", objectFit: "cover" } : { display: "block", width: "100%", height: "100%", objectFit: "fill" })} />
+    ) : (
+      <AbsoluteFill style={{ backgroundColor: brand.colours.background }}>{clip({ width: "100%", height: "100%", objectFit: visual.fit })}</AbsoluteFill>
+    );
+  // The clip loops when the shot is longer than it; the loop wraps the whole frame so backdrop and front stay in step.
+  return clipFrames < durationFrames ? <Loop durationInFrames={clipFrames}>{body}</Loop> : body;
 };
 
 /** Hard cut into each shot with a quick punch-in so the change registers. */
