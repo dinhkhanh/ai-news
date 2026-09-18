@@ -59,7 +59,7 @@ The API only accepts a bearer token, only serves search and trimmed (≤ 120 s) 
 ## 6. Inngest
 1. Create app **ai-news** (cloud). Copy `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` to Vercel. Install the Vercel integration so previews register automatically, or sync `https://<domain>/api/inngest` manually.
 2. Local: `INNGEST_DEV=1 pnpm dev` in one terminal and `pnpm --filter web inngest:dev` in another (dashboard at http://localhost:8288).
-3. Recurring jobs (publication poll, analytics, token refresh, queue watchdog) are HTTP routes, `/api/cron/<job>` with `Authorization: Bearer $CRON_SECRET`. Vercel Cron on the Hobby plan runs at most daily, so the scheduler is Supabase pg_cron: follow the steps at the top of `infra/supabase/cron.sql` (set `CRON_SECRET` in Vercel, store it in Vault, run the file once on production, then remove the Inngest crons). Until then the Inngest crons in `publish-crons.ts` keep the first three running.
+3. Recurring jobs (publication poll, analytics, token refresh, queue watchdog) are HTTP routes, `/api/cron/<job>` with `Authorization: Bearer $CRON_SECRET`, scheduled by Supabase pg_cron + pg_net (Vercel Cron on the Hobby plan runs at most daily, and a cron on Inngest stops with Inngest). Setup and inspection queries are at the top of `infra/supabase/cron.sql`; the secret lives in Vercel (`CRON_SECRET`), in Vault (`ai_news_cron_secret`) and in `apps/web/.env.local`.
 
 ## 7. Acceptance test
 0. `pnpm --filter web exec tsx --env-file=.env.local scripts/check-infra.ts` must print PASS on every line.

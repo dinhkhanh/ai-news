@@ -9,10 +9,10 @@ import { checkPublication, pullChannelAnalytics, staleProcessing } from "@/lib/p
 import { checkQueue } from "@/lib/queue-health";
 
 /**
- * The recurring jobs as plain functions, so the scheduler is a deployment choice: `GET|POST /api/cron/<job>`
- * (any HTTP scheduler: Supabase pg_cron, Vercel Cron on a Pro plan, a cron on the NAS) or the Inngest crons in
- * `src/inngest/functions/publish-crons.ts`. Every job is safe to run twice and one failing item never stops
- * the rest. Schedules are in UTC.
+ * The recurring jobs as plain functions behind `GET|POST /api/cron/<job>`, so the scheduler is a deployment
+ * choice. In production it is Supabase pg_cron + pg_net (infra/supabase/cron.sql); they used to be Inngest crons,
+ * which stop when Inngest does (2026-09-18), and Vercel Cron on the Hobby plan runs at most daily. Every job is
+ * safe to run twice and one failing item never stops the rest. Schedules are in UTC.
  */
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -74,12 +74,12 @@ export async function refreshChannelTokens() {
   return { checked: channels.length, failures };
 }
 
-/** `schedule` documents the intended cadence (UTC); the scheduler itself lives outside the app (infra/supabase/cron.sql). */
+/** `schedule` documents the cadence (UTC); the schedules that actually fire are the ones in infra/supabase/cron.sql: change both. */
 export const CRON_JOBS = {
   "poll-publications": { schedule: "*/10 * * * *", run: pollPublications },
   "pull-analytics": { schedule: "30 19 * * *", run: pullAnalytics },
   "refresh-channel-tokens": { schedule: "15 */6 * * *", run: refreshChannelTokens },
-  /** Only useful on a scheduler that is not Inngest: it watches Inngest. */
+  /** Watches Inngest, so it must never run on Inngest. */
   "queue-watchdog": { schedule: "*/5 * * * *", run: checkQueue },
 } as const satisfies Record<string, { schedule: string; run: () => Promise<unknown> }>;
 

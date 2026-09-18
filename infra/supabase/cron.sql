@@ -1,17 +1,17 @@
 -- Recurring jobs on Supabase pg_cron instead of Inngest crons.
 --
--- NOT a migration and NOT applied automatically: run it once, by hand, against the PRODUCTION database only
--- (it calls the production URL). Why here: Vercel Cron on the Hobby plan only allows one run a day, and a cron
--- on Inngest stops when Inngest does (2026-09-18). Supabase is already a hard dependency of the app, so this
--- adds no new point of failure. The jobs are apps/web/src/lib/cron-jobs.ts behind /api/cron/<job>.
+-- NOT a migration: applied by hand to the PRODUCTION database only (it calls the production URL), first on
+-- 2026-09-19. Why here: Vercel Cron on the Hobby plan only allows one run a day, and a cron on Inngest stops
+-- when Inngest does (2026-09-18). Supabase is already a hard dependency of the app, so this adds no new point
+-- of failure. The jobs are apps/web/src/lib/cron-jobs.ts behind /api/cron/<job>; keep the schedules in sync.
 --
--- Order:
---   1. Set CRON_SECRET (long random string) in Vercel (Production) and redeploy.
+-- Setting it up again (new project / new secret):
+--   1. Set CRON_SECRET (long random string) in Vercel (Production) with `vercel env add ... --value`, redeploy.
 --   2. Check by hand:  curl -H "Authorization: Bearer $CRON_SECRET" "https://www.suzu.net/api/cron/queue-watchdog?wait=1"
---   3. Store the same secret in Vault (replace the placeholder, do not commit the value):
+--   3. Store the same secret in Vault (do not commit the value):
 --        select vault.create_secret('<CRON_SECRET>', 'ai_news_cron_secret');
---   4. Run this file.
---   5. Remove the three Inngest crons (apps/web/src/inngest/functions/publish-crons.ts + index.ts) and deploy.
+--      Rotating: select vault.update_secret((select id from vault.secrets where name = 'ai_news_cron_secret'), '<new>');
+--   4. Run this file (safe to re-run: cron.schedule replaces a job of the same name).
 --
 -- Inspect:  select jobname, schedule, active from cron.job;
 --           select * from cron.job_run_details order by start_time desc limit 20;
