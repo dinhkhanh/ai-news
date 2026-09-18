@@ -1,8 +1,8 @@
-import React, { useMemo } from "react";
-import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import React, { useEffect, useMemo, useState } from "react";
+import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { boxShadowCss, CREDIT_MAX_WIDTH, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { boxShadowCss, CREDIT_MAX_WIDTH, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -14,32 +14,96 @@ const PUNCH_FRAMES = 6;
 
 /* ---------------------------------------------------------------- visuals */
 
-const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand; variant?: number }> = ({ visual, durationFrames, brand, variant = 0 }) => {
+type ImageSize = { width: number; height: number };
+const imageSizes = new Map<string, ImageSize | null>();
+
+/**
+ * Natural size of a still, so the layout can tell landscape from portrait.
+ * The render waits for it (`delayRender`); sizes are cached per URL so a
+ * shot that mounts again (Player scrubbing, the next chunk) does not reload.
+ * A picture that fails to load counts as unknown → cover fit, as before.
+ */
+function useImageSize(src: string): ImageSize | null | undefined {
+  const [size, setSize] = useState<ImageSize | null | undefined>(() => imageSizes.get(src));
+  const [handle] = useState(() => (imageSizes.has(src) ? null : delayRender(`image size ${src.slice(0, 80)}`, { timeoutInMilliseconds: 90_000 })));
+  useEffect(() => {
+    if (imageSizes.has(src)) {
+      setSize(imageSizes.get(src));
+      if (handle !== null) continueRender(handle);
+      return;
+    }
+    const img = new Image();
+    const done = (s: ImageSize | null) => {
+      imageSizes.set(src, s);
+      setSize(s);
+      if (handle !== null) continueRender(handle);
+    };
+    img.onload = () => done(img.naturalWidth > 0 && img.naturalHeight > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null);
+    img.onerror = () => done(null);
+    img.src = src;
+    return () => {
+      // Unmounted before the load ended: never leave the render waiting.
+      if (handle !== null) continueRender(handle);
+    };
+  }, [src, handle]);
+  return size;
+}
+
+/** A landscape still: full width on the upper-third line over a blurred, darkened copy of itself. Nothing is cropped. */
+const LandscapeStill: React.FC<{ src: string; size: ImageSize; durationFrames: number; kenBurns: boolean; variant: number; brand: Brand }> = ({ src, size, durationFrames, kenBurns, variant, brand }) => {
   const frame = useCurrentFrame();
+  const at = landscapeLayout(size.width, size.height);
+  const range = variant % 2 === 1 ? LANDSCAPE_KEN_BURNS.out : LANDSCAPE_KEN_BURNS.in;
+  const scale = kenBurns ? interpolate(frame, [0, durationFrames], [range[0], range[1]], { extrapolateRight: "clamp" }) : 1;
+  return (
+    <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
+      {/* Backdrop: the same picture, cover-fitted and blurred; enlarged so the blur has no soft edges, dimmed so text stays readable. */}
+      <AbsoluteFill style={{ transform: `scale(${1.12 * (kenBurns ? scale : 1)})` }}>
+        <Img src={src} style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(36px) saturate(1.1)" }} />
+      </AbsoluteFill>
+      <AbsoluteFill style={{ background: "rgba(0,0,0,.42)" }} />
+      <div style={{ position: "absolute", left: 0, top: at.top, width: OUTPUT.width, height: at.height, transform: `scale(${scale})`, transformOrigin: "50% 50%", boxShadow: "0 24px 60px rgba(0,0,0,.45)" }}>
+        <Img src={src} style={{ display: "block", width: "100%", height: "100%", objectFit: "fill" }} />
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+/** A portrait or square still: cover-fitted, anchored on the faces by the face guard (`focus`), with the Ken Burns move. */
+const CoverStill: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durationFrames: number; brand: Brand; variant: number }> = ({ visual, durationFrames, brand, variant }) => {
+  const frame = useCurrentFrame();
+  // Alternate zoom-in / zoom-out and pan direction from shot to shot so consecutive stills do not feel identical.
+  const zoomOut = variant % 2 === 1;
+  const scale = visual.kenBurns ? interpolate(frame, [0, durationFrames], zoomOut ? [1.18, 1.06] : [1.04, 1.16], { extrapolateRight: "clamp" }) : 1;
+  const tx = visual.kenBurns ? interpolate(frame, [0, durationFrames], [0, zoomOut ? 24 : -24], { extrapolateRight: "clamp" }) : 0;
+  // Face guard: anchor the cover crop on the faces and zoom around them. The box is `zoom` times the frame,
+  // shifted by the same share as `object-position`, which equals a cover fit of the enlarged picture.
+  const f = visual.focus ?? { x: 0.5, y: 0.5, zoom: 1, originX: 0.5, originY: 0.5 };
+  const pct = (n: number) => `${n * 100}%`;
+  return (
+    <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
+      <AbsoluteFill style={{ transform: `scale(${scale}) translateX(${tx}px)`, transformOrigin: `${pct(f.originX)} ${pct(f.originY)}` }}>
+        <Img
+          src={visual.src}
+          style={{ position: "absolute", width: pct(f.zoom), height: pct(f.zoom), left: pct(-(f.zoom - 1) * f.x), top: pct(-(f.zoom - 1) * f.y), objectFit: "cover", objectPosition: `${pct(f.x)} ${pct(f.y)}` }}
+        />
+      </AbsoluteFill>
+    </AbsoluteFill>
+  );
+};
+
+const StillVisual: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durationFrames: number; brand: Brand; variant: number }> = (props) => {
+  const size = useImageSize(props.visual.src);
+  if (size && isLandscape(size.width, size.height)) return <LandscapeStill src={props.visual.src} size={size} durationFrames={props.durationFrames} kenBurns={props.visual.kenBurns !== false} variant={props.variant} brand={props.brand} />;
+  return <CoverStill {...props} />;
+};
+
+const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand; variant?: number }> = ({ visual, durationFrames, brand, variant = 0 }) => {
   const { fps } = useVideoConfig();
   if (visual.kind === "solid") {
     return <AbsoluteFill style={{ background: `linear-gradient(160deg, ${brand.colours.primary}, ${brand.colours.background})` }} />;
   }
-  if (visual.kind === "image") {
-    // Alternate zoom-in / zoom-out and pan direction from shot to shot so consecutive stills do not feel identical.
-    const zoomOut = variant % 2 === 1;
-    const scale = visual.kenBurns ? interpolate(frame, [0, durationFrames], zoomOut ? [1.18, 1.06] : [1.04, 1.16], { extrapolateRight: "clamp" }) : 1;
-    const tx = visual.kenBurns ? interpolate(frame, [0, durationFrames], [0, zoomOut ? 24 : -24], { extrapolateRight: "clamp" }) : 0;
-    // Face guard: anchor the cover crop on the faces and zoom around them. The box is `zoom` times the frame,
-    // shifted by the same share as `object-position`, which equals a cover fit of the enlarged picture.
-    const f = visual.focus ?? { x: 0.5, y: 0.5, zoom: 1, originX: 0.5, originY: 0.5 };
-    const pct = (n: number) => `${n * 100}%`;
-    return (
-      <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
-        <AbsoluteFill style={{ transform: `scale(${scale}) translateX(${tx}px)`, transformOrigin: `${pct(f.originX)} ${pct(f.originY)}` }}>
-          <Img
-            src={visual.src}
-            style={{ position: "absolute", width: pct(f.zoom), height: pct(f.zoom), left: pct(-(f.zoom - 1) * f.x), top: pct(-(f.zoom - 1) * f.y), objectFit: "cover", objectPosition: `${pct(f.x)} ${pct(f.y)}` }}
-          />
-        </AbsoluteFill>
-      </AbsoluteFill>
-    );
-  }
+  if (visual.kind === "image") return <StillVisual visual={visual} durationFrames={durationFrames} brand={brand} variant={variant} />;
   const clipFrames = Math.max(1, Math.round(visual.clipDurationSec * fps));
   const video = (
     <OffthreadVideo

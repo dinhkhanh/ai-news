@@ -168,7 +168,7 @@ export async function registerUpload(input: { projectId: string; key: string; fi
         .returning({ id: schema.assets.id }),
     );
     await log("asset.uploaded", { assetId: row.id, key: input.key, kind, sizeBytes: head.size, durationSec }, input.projectId);
-    const option: VisualOption = { assetId: row.id, key: input.key, kind, durationSec, credit: null, thumbnailUrl: null, provider: "upload", sceneId: null, searchTerm: input.filename.slice(0, 80), rankScore: null, frame: kind === "image" ? await guardFrame({ assetId: row.id, key: input.key }, { ...ws, projectId: input.projectId }) : null };
+    const option: VisualOption = { assetId: row.id, key: input.key, kind, durationSec, credit: null, thumbnailUrl: null, provider: "upload", sceneId: null, searchTerm: input.filename.slice(0, 80), rankScore: null, frame: kind === "image" ? await guardFrame({ assetId: row.id, key: input.key }, { ...ws, projectId: input.projectId }) : null, sourceUrl: null, section: null };
     return { ok: true, option, url: await presignGet(input.key, 3600), message: kind === "video" ? "Đã tải clip lên" : "Đã tải ảnh lên" };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
@@ -199,7 +199,7 @@ export async function importVisualFromUrl(input: { projectId: string; url: strin
         .returning({ id: schema.assets.id }),
     );
     await log("asset.imported_url", { assetId: row.id, key, kind, sizeBytes: dl.sizeBytes, url: url.slice(0, 300) }, input.projectId);
-    const option: VisualOption = { assetId: row.id, key, kind, durationSec: null, credit: null, thumbnailUrl: kind === "image" ? url : null, provider: "url", sceneId: null, searchTerm: null, rankScore: null, frame: kind === "image" ? await guardFrame({ assetId: row.id, key }, { ...ws, projectId: input.projectId }) : null };
+    const option: VisualOption = { assetId: row.id, key, kind, durationSec: null, credit: null, thumbnailUrl: kind === "image" ? url : null, provider: "url", sceneId: null, searchTerm: null, rankScore: null, frame: kind === "image" ? await guardFrame({ assetId: row.id, key }, { ...ws, projectId: input.projectId }) : null, sourceUrl: url, section: null };
     return { ok: true, option, url: await presignGet(key, 3600), message: kind === "video" ? "Đã lấy clip từ đường dẫn" : "Đã lấy ảnh từ đường dẫn" };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
@@ -249,7 +249,7 @@ export async function importWebVideo(input: { projectId: string; url: string; st
       };
     }
     await log("asset.imported_web_video", { assetId: asset.assetId, key: asset.key, url: url.slice(0, 300), site: c.site, startSec: section.startSec, endSec: section.endSec }, input.projectId);
-    const option: VisualOption = { assetId: asset.assetId, key: asset.key, kind: "video", durationSec: asset.durationSec, credit: asset.credit, thumbnailUrl: asset.thumbnailUrl, provider: asset.provider, sceneId: null, searchTerm: null, rankScore: null, frame: null };
+    const option: VisualOption = { assetId: asset.assetId, key: asset.key, kind: "video", durationSec: asset.durationSec, credit: asset.credit, thumbnailUrl: asset.thumbnailUrl, provider: asset.provider, sceneId: null, searchTerm: null, rankScore: null, frame: null, sourceUrl: url, section: [section.startSec, section.endSec] };
     return { ok: true, option, url: await presignGet(asset.key, 3600), message: `Đã lấy ${formatTimecode(section.startSec)}–${formatTimecode(section.endSec)} từ ${c.site}` };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
@@ -305,7 +305,7 @@ export async function registerWebCapture(input: {
         .returning({ id: schema.assets.id }),
     );
     await log("asset.web_captured", { assetId: row.id, key, videoId: c.videoId, startSec: c.startSec, durationSec: clipSec, width: probe.width, height: probe.height, sizeBytes: probe.sizeBytes }, input.projectId);
-    const option: VisualOption = { assetId: row.id, key, kind: "video", durationSec: clipSec, credit, thumbnailUrl: c.thumbnailUrl, provider: "yt-capture", sceneId: null, searchTerm: c.title.slice(0, 80), rankScore: null, frame: null };
+    const option: VisualOption = { assetId: row.id, key, kind: "video", durationSec: clipSec, credit, thumbnailUrl: c.thumbnailUrl, provider: "yt-capture", sceneId: null, searchTerm: c.title.slice(0, 80), rankScore: null, frame: null, sourceUrl: c.url, section: [c.startSec, c.startSec + durationSec] };
     return { ok: true, option, url: await presignGet(key, 3600), message: "Đã ghi clip YouTube" };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };

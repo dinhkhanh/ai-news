@@ -18,6 +18,10 @@ export type VisualOption = {
   rankScore: number | null;
   /** Picture size + faces from the face guard (`assets.meta.frame`); null = never analysed. */
   frame: FrameFaces | null;
+  /** Page or file the asset was taken from (`assets.source_url`): the video page of a web clip, the outlet page of a picture. */
+  sourceUrl: string | null;
+  /** Section of the source video this clip is, in seconds (`assets.meta.section`); null for pictures / whole files. */
+  section: [number, number] | null;
 };
 
 export type MusicOption = { id: string; title: string; key: string; moodTags: string[]; durationSec: number | null; licence: string };

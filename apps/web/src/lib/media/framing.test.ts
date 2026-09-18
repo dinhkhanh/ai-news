@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { landscapeLayout } from "@ai-news/video/schema";
 import { frameStill, overlayZones, significantFaces, storedFrame, TARGET, TOLERANCE, type FaceBox, type FrameFaces } from "./framing";
 
 const face = (x: number, y: number, w: number, h: number, confidence = 0.95): FaceBox => ({ x, y, w, h, confidence });
 const landscape = (faces: FaceBox[]): FrameFaces => ({ width: 1200, height: 800, faces });
 const portrait = (faces: FaceBox[]): FrameFaces => ({ width: 1080, height: 1920, faces });
+// Cover-fitted like a landscape picture used to be (only sideways travel), but not landscape: those are no longer cropped.
+const square = (faces: FaceBox[]): FrameFaces => ({ width: 1000, height: 1000, faces });
 const body = (headline = "Giá xăng tăng mạnh") => overlayZones({ kind: "body", headline, caption: { position: "bottom", fontSize: 64 }, hasCaptions: true, showSource: true, hasLogo: false });
 
 /** Where the faces' box ends up in the 1080×1920 frame for a focus (same maths as News.tsx). */
@@ -89,13 +92,13 @@ describe("significantFaces", () => {
 describe("frameStill", () => {
   it("leaves pictures without faces (or never analysed) centred", () => {
     expect(frameStill(null, body())).toMatchObject({ ok: true, focus: null, faces: 0, kenBurns: true });
-    expect(frameStill(landscape([]), body())).toMatchObject({ ok: true, focus: null });
+    expect(frameStill(square([]), body())).toMatchObject({ ok: true, focus: null });
   });
 
-  it("pans a landscape picture so an off-centre face is centred instead of cropped", () => {
+  it("pans a square picture so an off-centre face is centred instead of cropped", () => {
     // Face at the right edge: a centred 9:16 crop (the middle 37.5 %) would cut it off entirely.
     const f = face(0.78, 0.25, 0.1, 0.18);
-    const frame = landscape([f]);
+    const frame = square([f]);
     const r = frameStill(frame, body());
     expect(r.ok).toBe(true);
     const b = placed(frame, f, r.focus!);
@@ -107,18 +110,18 @@ describe("frameStill", () => {
   });
 
   it("zooms in only as much as needed to lift a low face to the upper-third line", () => {
-    const high = frameStill(landscape([face(0.45, 0.24, 0.1, 0.18)]), body());
+    const high = frameStill(square([face(0.45, 0.24, 0.1, 0.18)]), body());
     expect(high.focus!.zoom).toBe(1);
     const f = face(0.45, 0.42, 0.1, 0.16);
-    const frame = landscape([f]);
+    const frame = square([f]);
     const low = frameStill(frame, body());
     expect(low.ok).toBe(true);
     expect(low.focus!.zoom).toBeGreaterThan(1);
     expect(low.focus!.zoom).toBeLessThanOrEqual(1.3);
     const b = placed(frame, f, low.focus!);
     expect((b.y0 + b.y1) / 2).toBeLessThanOrEqual(TARGET.y + TOLERANCE.y);
-    // A face in the lower part of a landscape picture is out of reach even at the largest zoom.
-    const out = frameStill(landscape([face(0.45, 0.55, 0.1, 0.16)]), body());
+    // A face in the lower part of a square picture is out of reach even at the largest zoom.
+    const out = frameStill(square([face(0.45, 0.55, 0.1, 0.16)]), body());
     expect(out.ok).toBe(false);
     expect(out.issues).toContain("face_off_centre");
   });
@@ -128,20 +131,20 @@ describe("frameStill", () => {
     const headline = zones.find((z) => z.name === "headline")!;
     const captions = zones.find((z) => z.name === "captions")!;
     const f = face(0.4, 0.3, 0.1, 0.14);
-    const frame = landscape([f]);
+    const frame = square([f]);
     const r = frameStill(frame, zones);
     expect(r.ok).toBe(true);
     const b = placed(frame, f, r.focus!);
     expect(b.y1).toBeLessThanOrEqual(headline.y0);
     expect(headline.y1).toBeLessThanOrEqual(captions.y0);
     // A big face right below the top edge used to sit under the headline; the lower-third headline leaves it alone.
-    expect(frameStill(landscape([face(0.4, 0.2, 0.14, 0.22)]), zones).ok).toBe(true);
+    expect(frameStill(square([face(0.4, 0.2, 0.14, 0.22)]), zones).ok).toBe(true);
     // A face low in a portrait picture cannot be lifted out from under the headline.
     expect(frameStill(portrait([face(0.3, 0.52, 0.3, 0.12)]), zones)).toMatchObject({ ok: false, issues: expect.arrayContaining(["face_under_text"]) });
   });
 
   it("fails a picture whose faces are wider apart than the vertical frame", () => {
-    const r = frameStill(landscape([face(0.08, 0.25, 0.12, 0.2), face(0.8, 0.25, 0.12, 0.2)]), body());
+    const r = frameStill(square([face(0.08, 0.25, 0.12, 0.2), face(0.8, 0.25, 0.12, 0.2)]), body());
     expect(r.ok).toBe(false);
     expect(r.issues).toContain("face_cropped");
     expect(r.focus).not.toBeNull(); // best effort for a last-resort use
@@ -173,5 +176,26 @@ describe("storedFrame", () => {
     expect(storedFrame({ frame: { width: "10" } })).toBeNull();
     expect(storedFrame({})).toBeNull();
     expect(storedFrame(null)).toBeNull();
+  });
+});
+
+describe("landscape stills (full width on a blurred backdrop, never cropped)", () => {
+  it("sit on the upper-third line, pushed down only by the platform's top bar", () => {
+    const wide = landscapeLayout(1600, 900);
+    expect(wide.height).toBeCloseTo(607.5, 1);
+    expect(wide.top + wide.height / 2).toBeCloseTo(640, 1);
+    const tall = landscapeLayout(1000, 990); // nearly square → 1069 px high: centred on 640 it would start at 105, inside the top bar
+    expect(tall.top).toBe(120);
+  });
+  it("pass faces anywhere in the picture without a crop, even at the far left", () => {
+    const f = frameStill(landscape([face(0.08, 0.3, 0.12, 0.18)]), body());
+    expect(f).toMatchObject({ ok: true, focus: null, kenBurns: true, faces: 1 });
+    expect(f.box!.x0).toBeLessThan(80);
+  });
+  it("still refuse a face that ends up under the headline", () => {
+    // 4:3 picture: 810 px high, 235–1045; a face at its very bottom sits under a two-line headline (≈1031–1245).
+    const f = frameStill({ width: 1200, height: 900, faces: [face(0.45, 0.9, 0.1, 0.09)] }, body("Chính phủ công bố gói hỗ trợ mới cho doanh nghiệp nhỏ và vừa"));
+    expect(f.ok).toBe(false);
+    expect(f.issues).toEqual(["face_under_text"]);
   });
 });

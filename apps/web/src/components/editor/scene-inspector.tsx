@@ -11,7 +11,7 @@ import type { TextLayoutInput } from "@ai-news/video/schema";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 import { FRAMING_ISSUE_LABEL, frameStill, overlayZones, type FrameFaces } from "@/lib/media/framing";
-import { DEFAULT_MANUAL_SECTION_SEC, MAX_MANUAL_SECTION_SEC, parseTimecode, webVideoPageUrl, type PendingCapture } from "@/lib/media/visual-plan";
+import { DEFAULT_MANUAL_SECTION_SEC, formatTimecode, MAX_MANUAL_SECTION_SEC, parseTimecode, webVideoPageUrl, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
 import type { VisualOption } from "./types";
 
@@ -133,6 +133,22 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
   const usedElsewhere = (key: string) => (usedKeys[key] ?? []).filter((at) => !at.startsWith(`${scene.id} `) && at !== scene.id);
   const currentKey = shot.kind === "solid" ? null : shot.key;
   const dupHere = currentKey ? usedElsewhere(currentKey) : [];
+  // Where the active shot came from (a web-video page + its section, an outlet page, a linked file), from the matching option.
+  const shotOption = shot.kind === "solid" ? null : (options.find((o) => (shot.assetId && o.assetId === shot.assetId) || o.key === shot.key) ?? null);
+  const shotSource = shotOption?.sourceUrl ?? null;
+  const shotSection = shotOption?.section ?? null;
+  // A shot cut from a video page pre-fills the fetch form with that page and section, so another portion is one edit away
+  // (state adjusted during render when the active shot changes, the React "derived state" pattern).
+  const prefillKey = `${scene.id}:${active}:${shotSource ?? ""}:${shotSection?.join("-") ?? ""}`;
+  const [prefilled, setPrefilled] = useState<string | null>(null);
+  if (prefilled !== prefillKey) {
+    setPrefilled(prefillKey);
+    if (shotSource && webVideoPageUrl(shotSource) && !busy) {
+      setLinkUrl(shotSource);
+      setLinkFrom(shotSection ? formatTimecode(shotSection[0]) : "");
+      setLinkTo(shotSection ? formatTimecode(shotSection[1]) : "");
+    }
+  }
 
   // Face guard (lib/media/framing.ts): pictures analysed by the build or on upload are re-cropped for this scene's overlays.
   const zonesOf = (s: EditorScene) => overlayZones({ kind: s.kind, headline: s.onScreenText, hasCaptions: Boolean(s.voice), ...overlay });
@@ -332,6 +348,16 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
             Cảnh quay {active + 1}: {shot.kind === "video" ? `clip ${shot.clipDurationSec.toFixed(0)} s · ${shot.credit ?? ""}` : shot.kind === "image" ? `ảnh · ${shot.credit ?? ""}` : "nền màu"}
+            {shotSource ? (
+              <>
+                {" "}
+                <a href={shotSource} target="_blank" rel="noreferrer" className="underline" title={shotSource}>
+                  {shotSource.replace(/^https?:\/\/(www\.)?/, "").slice(0, 48)}
+                  {shotSource.replace(/^https?:\/\/(www\.)?/, "").length > 48 ? "…" : ""}
+                </a>
+                {shotSection ? <span className="text-muted-foreground"> · {formatTimecode(shotSection[0])}–{formatTimecode(shotSection[1])}</span> : null}
+              </>
+            ) : null}
           </span>
           {shot.kind === "image" && !disabled ? (
             <>

@@ -10,11 +10,14 @@
  *     frame are "above the fold" on Reels / TikTok / Shorts, the bottom third
  *     belongs to captions and the platform UI.
  *
- * A landscape picture cover-fitted into 9:16 can only move sideways, so the
- * guard may enlarge it (≤ `MAX_ZOOM`) to gain vertical travel, and turns Ken
- * Burns off when the zoom alone would push a face out.
+ * Portrait and square pictures are cover-fitted: the guard picks the anchor,
+ * may enlarge the picture (≤ `MAX_ZOOM`) to gain travel, and turns Ken Burns
+ * off when the zoom alone would push a face out. A landscape picture is never
+ * cropped: `News.tsx` shows it full width on a blurred backdrop on the
+ * upper-third line (`landscapeLayout`), so the guard only checks that no
+ * overlay covers the faces where the picture puts them.
  */
-import { CREDIT_MAX_WIDTH, HEADLINE_BAR, headlinePadding, OUTPUT, SAFE_ZONES, textLayout, type Focus, type TextLayoutInput } from "@ai-news/video/schema";
+import { CREDIT_MAX_WIDTH, HEADLINE_BAR, headlinePadding, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, OUTPUT, SAFE_ZONES, textLayout, type Focus, type TextLayoutInput } from "@ai-news/video/schema";
 
 /** Face box normalised to the source picture (0–1, origin top-left). */
 export type FaceBox = { x: number; y: number; w: number; h: number; confidence: number };
@@ -25,6 +28,12 @@ export type FrameFaces = { width: number; height: number; faces: FaceBox[] };
 export function storedFrame(meta: unknown): FrameFaces | null {
   const f = (meta as { frame?: FrameFaces } | null)?.frame;
   return f && typeof f.width === "number" && typeof f.height === "number" && Array.isArray(f.faces) ? f : null;
+}
+
+/** `assets.meta.section` of a web-video clip: the `[startSec, endSec)` of the source video it was cut from. */
+export function storedSection(meta: unknown): [number, number] | null {
+  const s = (meta as { section?: unknown } | null)?.section;
+  return Array.isArray(s) && s.length === 2 && typeof s[0] === "number" && typeof s[1] === "number" && s[1] > s[0] ? [s[0], s[1]] : null;
 }
 
 export type Zone = { name: "headline" | "captions" | "source" | "outro" | "logo" | "platform_bottom" | "platform_right"; x0: number; y0: number; x1: number; y1: number };
@@ -183,6 +192,7 @@ export function frameStill(frame: FrameFaces | null, zones: Zone[]): Framing {
   if (!frame || frame.width <= 0 || frame.height <= 0) return { ok: true, issues: [], faces: 0, focus: null, kenBurns: true, box: null };
   const faces = significantFaces(frame);
   if (faces.length === 0) return { ok: true, issues: [], faces: 0, focus: null, kenBurns: true, box: null };
+  if (isLandscape(frame.width, frame.height)) return frameLandscape(frame, faces, zones);
   const u = {
     x0: clamp(Math.min(...faces.map((f) => f.x - f.w * HEAD_ROOM)), 0, 1),
     y0: clamp(Math.min(...faces.map((f) => f.y - f.h * HEAD_ROOM)), 0, 1),
@@ -198,6 +208,31 @@ export function frameStill(frame: FrameFaces | null, zones: Zone[]): Framing {
     }
   }
   return { ok: false, issues: best!.issues, faces: faces.length, focus: best!.focus, kenBurns: best!.kenBurns, box: best!.box };
+}
+
+/**
+ * A landscape still is drawn full width on a blurred backdrop (`landscapeLayout`),
+ * so nothing is cropped and there is no crop to choose: the faces land where the
+ * picture puts them, and the only question is whether an overlay covers them.
+ */
+function frameLandscape(frame: FrameFaces, faces: FaceBox[], zones: Zone[]): Framing {
+  const at = landscapeLayout(frame.width, frame.height);
+  const grow = LANDSCAPE_KEN_BURNS.in[1] * PUNCH_SCALE;
+  const u = {
+    x0: clamp(Math.min(...faces.map((f) => f.x - f.w * HEAD_ROOM)), 0, 1),
+    y0: clamp(Math.min(...faces.map((f) => f.y - f.h * HEAD_ROOM)), 0, 1),
+    x1: clamp(Math.max(...faces.map((f) => f.x + f.w * (1 + HEAD_ROOM))), 0, 1),
+    y1: clamp(Math.max(...faces.map((f) => f.y + f.h * (1 + HEAD_ROOM))), 0, 1),
+  };
+  const box = { x0: u.x0 * W, y0: at.top + u.y0 * at.height, x1: u.x1 * W, y1: at.top + u.y1 * at.height };
+  // Worst case while the shot plays: the gentle zoom around the frame's centre.
+  const cx = W / 2;
+  const cy = at.top + at.height / 2;
+  const moving = { x0: cx + (box.x0 - cx) * grow, y0: cy + (box.y0 - cy) * grow, x1: cx + (box.x1 - cx) * grow, y1: cy + (box.y1 - cy) * grow };
+  const issues: FramingIssue[] = [];
+  if (moving.x0 < 0 || moving.y0 < 0 || moving.x1 > W || moving.y1 > H) issues.push("face_cropped");
+  if (zones.some((z) => moving.x0 < z.x1 && moving.x1 > z.x0 && moving.y0 < z.y1 && moving.y1 > z.y0)) issues.push("face_under_text");
+  return { ok: issues.length === 0, issues, faces: faces.length, focus: null, kenBurns: true, box: { x0: Math.round(box.x0), y0: Math.round(box.y0), x1: Math.round(box.x1), y1: Math.round(box.y1) } };
 }
 
 export const FRAMING_ISSUE_LABEL: Record<FramingIssue, string> = {

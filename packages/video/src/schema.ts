@@ -101,6 +101,23 @@ export function textLayout(brand: TextLayoutInput, kind: "hook" | "body" | "cta"
   };
 }
 
+/**
+ * A landscape still is never cover-cropped to 9:16 (that cuts away the people
+ * and places the picture is about). It is shown full width on a blurred copy
+ * of itself, centred on the upper-third line – above the fold, clear of the
+ * headline and captions – and only pushed down when it would run into the
+ * platform's top bar. One function for `News.tsx` and the face guard.
+ */
+export const LANDSCAPE_MIN_TOP = SAFE_ZONES.top - 100;
+export const isLandscape = (width: number, height: number) => width > height;
+export function landscapeLayout(width: number, height: number) {
+  const scale = OUTPUT.width / width;
+  const h = height * scale;
+  return { scale, height: h, top: Math.max(LANDSCAPE_MIN_TOP, OUTPUT.height / 3 - h / 2) };
+}
+/** Ken Burns on a landscape still: a gentle zoom, so no more than 3 % of each edge ever leaves the frame. */
+export const LANDSCAPE_KEN_BURNS = { in: [1, 1.06], out: [1.06, 1.01] } as const;
+
 export const testCardSchema = z.object({
   title: z.string().default("ai-news test render"),
   durationSec: z.number().int().min(3).max(60).default(6),
