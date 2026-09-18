@@ -1,9 +1,12 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { Film } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { VideoButton } from "@/components/video-dialog";
 import type { ExportInfo } from "./types";
 
 const RENDER_LABEL: Record<string, string> = { queued: "chờ", rendering: "đang kết xuất", post_processing: "hậu kỳ + QA", qa_failed: "QA không đạt", done: "xong", failed: "lỗi" };
@@ -26,6 +29,8 @@ export function ExportPanel({
   busy,
   hint,
   working,
+  logo,
+  onLogoChange,
   onExport,
   onForce,
 }: {
@@ -43,16 +48,18 @@ export function ExportPanel({
   busy: boolean;
   hint: string | null;
   working: boolean;
-  onExport: (logoChannelId: string | null) => void;
+  /** Channel whose logo the export carries ("" = the kit's); owned by the editor so its toolbar can export too. */
+  logo: string;
+  onLogoChange: (id: string) => void;
+  onExport: () => void;
   /** Render that version again with QA not gating the result (offered on a `qa_failed` row). */
   onForce: (render: ExportInfo["renders"][number]) => void;
 }) {
-  const [logo, setLogo] = useState(info.logoChannels.some((c) => c.id === info.defaultLogoChannelId) ? info.defaultLogoChannelId! : "");
   const saveFirst = dirty && canSave;
   const label = working ? (saveFirst ? "Đang lưu và gửi kết xuất…" : "Đang gửi kết xuất…") : saveFirst ? `Lưu v${nextVersion} và kết xuất` : approved ? `Kết xuất bản duyệt v${version}` : `Kết xuất thử v${version}`;
 
   return (
-    <div className="space-y-2 rounded-md border p-3">
+    <div id="export" className="space-y-2 rounded-xl bg-card p-3 shadow-xs ring-1 ring-border scroll-mt-40 sm:p-4">
       <div className="flex items-center justify-between">
         <Label htmlFor="export-logo">Kết xuất (xuất video)</Label>
         <span className="text-xs text-muted-foreground">
@@ -62,48 +69,46 @@ export function ExportPanel({
       {info.logoChannels.length ? (
         <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="export-logo">
           logo
-          <select id="export-logo" value={logo} disabled={disabled || working} onChange={(e) => setLogo(e.target.value)} className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs text-foreground">
+          <NativeSelect id="export-logo" fieldSize="sm" value={logo} disabled={disabled || working} onChange={(e) => onLogoChange(e.target.value)} className="min-w-0 flex-1">
             <option value="">của bộ nhận diện</option>
             {info.logoChannels.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} · {c.platformLabel}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
       ) : null}
-      <Button type="button" className="w-full" variant={approved && !saveFirst ? "default" : "outline"} disabled={disabled || working} onClick={() => onExport(info.logoChannels.length ? logo || "kit" : null)}>
-        {label}
+      <Button type="button" className="w-full" variant={approved && !saveFirst ? "default" : "outline"} disabled={disabled || working} onClick={onExport}>
+        <Film /> {label}
       </Button>
       <p className="text-[11px] text-muted-foreground">
         {hint ?? (saveFirst ? "Thay đổi chưa lưu sẽ được lưu thành phiên bản mới rồi kết xuất ngay phiên bản đó." : "1080×1920, 30 fps, −14 LUFS. Mất vài phút; tiến độ hiện ở đầu trang, bạn không cần rời trình chỉnh sửa.")}
         {!hint && (saveFirst || !approved) ? " Bản chưa duyệt chỉ là kết xuất thử, không đăng được." : ""}
       </p>
       {info.renders.length ? (
-        <ul className="space-y-1 border-t pt-2 text-xs">
+        <CollapsibleSection variant="plain" defaultOpen="desktop" title={`Bản kết xuất gần đây (${info.renders.length})`} className="border-t pt-1 text-xs">
+        <ul className="space-y-1.5 text-xs">
           {info.renders.map((r) => (
             <li key={r.id} className="flex flex-wrap items-center gap-1.5">
               <Badge variant={r.status === "done" ? "default" : r.status === "failed" || r.status === "qa_failed" ? "destructive" : "secondary"}>{RENDER_LABEL[r.status] ?? r.status}</Badge>
               <span className="text-muted-foreground">
                 v{r.version ?? "?"} · {r.createdAt.slice(5, 16).replace("T", " ")} · logo {r.logoName}
               </span>
-              {r.videoUrl ? (
-                <a href={r.videoUrl} target="_blank" rel="noreferrer" className="underline">
-                  tải / xem MP4
-                </a>
-              ) : null}
+              {r.videoUrl ? <VideoButton src={r.videoUrl} title={`Kết xuất v${r.version ?? "?"}`} description={`logo ${r.logoName} · ${r.createdAt.slice(0, 16).replace("T", " ")}`} /> : null}
               {r.qaOverridden ? <Badge variant="destructive">QA bị bỏ qua</Badge> : null}
               {r.error ? <span className="w-full truncate text-destructive" title={r.error}>{r.error}</span> : null}
               {r.canForce ? (
-                <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={busy || working} title="Kết xuất lại đúng phiên bản và logo này; kết quả QA vẫn được ghi lại nhưng không còn chặn bản kết xuất. Tính phút kết xuất như thường." onClick={() => onForce(r)}>
+                <Button type="button" size="xs" variant="outline" disabled={busy || working} title="Kết xuất lại đúng phiên bản và logo này; kết quả QA vẫn được ghi lại nhưng không còn chặn bản kết xuất. Tính phút kết xuất như thường." onClick={() => onForce(r)}>
                   Kết xuất lại v{r.version ?? "?"}, bỏ qua QA
                 </Button>
               ) : null}
             </li>
           ))}
         </ul>
+        </CollapsibleSection>
       ) : null}
-      <Link href={`/app/projects/${projectId}`} className="block text-[11px] text-muted-foreground underline">
+      <Link href={`/app/projects/${projectId}`} className="inline-flex min-h-8 items-center text-[11px] text-muted-foreground underline">
         Mọi bản kết xuất, ghim và đăng: trang dự án
       </Link>
     </div>

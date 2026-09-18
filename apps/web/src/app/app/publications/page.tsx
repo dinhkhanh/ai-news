@@ -60,13 +60,13 @@ export default async function PublicationsPage() {
   const active = rows.some((r) => r.status === "publishing" || r.status === "processing");
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
       <AutoRefresh active={active} everyMs={15000} />
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Đã đăng</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Đã đăng</h1>
         <p className="text-sm text-muted-foreground">Workspace: {ws.name} · số liệu được kéo về hằng ngày lúc 02:30 (giờ Việt Nam).</p>
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
         {[
           ["Bài đã đăng", String(published.length)],
           ["Lượt xem", n(totals.views)],
@@ -104,13 +104,13 @@ export default async function PublicationsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Dự án</TableHead>
-                  <TableHead>Kênh</TableHead>
+                  <TableHead className="hidden sm:table-cell">Kênh</TableHead>
                   <TableHead>Trạng thái</TableHead>
-                  <TableHead>Thời gian</TableHead>
+                  <TableHead className="hidden md:table-cell">Thời gian</TableHead>
                   <TableHead className="text-right">Xem</TableHead>
-                  <TableHead className="text-right">Thích</TableHead>
-                  <TableHead className="text-right">BL</TableHead>
-                  <TableHead className="text-right">Chia sẻ</TableHead>
+                  <TableHead className="hidden text-right lg:table-cell">Thích</TableHead>
+                  <TableHead className="hidden text-right lg:table-cell">BL</TableHead>
+                  <TableHead className="hidden text-right lg:table-cell">Chia sẻ</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -118,24 +118,27 @@ export default async function PublicationsPage() {
                   const a = r.analyticsJson as unknown as Analytics | null;
                   return (
                     <TableRow key={r.id}>
-                      <TableCell className="max-w-64 truncate">
+                      <TableCell className="max-w-56 whitespace-normal sm:max-w-64">
                         {r.projectId ? (
-                          <Link href={`/app/projects/${r.projectId}`} className="underline">
+                          <Link href={`/app/projects/${r.projectId}`} className="line-clamp-2 font-medium hover:underline">
                             {r.projectTitle ?? r.projectId}
                           </Link>
                         ) : (
-                          (r.projectTitle ?? "—")
+                          <span className="line-clamp-2">{r.projectTitle ?? "—"}</span>
                         )}
-                        <div className="text-xs text-muted-foreground">{r.createdByName ?? ""}</div>
+                        <div className="text-xs text-muted-foreground">
+                          <span className="sm:hidden">{PLATFORM_SPEC[r.platform].label} · {r.channelName} · </span>
+                          {r.createdByName ?? ""}
+                        </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         {PLATFORM_SPEC[r.platform].label}
                         <div className="text-xs text-muted-foreground">
                           {r.channelName} · {PRIVACY_LABEL[r.privacy] ?? r.privacy}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={r.status === "published" ? "default" : r.status === "failed" ? "destructive" : "secondary"}>{PUB_STATUS_LABEL[r.status] ?? r.status}</Badge>
+                        <Badge variant={r.status === "published" ? "success" : r.status === "failed" ? "destructive" : "secondary"}>{PUB_STATUS_LABEL[r.status] ?? r.status}</Badge>
                         {r.platformUrl ? (
                           <div>
                             <a href={r.platformUrl} target="_blank" rel="noreferrer" className="text-xs underline">
@@ -145,11 +148,11 @@ export default async function PublicationsPage() {
                         ) : null}
                         {r.error ? <div className="max-w-56 truncate text-xs text-destructive" title={r.error}>{r.error}</div> : null}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{r.publishedAt ? formatVietnam(r.publishedAt) : r.status === "scheduled" && r.scheduledAt ? `lịch ${formatVietnam(r.scheduledAt)}` : formatVietnam(r.createdAt)}</TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground md:table-cell">{r.publishedAt ? formatVietnam(r.publishedAt) : r.status === "scheduled" && r.scheduledAt ? `lịch ${formatVietnam(r.scheduledAt)}` : formatVietnam(r.createdAt)}</TableCell>
                       <TableCell className="text-right tabular-nums">{n(a?.views)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n(a?.likes)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n(a?.comments)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{n(a?.shares)}</TableCell>
+                      <TableCell className="hidden text-right tabular-nums lg:table-cell">{n(a?.likes)}</TableCell>
+                      <TableCell className="hidden text-right tabular-nums lg:table-cell">{n(a?.comments)}</TableCell>
+                      <TableCell className="hidden text-right tabular-nums lg:table-cell">{n(a?.shares)}</TableCell>
                     </TableRow>
                   );
                 })}

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/ui/native-select";
 import type { EvalSummary } from "@/lib/eval-summary";
 import { PROMPT_PURPOSES } from "@/lib/integrations";
 import { KNOWN_PLACEHOLDERS } from "@/lib/llm/render";
@@ -55,7 +56,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
     <div className="space-y-6">
       <AutoRefresh active={Boolean(running)} everyMs={6000} />
       <div>
-        <h1 className="text-xl font-semibold">Prompt templates</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Prompt templates</h1>
         <p className="text-sm text-muted-foreground">
           One promoted version per purpose and language is used by the pipeline. Every save creates a new version; run an eval on it, then promote.
           Promoting an older version rolls back. Without any promoted version the built-in default is used.{" "}
@@ -66,7 +67,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex max-w-full gap-0.5 overflow-x-auto rounded-lg bg-muted p-0.5 scrollbar-none">
         {PROMPT_PURPOSES.map((p) =>
           (["vi", "en"] as const).map((l) => {
             const active = p === purpose && l === language;
@@ -75,7 +76,8 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
               <a
                 key={`${p}-${l}`}
                 href={`/admin/prompts?purpose=${p}&language=${l}`}
-                className={`rounded-full border px-3 py-1 text-xs ${active ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                aria-current={active ? "true" : undefined}
+                className={`inline-flex h-8 shrink-0 items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap pointer-coarse:h-9 ${active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
               >
                 {p} / {l} {has ? "●" : "○"}
               </a>
@@ -136,7 +138,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
               const thisEval = v.evalJson as EvalSummary | null;
               const worse = Boolean(!v.promoted && promotedEval && typeof promotedEval.score === "number" && thisEval && thisEval.score < promotedEval.score);
               return (
-                <details key={v.id} className="rounded-md border p-3" open={v.promoted}>
+                <details key={v.id} className="rounded-lg border p-3" open={v.promoted}>
                   <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium">v{v.version}</span>
                     {v.promoted ? <Badge>promoted</Badge> : null}
@@ -149,20 +151,20 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
                     {evaluable ? (
                       <ActionForm action={runPromptEval} className="flex flex-wrap items-end gap-2">
                         <input type="hidden" name="templateId" value={v.id} />
-                        <select name="durationSec" defaultValue="60" className="h-8 rounded-md border bg-background px-2 text-xs">
+                        <NativeSelect name="durationSec" defaultValue="60" fieldSize="sm">
                           {DURATION_PRESETS.map((d) => (
                             <option key={d} value={d}>
                               {d}s
                             </option>
                           ))}
-                        </select>
-                        <select name="tone" defaultValue="news" className="h-8 rounded-md border bg-background px-2 text-xs">
+                        </NativeSelect>
+                        <NativeSelect name="tone" defaultValue="news" fieldSize="sm">
                           {SCRIPT_TONES.map((t) => (
                             <option key={t.key} value={t.key}>
                               {t.en}
                             </option>
                           ))}
-                        </select>
+                        </NativeSelect>
                         <Button type="submit" size="sm" variant="outline" disabled={Boolean(running)}>
                           {running ? "eval running…" : "Run eval"}
                         </Button>

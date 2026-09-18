@@ -67,8 +67,8 @@ function SceneCard({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       onClick={onSelect}
       className={cn(
-        "flex cursor-pointer gap-2 rounded-md border bg-background p-2 text-sm transition-colors hover:bg-muted/50",
-        selected && "border-primary bg-muted/60",
+        "flex cursor-pointer gap-2 rounded-xl border bg-card p-2 text-sm shadow-xs transition-colors hover:bg-muted/50",
+        selected && "border-primary/50 bg-primary/5 ring-1 ring-primary/40",
         isDragging && "opacity-60 shadow-lg",
       )}
     >
@@ -77,7 +77,7 @@ function SceneCard({
         type="button"
         aria-label="Kéo để đổi thứ tự"
         className={cn(
-          "flex w-5 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing",
+          "flex w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing",
           disabled && "cursor-not-allowed opacity-40",
         )}
         {...attributes}
@@ -85,7 +85,7 @@ function SceneCard({
       >
         <GripVertical className="size-4" />
       </button>
-      <div className="h-20 w-[45px] shrink-0 overflow-hidden rounded bg-muted">
+      <div className="h-20 w-[45px] shrink-0 overflow-hidden rounded-md bg-muted">
         {thumb.url ? (
           thumb.video ? (
             <video src={thumb.url} muted preload="metadata" className="h-full w-full object-cover" />

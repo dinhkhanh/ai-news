@@ -24,28 +24,39 @@ export default async function MusicPage() {
   }
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Music library</h1>
+      <h1 className="text-xl font-semibold tracking-tight">Music library</h1>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Add a track</CardTitle>
           <CardDescription>
             Used when Mubert is not enabled or fails. Mood tags are matched against the script tone:{" "}
-            {Object.entries(TONE_MOODS).map(([tone, m]) => `${tone} → ${m.tags.join("/")}`).join("; ")}. Tracks are looped in the mix, so 60–120 s is enough. Music is ducked −12 dB under the voice.
+            {Object.entries(TONE_MOODS)
+              .map(([tone, m]) => `${tone} → ${m.tags.join("/")}`)
+              .join("; ")}
+            . Tracks are looped in the mix, so 60–120 s is enough. Music is ducked −12 dB under the voice.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <ActionForm action={uploadTrack} className="grid gap-3 md:grid-cols-3" resetOnSuccess>
             <div className="space-y-1">
-              <Label htmlFor="file">Audio file (MP3/WAV/M4A/MP4/AAC/OGG, ≤ 25 MB)</Label>
-              <Input id="file" name="file" type="file" accept="audio/*,video/mp4,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.flac" required />
+              <Label htmlFor="file">Audio file</Label>
+              <Input
+                id="file"
+                name="file"
+                type="file"
+                accept="audio/*,video/mp4,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.flac"
+                required
+              />
+              <p className="text-xs text-muted-foreground">(MP3/WAV/M4A/MP4/AAC/OGG, max. 25 MB)</p>
             </div>
             <div className="space-y-1">
               <Label htmlFor="title">Title</Label>
               <Input id="title" name="title" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="moodTags">Mood tags (comma-separated)</Label>
+              <Label htmlFor="moodTags">Mood tags</Label>
               <Input id="moodTags" name="moodTags" placeholder="news, neutral, minimal" />
+              <p className="text-xs text-muted-foreground">(for AI picking, comma-separated)</p>
             </div>
             <div className="space-y-1">
               <Label htmlFor="licence">Licence *</Label>
@@ -56,7 +67,7 @@ export default async function MusicPage() {
               <Input id="licenceUrl" name="licenceUrl" type="url" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="durationSec">Duration (s, optional)</Label>
+              <Label htmlFor="durationSec">Duration(s)</Label>
               <Input id="durationSec" name="durationSec" type="number" step="0.1" />
             </div>
             <div className="md:col-span-3">
@@ -74,7 +85,8 @@ export default async function MusicPage() {
                 <TableHead>Moods</TableHead>
                 <TableHead>Licence</TableHead>
                 <TableHead>Duration</TableHead>
-                <TableHead>Listen</TableHead>
+                {/* The player column takes all remaining width: a long seek bar is what makes scrubbing usable. */}
+                <TableHead className="w-full">Listen</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -82,8 +94,10 @@ export default async function MusicPage() {
               {rows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">{r.title}</TableCell>
-                  <TableCell className="text-xs">{r.moodTags.join(", ")}</TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="max-w-40 truncate text-xs" title={r.moodTags.join(", ")}>
+                    {r.moodTags.join(", ")}
+                  </TableCell>
+                  <TableCell className="max-w-44 truncate text-xs" title={r.licence}>
                     {r.licenceUrl ? (
                       <a href={r.licenceUrl} target="_blank" rel="noreferrer" className="underline">
                         {r.licence}
@@ -92,8 +106,20 @@ export default async function MusicPage() {
                       r.licence
                     )}
                   </TableCell>
-                  <TableCell className="text-xs">{r.durationSec ? `${Number(r.durationSec).toFixed(0)} s` : "—"}</TableCell>
-                  <TableCell>{links.get(r.id) ? <audio controls preload="none" src={links.get(r.id)} className="h-8 w-56" /> : null}</TableCell>
+                  <TableCell className="text-xs">
+                    {r.durationSec ? `${Number(r.durationSec).toFixed(0)} s` : "—"}
+                  </TableCell>
+                  <TableCell className="w-full">
+                    {links.get(r.id) ? (
+                      <audio
+                        controls
+                        preload="none"
+                        src={links.get(r.id)}
+                        className="block h-9 w-full min-w-64"
+                        aria-label={`Nghe ${r.title}`}
+                      />
+                    ) : null}
+                  </TableCell>
                   <TableCell>
                     <ActionForm action={deleteTrack}>
                       <input type="hidden" name="id" value={r.id} />

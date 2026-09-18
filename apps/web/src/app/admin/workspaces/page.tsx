@@ -2,6 +2,7 @@ import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { NativeSelect } from "@/components/ui/native-select";
 import { loadAdminWorkspaces } from "@/lib/admin-data";
 import { ORG_ROLE_NAMES } from "@/lib/permissions";
 import { removeMember, setMemberRole } from "./actions";
@@ -14,7 +15,7 @@ export default async function WorkspacesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Workspaces</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Workspaces</h1>
         <p className="text-sm text-muted-foreground">
           One personal workspace per user is created on first sign-in. Team workspaces come in phase 6; members can still be added here
           for testing.
@@ -45,13 +46,13 @@ export default async function WorkspacesPage() {
                         <ActionForm action={setMemberRole} className="flex items-center gap-1">
                           <input type="hidden" name="organizationId" value={o.id} />
                           <input type="hidden" name="userId" value={m.userId} />
-                          <select name="role" defaultValue={m.role} className="h-8 rounded-md border bg-background px-2 text-xs">
+                          <NativeSelect name="role" defaultValue={m.role} fieldSize="sm">
                             {ORG_ROLE_NAMES.map((r) => (
                               <option key={r} value={r}>
                                 {r}
                               </option>
                             ))}
-                          </select>
+                          </NativeSelect>
                           <Button type="submit" size="sm" variant="outline">
                             Set
                           </Button>
@@ -69,7 +70,7 @@ export default async function WorkspacesPage() {
                 ))}
                 <ActionForm action={setMemberRole} className="flex items-center gap-1 border-t pt-2" resetOnSuccess>
                   <input type="hidden" name="organizationId" value={o.id} />
-                  <select name="userId" className="h-8 flex-1 rounded-md border bg-background px-2 text-xs">
+                  <NativeSelect name="userId" fieldSize="sm" className="flex-1">
                     {users
                       .filter((u) => !ms.some((m) => m.userId === u.id))
                       .map((u) => (
@@ -77,14 +78,14 @@ export default async function WorkspacesPage() {
                           {u.email}
                         </option>
                       ))}
-                  </select>
-                  <select name="role" defaultValue="editor" className="h-8 rounded-md border bg-background px-2 text-xs">
+                  </NativeSelect>
+                  <NativeSelect name="role" defaultValue="editor" fieldSize="sm">
                     {ORG_ROLE_NAMES.map((r) => (
                       <option key={r} value={r}>
                         {r}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <Button type="submit" size="sm" variant="outline">
                     Add
                   </Button>

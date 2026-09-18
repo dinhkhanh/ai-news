@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import type { SceneVerdict, StoredFaithfulness, StoredScript } from "@/lib/llm/schemas";
 import { findRange } from "@/lib/text-match";
 import { cn } from "@/lib/utils";
@@ -78,7 +79,7 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
               <li
                 key={s.id}
                 onClick={() => setActive(isActive ? null : s.id)}
-                className={cn("cursor-pointer rounded-md border p-3 text-sm transition-colors hover:bg-muted/50", isActive && "border-primary bg-muted/60")}
+                className={cn("cursor-pointer rounded-lg border p-3 text-sm transition-colors hover:bg-muted/50", isActive && "border-primary/50 bg-primary/5 ring-1 ring-primary/40")}
               >
                 <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-mono">{i + 1}</span>
@@ -118,9 +119,8 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
           })}
         </ol>
 
-        <details className="rounded-md border p-3 text-sm">
-          <summary className="cursor-pointer font-medium">Platform metadata</summary>
-          <div className="mt-2 grid gap-3 md:grid-cols-3">
+        <CollapsibleSection variant="plain" defaultOpen={false} title="Metadata cho từng nền tảng" className="rounded-lg border px-3 text-sm [&>summary]:px-0">
+          <div className="grid gap-3 pb-2 md:grid-cols-3">
             {(["youtube", "facebook", "tiktok"] as const).map((p) => (
               <div key={p} className="space-y-1 text-xs">
                 <div className="font-semibold uppercase text-muted-foreground">{p}</div>
@@ -130,15 +130,23 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
               </div>
             ))}
           </div>
-        </details>
+        </CollapsibleSection>
       </div>
 
-      {/* ---- article ---- */}
-      <div className="space-y-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-auto">
+      {/* ---- article: beside the script on wide screens, a collapsed section under it on phones ---- */}
+      <CollapsibleSection
+        variant="plain"
+        defaultOpen="desktop"
+        title="Bài báo gốc"
+        summary={activeScene ? (range ? "căn cứ được tô sáng" : "không thấy câu căn cứ nguyên văn") : "bấm một cảnh để soi căn cứ"}
+        summaryAlways
+        className="lg:sticky lg:top-40 lg:max-h-[calc(100vh-11rem)] lg:overflow-auto"
+        bodyClassName="space-y-2"
+      >
         <div className="text-xs text-muted-foreground">
           {activeScene ? (range ? "Căn cứ được tô sáng trong bài." : "Không tìm thấy câu căn cứ nguyên văn trong bài.") : "Chọn một cảnh để xem căn cứ trong bài báo."}
         </div>
-        <article className="rounded-md border p-4 text-sm leading-relaxed">
+        <article className="rounded-lg border p-4 text-sm leading-relaxed">
           <h3 className="mb-2 text-base font-semibold">{article.title}</h3>
           <p className="mb-3 text-xs text-muted-foreground">
             {article.siteName ? `${article.siteName} · ` : ""}
@@ -163,13 +171,12 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
           })}
         </article>
         {article.screenshotUrl ? (
-          <details className="text-xs">
-            <summary className="cursor-pointer text-muted-foreground">Page screenshot</summary>
+          <CollapsibleSection variant="plain" defaultOpen={false} title="Ảnh chụp trang" className="text-xs">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={article.screenshotUrl} alt="Article page screenshot" className="mt-2 w-full rounded-md border" />
-          </details>
+            <img src={article.screenshotUrl} alt="Article page screenshot" className="w-full rounded-lg border" />
+          </CollapsibleSection>
         ) : null}
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

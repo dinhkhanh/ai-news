@@ -1,44 +1,39 @@
 import Link from "next/link";
+import { AdminNav } from "@/components/admin-nav";
 import { UserMenu } from "@/components/user-menu";
 import { requireAdmin } from "@/lib/session";
-
-const nav = [
-  ["/admin", "Overview"],
-  ["/admin/users", "Users"],
-  ["/admin/domains", "Domains"],
-  ["/admin/workspaces", "Workspaces"],
-  ["/admin/integrations", "Integrations"],
-  ["/admin/channels", "Channels"],
-  ["/admin/analytics", "Analytics"],
-  ["/admin/prompts", "Prompt templates"],
-  ["/admin/evals", "Eval set & runs"],
-  ["/admin/music", "Music library"],
-  ["/admin/quotas", "Quotas"],
-  ["/admin/activity", "Activity log"],
-  ["/admin/health", "Health & test render"],
-] as const;
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await requireAdmin();
   return (
     <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r bg-sidebar p-4">
-        <Link href="/app" className="block text-sm font-semibold">
-          ai-news <span className="text-muted-foreground">/ admin</span>
+      <aside className="hidden w-60 shrink-0 border-r bg-sidebar p-4 lg:block">
+        <Link href="/app" className="inline-flex h-10 items-center gap-2 rounded-lg px-1.5 text-sm font-semibold">
+          <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-[11px] font-bold text-primary-foreground" aria-hidden>
+            ai
+          </span>
+          ai-news <span className="font-normal text-muted-foreground">/ admin</span>
         </Link>
-        <nav className="mt-6 flex flex-col gap-1 text-sm">
-          {nav.map(([href, label]) => (
-            <Link key={href} href={href} className="rounded-md px-2 py-1.5 hover:bg-sidebar-accent">
-              {label}
-            </Link>
-          ))}
-        </nav>
+        <AdminNav variant="sidebar" />
       </aside>
-      <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-end border-b px-6 py-3">
-          <UserMenu name={session.user.name} email={session.user.email} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-40 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85">
+          <div className="flex h-14 items-center gap-3 px-3 sm:px-6">
+            <Link href="/app" className="inline-flex h-10 items-center gap-2 rounded-lg px-1.5 text-sm font-semibold lg:hidden">
+              <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-[11px] font-bold text-primary-foreground" aria-hidden>
+                ai
+              </span>
+              admin
+            </Link>
+            <div className="ml-auto">
+              <UserMenu name={session.user.name} email={session.user.email} />
+            </div>
+          </div>
+          <div className="border-t lg:hidden">
+            <AdminNav variant="strip" />
+          </div>
         </header>
-        <main className="flex-1 p-6">{children}</main>
+        <main className="min-w-0 flex-1 p-3 sm:p-6">{children}</main>
       </div>
     </div>
   );

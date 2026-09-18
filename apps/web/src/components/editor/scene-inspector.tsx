@@ -94,7 +94,7 @@ function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; ur
       type="button"
       onClick={onPick}
       title={`${providerLabel}${o.searchTerm ? ` · ${o.searchTerm}` : ""}${o.rankScore != null ? ` · ${o.rankScore.toFixed(0)}/100` : ""}${usedAt.length ? ` · đã dùng ở ${usedAt.join(", ")}` : ""}`}
-      className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded border bg-muted", selected && "ring-2 ring-primary", usedAt.length && !selected && "opacity-50")}
+      className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded-md border bg-muted pointer-coarse:h-28 pointer-coarse:w-16", selected && "ring-2 ring-primary", usedAt.length && !selected && "opacity-50")}
     >
       <Thumb src={src} video={o.kind === "video" && !o.thumbnailUrl} />
       <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 text-[9px] text-white">{o.kind === "video" ? `${o.durationSec?.toFixed(0) ?? "?"} s` : providerLabel}</span>
@@ -282,13 +282,13 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
         <span className="text-xs text-muted-foreground">
           cảnh {index + 1}/{total} · lời {(voiceMs / 1000).toFixed(1)} s
         </span>
-        <button type="button" onClick={onSeek} className="text-xs underline">
+        <Button type="button" size="xs" variant="ghost" onClick={onSeek}>
           tua tới cảnh
-        </button>
+        </Button>
         {total > 1 && !disabled ? (
-          <button type="button" onClick={onRemove} className="ml-auto text-xs text-destructive underline">
+          <Button type="button" size="xs" variant="ghost" onClick={onRemove} className="ml-auto text-destructive">
             bỏ cảnh
-          </button>
+          </Button>
         ) : null}
       </div>
 
@@ -309,14 +309,14 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
         <div className="flex items-center justify-between">
           <Label>Cảnh quay ({shots.length}) · mỗi hình {perShotSec.toFixed(1)} s</Label>
           {!disabled ? (
-            <div className="flex gap-2 text-xs">
-              <button type="button" className="underline" onClick={addShot} disabled={shots.length >= 13}>
+            <div className="flex gap-1 text-xs">
+              <Button type="button" size="xs" variant="ghost" onClick={addShot} disabled={shots.length >= 13}>
                 + thêm cảnh quay
-              </button>
+              </Button>
               {shots.length > 1 ? (
-                <button type="button" className="text-destructive underline" onClick={dropShot}>
+                <Button type="button" size="xs" variant="ghost" className="text-destructive" onClick={dropShot}>
                   bỏ cảnh quay {active + 1}
-                </button>
+                </Button>
               ) : null}
             </div>
           ) : null}
@@ -325,7 +325,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
           {shots.map((v, i) => {
             const t = thumbOf(v);
             return (
-              <button key={i} type="button" onClick={() => setShotIdx(i)} className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded border bg-gradient-to-br from-slate-900 to-slate-700", i === active && "ring-2 ring-primary")} title={v.kind === "solid" ? "nền màu" : v.key}>
+              <button key={i} type="button" onClick={() => setShotIdx(i)} className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded-md border bg-gradient-to-br from-slate-900 to-slate-700 pointer-coarse:h-28 pointer-coarse:w-16", i === active && "ring-2 ring-primary")} title={v.kind === "solid" ? "nền màu" : v.key}>
                 <Thumb src={t.src} video={t.video} />
                 <span className="absolute left-0 top-0 rounded-br bg-black/70 px-1 text-[10px] text-white">{i + 1}</span>
                 <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 text-[9px] text-white">{v.kind === "video" ? "clip" : v.kind === "image" ? "ảnh" : "nền màu"}</span>
@@ -361,7 +361,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
           </span>
           {shot.kind === "image" && !disabled ? (
             <>
-              <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={Boolean(busy)} onClick={() => void autoAlign()} title="Nhận diện khuôn mặt trong ảnh này rồi tự chọn khung 9:16: không cắt mặt, không để mặt dưới chữ / giao diện nền tảng, mặt nằm ở 1/3 trên.">
+              <Button type="button" size="xs" variant="outline" disabled={Boolean(busy)} onClick={() => void autoAlign()} title="Nhận diện khuôn mặt trong ảnh này rồi tự chọn khung 9:16: không cắt mặt, không để mặt dưới chữ / giao diện nền tảng, mặt nằm ở 1/3 trên.">
                 Tự căn khuôn mặt
               </Button>
               <span>{shot.focus ? "đang căn theo khuôn mặt" : shotFrame ? "khung giữa" : "chưa nhận diện"}</span>
@@ -371,7 +371,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
 
         {/* swap options for the active shot */}
         <div className="flex gap-2 overflow-x-auto pb-1">
-          <button type="button" disabled={disabled} onClick={() => setActive({ kind: "solid" })} className={cn("flex h-24 w-14 shrink-0 items-center justify-center rounded border bg-gradient-to-br from-slate-900 to-slate-700 text-[10px] text-white", shot.kind === "solid" && "ring-2 ring-primary")}>
+          <button type="button" disabled={disabled} onClick={() => setActive({ kind: "solid" })} className={cn("flex h-24 w-14 shrink-0 items-center justify-center rounded-md border bg-gradient-to-br from-slate-900 to-slate-700 text-[10px] text-white pointer-coarse:h-28 pointer-coarse:w-16", shot.kind === "solid" && "ring-2 ring-primary")}>
             nền màu
           </button>
           {shown.map((o) => (
@@ -383,15 +383,15 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
             {forScene.length} ứng viên cho cảnh này · {others.length} khác trong dự án
           </span>
           {others.length ? (
-            <button type="button" className="underline" onClick={() => setShowAll((v) => !v)}>
+            <Button type="button" size="xs" variant="ghost" onClick={() => setShowAll((v) => !v)}>
               {showAll ? "thu gọn" : "xem tất cả"}
-            </button>
+            </Button>
           ) : null}
         </div>
 
         {/* upload / link */}
         {!disabled ? (
-          <div className="space-y-2 rounded-md border p-2">
+          <div className="space-y-2 rounded-lg border p-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void upload(e.target.files[0])} />
               <Button type="button" size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => fileRef.current?.click()}>
@@ -400,17 +400,17 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
               <span className="text-[11px] text-muted-foreground">JPG, PNG, WebP, MP4, MOV, WebM · tối đa 200 MB · thay cho cảnh quay {active + 1}</span>
             </div>
             <div className="flex items-center gap-2">
-              <Input value={linkUrl} disabled={Boolean(busy)} placeholder="Link YouTube / TikTok / Facebook reels… hoặc link trực tiếp tới tệp ảnh, video" onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className="h-8 text-sm" />
-              <Button type="button" size="sm" variant="outline" disabled={Boolean(busy) || !/^https?:\/\//i.test(linkUrl.trim()) || !linkTimesOk} onClick={() => void importUrl()}>
+              <Input value={linkUrl} inputMode="url" disabled={Boolean(busy)} placeholder="Link YouTube / TikTok / Facebook reels… hoặc link tệp ảnh, video" onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className="min-w-0 flex-1 text-sm" />
+              <Button type="button" variant="outline" disabled={Boolean(busy) || !/^https?:\/\//i.test(linkUrl.trim()) || !linkTimesOk} onClick={() => void importUrl()}>
                 Lấy
               </Button>
             </div>
             {linkIsPage ? (
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="text-muted-foreground">Cắt đoạn từ</span>
-                <Input value={linkFrom} disabled={Boolean(busy)} placeholder="0:00" onChange={(e) => setLinkFrom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className={cn("h-7 w-20 text-sm", linkFrom.trim() && linkFromSec == null && "border-destructive")} aria-label="Bắt đầu (phút:giây)" />
+                <Input value={linkFrom} disabled={Boolean(busy)} placeholder="0:00" onChange={(e) => setLinkFrom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className={cn("h-8 w-20 text-sm", linkFrom.trim() && linkFromSec == null && "border-destructive")} aria-label="Bắt đầu (phút:giây)" />
                 <span className="text-muted-foreground">đến</span>
-                <Input value={linkTo} disabled={Boolean(busy)} placeholder={`+${DEFAULT_MANUAL_SECTION_SEC}s`} onChange={(e) => setLinkTo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className={cn("h-7 w-20 text-sm", ((linkTo.trim() && linkToSec == null) || !linkTimesOk) && "border-destructive")} aria-label="Kết thúc (phút:giây)" />
+                <Input value={linkTo} disabled={Boolean(busy)} placeholder={`+${DEFAULT_MANUAL_SECTION_SEC}s`} onChange={(e) => setLinkTo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), void importUrl())} className={cn("h-8 w-20 text-sm", ((linkTo.trim() && linkToSec == null) || !linkTimesOk) && "border-destructive")} aria-label="Kết thúc (phút:giây)" />
                 <span className="text-muted-foreground">phút:giây · tối đa {MAX_MANUAL_SECTION_SEC} s · chỉ tải đúng đoạn này, ghi nguồn kênh</span>
               </div>
             ) : null}
@@ -461,9 +461,9 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
           <div className="flex items-center justify-between">
             <Label>Phụ đề ({captions.length} dòng)</Label>
             {scene.captions ? (
-              <button type="button" className="text-xs underline" disabled={disabled} onClick={() => onChange({ ...scene, captions: null })}>
+              <Button type="button" size="xs" variant="ghost" disabled={disabled} onClick={() => onChange({ ...scene, captions: null })}>
                 đặt lại tự động
-              </button>
+              </Button>
             ) : null}
           </div>
           <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
@@ -473,7 +473,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
                 <Input
                   value={c.text}
                   disabled={disabled}
-                  className="h-8 text-sm"
+                  className="text-sm"
                   onChange={(e) => {
                     const next = captions.map((x, j) => (j === i ? setCaptionText(x, e.target.value) : x));
                     onChange({ ...scene, captions: next });
@@ -487,13 +487,13 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
       ) : null}
 
       {/* ---- regenerate ---- */}
-      <div className="space-y-2 rounded-md border p-3">
+      <div className="space-y-2 rounded-lg border p-3">
         <div className="text-xs font-medium">Tạo lại (chạy nền, thành phiên bản mới)</div>
         {regenerateHint ? <p className="text-xs text-amber-700 dark:text-amber-400">{regenerateHint}</p> : null}
         <div className="space-y-1">
           <Label htmlFor="voiceover">Lời đọc</Label>
           <Textarea id="voiceover" rows={3} value={voiceText} maxLength={2000} disabled={!canRegenerate} onChange={(e) => setVoiceText(e.target.value)} className="text-sm" />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" variant="outline" disabled={!canRegenerate || voiceText.trim().length < 2} onClick={() => onRegenerate("voice", { voiceover: voiceText.trim() })}>
               {voiceText.trim() !== scene.voiceover ? "Đọc lại với lời mới" : "Đọc lại lời"}
             </Button>

@@ -4,7 +4,9 @@ import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { cancelPublication, createPublication, retryPublication } from "@/app/app/projects/[id]/publish-actions";
 import { PLATFORM_SPEC, type Platform, type PublishMetadata } from "@/lib/publish/platforms";
@@ -63,12 +65,12 @@ export function PublishPanel(p: Props) {
       )}
       {p.render && p.canPublish ? (
         <div className="flex flex-wrap gap-2">
-          {p.channels.length === 0 ? <span className="text-muted-foreground">Workspace chưa có kênh nào. Nhờ admin kết nối kênh trong /admin/channels.</span> : null}
+          {p.channels.length === 0 ? <span className="text-muted-foreground">Workspace chưa có kênh nào. Kết nối kênh của bạn ở mục Kênh (/app/channels).</span> : null}
           {p.channels.map((c) => {
             const spec = PLATFORM_SPEC[c.platform];
             const blocked = !c.granted ? "chưa được cấp quyền" : !c.enabled ? "kênh tạm dừng" : !c.healthy ? "token lỗi" : !c.flagOn ? "nền tảng đang tắt" : p.render && p.render.durationSec != null && p.render.durationSec > spec.maxDurationSec ? `video dài hơn ${spec.maxDurationSec}s` : null;
             return (
-              <Button key={c.id} size="sm" variant={open === c.id ? "default" : "outline"} disabled={Boolean(blocked)} title={blocked ?? ""} onClick={() => setOpen(open === c.id ? null : c.id)}>
+              <Button key={c.id} variant={open === c.id ? "default" : "outline"} disabled={Boolean(blocked)} title={blocked ?? ""} aria-pressed={open === c.id} onClick={() => setOpen(open === c.id ? null : c.id)}>
                 {spec.label} · {c.name}
                 {blocked ? ` (${blocked})` : ""}
               </Button>
@@ -84,7 +86,7 @@ export function PublishPanel(p: Props) {
             const own = p.renders.find((r) => r.logoChannelId === c.id);
             const chosen = own ?? p.renders[0] ?? null;
             return (
-              <ActionForm key={c.id} action={createPublication} className="space-y-3 rounded-md border p-3">
+              <ActionForm key={c.id} action={createPublication} className="space-y-3 rounded-lg border p-3">
                 <input type="hidden" name="projectId" value={p.projectId} />
                 <input type="hidden" name="channelId" value={c.id} />
                 <input type="hidden" name="renderId" value={chosen?.id ?? p.render!.id} />
@@ -118,16 +120,16 @@ export function PublishPanel(p: Props) {
                     <Input id={`h-${c.id}`} name="hashtags" defaultValue={c.defaults.hashtags.map((h) => `#${h}`).join(" ")} />
                   </div>
                 ) : null}
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor={`p-${c.id}`}>Hiển thị</Label>
-                    <select id={`p-${c.id}`} name="privacy" defaultValue={spec.privacy[0]} className="h-9 rounded-md border bg-background px-2 text-sm">
+                    <NativeSelect id={`p-${c.id}`} name="privacy" defaultValue={spec.privacy[0]} className="w-full">
                       {spec.privacy.map((v) => (
                         <option key={v} value={v}>
                           {PRIVACY_LABEL[v] ?? v}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </div>
                   {p.schedulingOn ? (
                     <div className="space-y-1">
@@ -135,12 +137,14 @@ export function PublishPanel(p: Props) {
                       <Input id={`s-${c.id}`} name="scheduledAt" type="datetime-local" />
                     </div>
                   ) : null}
-                  <label className="flex items-center gap-2 text-xs">
+                  <label className="flex min-h-9 items-center gap-2 text-xs sm:col-span-2">
                     <input type="checkbox" name="aiDisclosure" defaultChecked={p.aiDisclosure} /> Gắn nhãn nội dung có AI {spec.disclosureFlag ? "(cờ của nền tảng)" : "(dòng trong mô tả)"}
                   </label>
                 </div>
                 {c.platform === "tiktok" ? <p className="text-xs text-muted-foreground">Ứng dụng TikTok chưa qua kiểm duyệt chỉ đăng được ở chế độ “Chỉ mình tôi”; hệ thống tự hạ mức hiển thị nếu cần và ghi lại.</p> : null}
-                <Button type="submit">{p.schedulingOn ? "Đăng / lên lịch" : "Đăng ngay"}</Button>
+                <Button type="submit" className="w-full sm:w-auto">
+                  {p.schedulingOn ? "Đăng / lên lịch" : "Đăng ngay"}
+                </Button>
               </ActionForm>
             );
           })()
@@ -148,8 +152,20 @@ export function PublishPanel(p: Props) {
 
       {p.publications.length ? (
         <div className="space-y-2">
-          {p.publications.map((x) => (
-            <div key={x.id} className="rounded-md border p-2">
+          {publicationRows(p.publications.slice(0, 3))}
+          {p.publications.length > 3 ? (
+            <CollapsibleSection variant="plain" defaultOpen={false} title={`Lượt đăng cũ hơn (${p.publications.length - 3})`} bodyClassName="space-y-2">
+              {publicationRows(p.publications.slice(3))}
+            </CollapsibleSection>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  function publicationRows(list: PublicationView[]) {
+    return list.map((x) => (
+            <div key={x.id} className="rounded-lg border p-2.5">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={x.status === "published" ? "default" : x.status === "failed" ? "destructive" : "secondary"}>{PUB_STATUS_LABEL[x.status] ?? x.status}</Badge>
                 <span className="font-medium">
@@ -172,7 +188,7 @@ export function PublishPanel(p: Props) {
                 {x.status === "scheduled" ? (
                   <ActionForm action={cancelPublication}>
                     <input type="hidden" name="publicationId" value={x.id} />
-                    <Button type="submit" size="sm" variant="ghost" className="h-7">
+                    <Button type="submit" size="xs" variant="ghost">
                       Huỷ
                     </Button>
                   </ActionForm>
@@ -180,7 +196,7 @@ export function PublishPanel(p: Props) {
                 {(x.status === "failed" || x.status === "cancelled") && p.canPublish ? (
                   <ActionForm action={retryPublication}>
                     <input type="hidden" name="publicationId" value={x.id} />
-                    <Button type="submit" size="sm" variant="ghost" className="h-7">
+                    <Button type="submit" size="xs" variant="ghost">
                       Thử lại
                     </Button>
                   </ActionForm>
@@ -197,9 +213,6 @@ export function PublishPanel(p: Props) {
               ) : null}
               {x.error ? <div className="mt-1 text-xs text-destructive">{x.error.slice(0, 300)}</div> : null}
             </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
+    ));
+  }
 }

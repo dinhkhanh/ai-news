@@ -1,0 +1,63 @@
+/* Plyr tweaks for the render modal (loaded with the player, see video-player.tsx). */
+
+/* One compact time readout; the seek bar takes the rest of the row. */
+.ai-player .plyr__controls {
+  overflow-wrap: normal;
+  gap: 2px;
+}
+.ai-player .plyr__time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+.ai-player .plyr__progress__container {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ai-player .plyr__controls .plyr__controls__item.plyr__progress__container {
+  padding-left: 4px;
+}
+
+/* Volume: only the speaker button in the row; the slider pops up vertically on hover / focus. */
+.ai-player .plyr__volume {
+  position: relative;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 auto;
+}
+.ai-player .plyr__volume::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 4px);
+  width: 36px;
+  height: 118px;
+  transform: translateX(-50%);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.75);
+  display: none;
+}
+.ai-player .plyr__volume input[type="range"] {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 40px);
+  width: 90px;
+  height: 20px;
+  margin: 0;
+  max-width: none;
+  min-width: 0;
+  transform: translateX(-50%) rotate(-90deg);
+  transform-origin: center;
+  color: var(--plyr-color-main, #2f7ef7);
+}
+@media (hover: hover) and (pointer: fine) {
+  .ai-player .plyr__volume:hover::before,
+  .ai-player .plyr__volume:focus-within::before,
+  .ai-player .plyr__volume:hover input[type="range"],
+  .ai-player .plyr__volume:focus-within input[type="range"] {
+    display: block;
+  }
+}

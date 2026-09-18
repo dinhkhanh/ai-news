@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getSession } from "@/lib/session";
 import { banUser, impersonate, setPlatformRole, unbanUser } from "./actions";
 
@@ -16,7 +17,7 @@ export default async function UsersPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Users</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Users</h1>
         <p className="text-sm text-muted-foreground">
           Platform role <code>admin</code> unlocks this CMS. Workspace roles (viewer/editor/publisher/admin) are set per workspace.
         </p>
@@ -45,10 +46,10 @@ export default async function UsersPage() {
                 <TableCell>
                   <ActionForm action={setPlatformRole} className="flex items-center gap-2">
                     <input type="hidden" name="userId" value={u.id} />
-                    <select name="role" defaultValue={u.role} className="h-8 rounded-md border bg-background px-2 text-sm" disabled={isMe}>
+                    <NativeSelect name="role" defaultValue={u.role}  disabled={isMe}>
                       <option value="user">user</option>
                       <option value="admin">admin</option>
-                    </select>
+                    </NativeSelect>
                     {!isMe ? (
                       <Button type="submit" size="sm" variant="outline">
                         Set

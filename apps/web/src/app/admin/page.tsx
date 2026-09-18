@@ -35,7 +35,7 @@ export default async function AdminOverview() {
   ];
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Overview</h1>
+      <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         {tiles.map(([label, value]) => (
           <Card key={label}>

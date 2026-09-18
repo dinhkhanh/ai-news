@@ -2,6 +2,7 @@
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { approveTimeline, requestChanges, submitForReview, withdrawReview } from "@/app/app/projects/[id]/review-actions";
 
@@ -47,10 +48,10 @@ export function ReviewPanel(p: ReviewPanelProps) {
       </div>
 
       {canSubmit ? (
-        <ActionForm action={submitForReview} className="flex flex-wrap items-end gap-2">
+        <ActionForm action={submitForReview} className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <input type="hidden" name="projectId" value={p.projectId} />
-          <input name="note" placeholder="Ghi chú cho publisher (tuỳ chọn)" className="h-8 min-w-60 flex-1 rounded-md border bg-background px-2 text-sm" />
-          <Button type="submit" size="sm" variant="outline" disabled={p.busy}>
+          <Input name="note" placeholder="Ghi chú cho publisher (tuỳ chọn)" className="min-w-0 flex-1" aria-label="Ghi chú cho publisher" />
+          <Button type="submit" variant="outline" disabled={p.busy} className="sm:shrink-0">
             Gửi duyệt v{p.latestTimeline?.version}
           </Button>
         </ActionForm>
@@ -65,18 +66,18 @@ export function ReviewPanel(p: ReviewPanelProps) {
       ) : null}
 
       {canDecide ? (
-        <div className="grid gap-3 rounded-md border p-3 md:grid-cols-2">
+        <div className="grid gap-3 rounded-lg border p-3 md:grid-cols-2">
           <ActionForm action={approveTimeline} className="space-y-2">
             <input type="hidden" name="projectId" value={p.projectId} />
             <input type="hidden" name="timelineId" value={p.latestTimeline?.id ?? ""} />
             <div className="text-xs font-medium">Duyệt v{p.latestTimeline?.version}</div>
             <Textarea name="note" rows={2} placeholder="Ghi chú (tuỳ chọn)" className="text-sm" />
             {p.needsOverride ? (
-              <label className="flex items-start gap-2 text-xs">
+              <label className="flex items-start gap-2 py-1 text-xs">
                 <input type="checkbox" name="override" className="mt-0.5" /> Duyệt dù có cảnh không căn cứ / chưa kiểm chứng (được ghi log)
               </label>
             ) : null}
-            <Button type="submit" size="sm" disabled={p.busy}>
+            <Button type="submit" disabled={p.busy}>
               Duyệt
             </Button>
           </ActionForm>
@@ -84,7 +85,7 @@ export function ReviewPanel(p: ReviewPanelProps) {
             <input type="hidden" name="projectId" value={p.projectId} />
             <div className="text-xs font-medium">Trả lại để sửa</div>
             <Textarea name="note" rows={2} placeholder="Cần sửa gì?" className="text-sm" required />
-            <Button type="submit" size="sm" variant="outline" disabled={p.busy}>
+            <Button type="submit" variant="outline" disabled={p.busy}>
               Yêu cầu sửa
             </Button>
           </ActionForm>

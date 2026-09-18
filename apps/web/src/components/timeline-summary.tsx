@@ -1,5 +1,6 @@
 import type { Timeline } from "@ai-news/video/schema";
 import { Badge } from "@/components/ui/badge";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 
 type SceneBuild = { sceneId: string; durationMs: number; timing: string; matched: number; words: number; chars: number; pronunciations: string[] };
 type StockBuild = { selected: { provider: string; credit: string | null; thumbnailUrl: string | null; durationSec: number | null } | null; alternates: unknown[]; searched: number; errors: string[] };
@@ -55,15 +56,24 @@ export function TimelineSummary({ timeline, build, imageUrls, mixUrl }: { timeli
         {build.mix?.integratedLufs != null ? <span>· mix {build.mix.integratedLufs.toFixed(1)} LUFS</span> : null}
       </div>
       {mixUrl ? <audio controls preload="none" src={mixUrl} className="w-full" /> : null}
-      <div className="grid gap-2">
-        {timeline.scenes.map((sc) => {
+      <div className="grid gap-2">{sceneRows(timeline.scenes.slice(0, 4))}</div>
+      {timeline.scenes.length > 4 ? (
+        <CollapsibleSection variant="plain" defaultOpen={false} title={`Xem đủ ${timeline.scenes.length} cảnh`} bodyClassName="grid gap-2">
+          {sceneRows(timeline.scenes.slice(4))}
+        </CollapsibleSection>
+      ) : null}
+    </div>
+  );
+
+  function sceneRows(list: Timeline["scenes"]) {
+    return list.map((sc) => {
           const v = voiceById.get(sc.id);
           const st = build.stock?.[sc.id];
           const tiers = build.visuals?.perScene[sc.id];
           const thumb = sc.visual.kind === "solid" ? null : (st?.selected?.thumbnailUrl ?? imageUrls[sc.visual.src] ?? null);
           return (
-            <div key={sc.id} className="flex gap-3 rounded-md border p-2 text-sm">
-              <div className="h-24 w-14 shrink-0 overflow-hidden rounded bg-muted">
+            <div key={sc.id} className="flex gap-3 rounded-lg border p-2 text-sm">
+              <div className="h-24 w-14 shrink-0 overflow-hidden rounded-md bg-muted">
                 {thumb ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
@@ -89,8 +99,6 @@ export function TimelineSummary({ timeline, build, imageUrls, mixUrl }: { timeli
               </div>
             </div>
           );
-        })}
-      </div>
-    </div>
-  );
+    });
+  }
 }

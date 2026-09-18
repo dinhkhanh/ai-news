@@ -166,21 +166,21 @@ export default async function EditPage({ params, searchParams }: { params: Promi
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">
-            <Link href="/app" className="underline">
+            <Link href="/app" className="hover:underline">
               Dự án
             </Link>{" "}
             /{" "}
-            <Link href={`/app/projects/${project.id}`} className="underline">
+            <Link href={`/app/projects/${project.id}`} className="hover:underline">
               {displayHost(project.url)}
             </Link>{" "}
             / trình chỉnh sửa
           </div>
-          <h1 className="truncate text-lg font-semibold tracking-tight">{project.title ?? project.url}</h1>
+          <h1 className="line-clamp-2 text-base font-semibold tracking-tight sm:text-lg">{project.title ?? project.url}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="outline">timeline v{selected.version}</Badge>
           {status ? <PipelineStatus initial={status} variant="inline" /> : null}
-          {project.approvedTimelineId === selected.id ? <Badge>đã duyệt</Badge> : null}
+          {project.approvedTimelineId === selected.id ? <Badge variant="success">đã duyệt</Badge> : null}
         </div>
       </div>
       <EditorLoader key={selected.id} {...props} />

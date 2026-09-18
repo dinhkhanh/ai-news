@@ -35,9 +35,9 @@ export function CommentsPanel({ projectId, timelineId, comments, canComment, sel
           {open} bình luận mở{comments.length > open ? ` · ${comments.length - open} đã xong` : ""}
         </span>
         {comments.length > open ? (
-          <button type="button" className="underline" onClick={() => setShowResolved((v) => !v)}>
+          <Button type="button" size="xs" variant="ghost" onClick={() => setShowResolved((v) => !v)}>
             {showResolved ? "ẩn đã xong" : "hiện đã xong"}
-          </button>
+          </Button>
         ) : null}
       </div>
       {canComment ? (
@@ -48,12 +48,12 @@ export function CommentsPanel({ projectId, timelineId, comments, canComment, sel
           <input type="hidden" name="atMs" value={pinnedMs ?? ""} />
           <Textarea name="body" rows={3} placeholder="Nhận xét cho người dựng / publisher…" className="text-sm" required />
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <label className="flex items-center gap-1">
+            <label className="flex min-h-8 items-center gap-1.5">
               <input type="checkbox" checked={pinScene} onChange={(e) => setPinScene(e.target.checked)} /> gắn cảnh {selectedSceneId ?? "—"}
             </label>
-            <button type="button" className="rounded border px-2 py-0.5 hover:bg-muted" onClick={() => setPinnedMs(pinnedMs == null ? Math.round(currentMs()) : null)}>
+            <Button type="button" size="xs" variant="outline" onClick={() => setPinnedMs(pinnedMs == null ? Math.round(currentMs()) : null)}>
               {pinnedMs == null ? "ghim thời điểm hiện tại" : `tại ${fmt(pinnedMs)} ✕`}
-            </button>
+            </Button>
             <Button type="submit" size="sm" className="ml-auto">
               Gửi
             </Button>
@@ -63,27 +63,27 @@ export function CommentsPanel({ projectId, timelineId, comments, canComment, sel
       <div className="space-y-2">
         {visible.length === 0 ? <p className="text-xs text-muted-foreground">Chưa có bình luận.</p> : null}
         {visible.map((c) => (
-          <div key={c.id} className={cn("rounded-md border p-2 text-sm", c.resolvedAt && "opacity-60")}>
+          <div key={c.id} className={cn("rounded-lg border p-2.5 text-sm", c.resolvedAt && "opacity-60")}>
             <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">{c.authorName ?? "?"}</span>
               <span>{c.createdAt.slice(0, 16).replace("T", " ")}</span>
               {c.sceneId ? (
-                <button type="button" onClick={() => onJump(c.atMs, c.sceneId)} className="rounded border px-1 hover:bg-muted">
+                <Button type="button" size="xs" variant="outline" onClick={() => onJump(c.atMs, c.sceneId)}>
                   {c.sceneId}
-                </button>
+                </Button>
               ) : null}
               {c.atMs != null ? (
-                <button type="button" onClick={() => onJump(c.atMs, c.sceneId)} className="rounded border px-1 hover:bg-muted">
+                <Button type="button" size="xs" variant="outline" onClick={() => onJump(c.atMs, c.sceneId)}>
                   {fmt(c.atMs)}
-                </button>
+                </Button>
               ) : null}
               {c.resolvedAt ? <Badge variant="outline">xong</Badge> : null}
               {canComment ? (
                 <ActionForm action={toggleCommentResolved} className="ml-auto">
                   <input type="hidden" name="commentId" value={c.id} />
-                  <button type="submit" className="underline">
+                  <Button type="submit" size="xs" variant="ghost">
                     {c.resolvedAt ? "mở lại" : "đánh dấu xong"}
-                  </button>
+                  </Button>
                 </ActionForm>
               ) : null}
             </div>

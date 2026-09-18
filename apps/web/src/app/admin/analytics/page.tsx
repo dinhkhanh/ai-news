@@ -28,7 +28,7 @@ export default async function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Analytics</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Analytics</h1>
         <p className="text-sm text-muted-foreground">Produced vs published, platform performance from the daily analytics pull, YouTube Data API units used today (1,600 per upload; default quota 10,000/day).</p>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">

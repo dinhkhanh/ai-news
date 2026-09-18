@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/ui/native-select";
 import { loadAdminEvals } from "@/lib/admin-data";
 import type { EvalArticleResult, EvalSummary } from "@/lib/eval-summary";
 import { addEvalArticle, deleteEvalArticle, importEvalArticleFromProject, toggleEvalArticle } from "./actions";
@@ -26,7 +27,7 @@ export default async function EvalsPage({ searchParams }: { searchParams: Promis
     <div className="space-y-8">
       <AutoRefresh active={anyRunning} everyMs={5000} />
       <div>
-        <h1 className="text-xl font-semibold">Eval set & runs</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Eval set & runs</h1>
         <p className="text-sm text-muted-foreground">
           Target: ~20 articles, mostly Vietnamese (docs/PLAN.md §9). Enabled now: {counts.vi} vi · {counts.en} en. Runs are started from{" "}
           <Link href="/admin/prompts" className="underline">
@@ -51,10 +52,10 @@ export default async function EvalsPage({ searchParams }: { searchParams: Promis
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="ev-lang">Language</Label>
-                  <select id="ev-lang" name="language" defaultValue="vi" className="h-9 rounded-md border bg-background px-2 text-sm">
+                  <NativeSelect id="ev-lang" name="language" defaultValue="vi">
                     <option value="vi">vi</option>
                     <option value="en">en</option>
-                  </select>
+                  </NativeSelect>
                 </div>
               </div>
               <div className="space-y-1">

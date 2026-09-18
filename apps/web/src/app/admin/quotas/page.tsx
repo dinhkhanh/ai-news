@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { NativeSelect } from "@/components/ui/native-select";
 import { loadAdminQuotas } from "@/lib/admin-data";
 import { QUOTA_RESOURCES } from "@/lib/integrations";
 import { deleteQuota, saveQuota } from "./actions";
@@ -17,7 +18,7 @@ export default async function QuotasPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Quotas</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Quotas</h1>
         <p className="text-sm text-muted-foreground">Daily limits. Overrides for a specific user or workspace beat the scope default.</p>
       </div>
 
@@ -53,11 +54,11 @@ export default async function QuotasPage() {
         </CardHeader>
         <CardContent>
           <ActionForm action={saveQuota} className="grid gap-2 md:grid-cols-5" resetOnSuccess>
-            <select name="scope" className="h-9 rounded-md border bg-background px-2 text-sm">
+            <NativeSelect name="scope">
               <option value="user">user</option>
               <option value="org">workspace</option>
-            </select>
-            <select name="scopeId" className="h-9 rounded-md border bg-background px-2 text-sm">
+            </NativeSelect>
+            <NativeSelect name="scopeId">
               <optgroup label="Users">
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
@@ -72,14 +73,14 @@ export default async function QuotasPage() {
                   </option>
                 ))}
               </optgroup>
-            </select>
-            <select name="resource" className="h-9 rounded-md border bg-background px-2 text-sm">
+            </NativeSelect>
+            <NativeSelect name="resource">
               {QUOTA_RESOURCES.map((r) => (
                 <option key={r.key} value={r.key}>
                   {r.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             <Input name="dailyLimit" type="number" min="0" placeholder="Limit" required />
             <Button type="submit" size="sm">
               Add

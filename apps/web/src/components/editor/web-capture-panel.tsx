@@ -75,7 +75,7 @@ export function WebCapturePanel({ projectId, captures, disabled, onCaptured }: P
 
   return (
     // One line: a badge with the count, the recording button, and the list of videos only on request.
-    <section className="space-y-1 text-sm">
+    <section className="space-y-1 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm lg:col-span-2">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="border-amber-500/60 bg-amber-500/10 text-amber-800 dark:text-amber-300">
           {todo.length ? `${todo.length} video YouTube bị chặn tải` : "Đã ghi xong video YouTube"}
@@ -83,13 +83,13 @@ export function WebCapturePanel({ projectId, captures, disabled, onCaptured }: P
         <Button type="button" size="sm" variant="outline" disabled={disabled || running || todo.length === 0 || !support.ok} onClick={run} title={support.ok ? "Chọn “cho phép chia sẻ thẻ này”, rồi để yên thẻ cho tới khi xong (ghi theo thời gian thực)" : (support.reason ?? undefined)}>
           {running ? "Đang ghi…" : "Ghi từ trình duyệt"}
         </Button>
-        <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setOpen((o) => !o)}>
+        <Button type="button" size="xs" variant="ghost" onClick={() => setOpen((o) => !o)}>
           {open ? "ẩn chi tiết" : "chi tiết"}
-        </button>
+        </Button>
         {!support.ok ? <span className="text-xs text-destructive">{support.reason}</span> : null}
       </div>
       {open ? (
-        <ul className="space-y-1 rounded-md border p-2 text-xs">
+        <ul className="space-y-1 rounded-lg border bg-card p-2 text-xs">
           <li className="text-muted-foreground">Máy chủ không tải được YouTube; ghi bằng trình duyệt của bạn. Clip thay các shot stock/AI ở cuối cảnh đã định (hoặc đúng shot bạn đã dán link); xem lại rồi bấm Lưu.</li>
           {captures.map((c) => (
             <li key={c.videoId} className="flex flex-wrap items-center gap-2">
