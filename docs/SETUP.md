@@ -8,7 +8,8 @@ Order matters: database → auth → app deploy → storage → AWS → Inngest 
 3. Run migrations: `DATABASE_DIRECT_URL=... pnpm db:migrate`. This creates the schema, the `ai_news_app` role, RLS policies, Vault grants and seed data (`suzu.group`, default quotas, voice presets, pronunciations).
 4. Set the app role password in the SQL editor: `alter role ai_news_app with password '<strong>';`
 5. `DATABASE_URL` = Supavisor **transaction** pooler URL (port 6543) with user `ai_news_app.<project-ref>` and that password. The app never connects as `postgres`.
-6. Enable daily backups + PITR (Pro plan). Note the restore drill is a phase 6 task.
+6. The app never uses the Supabase Data API (REST / GraphQL). Migration 0021 takes every privilege in `public` away from `anon` / `authenticated` / `service_role` and turns RLS on for every table; also switch the API off in the dashboard (Project Settings → Data API → disable, or remove `public` from the exposed schemas) so nothing is served there at all. Check afterwards: Advisors → Security shows no `rls_disabled_in_public`, and `curl -I -H "apikey: <publishable key>" https://<ref>.supabase.co/rest/v1/user` no longer answers 200/206.
+7. Enable daily backups + PITR (Pro plan). Note the restore drill is a phase 6 task.
 
 ## 2. Google Cloud (OAuth, TTS/STT, Veo)
 1. Project **ai-news** under the `suzu.group` organisation.

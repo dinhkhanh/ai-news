@@ -7,12 +7,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * Applies every SQL migration to an in-memory Postgres (PGlite) so schema,
  * RLS policies and seed data are validated in CI without a database service.
  * Vault grants are skipped automatically (no vault schema locally).
+ * The Supabase API roles and their default grants are recreated first, so the
+ * lock-down in migration 0021 has something to take away.
  */
 const dir = path.resolve(__dirname, "migrations");
 let pg: PGlite;
 
 beforeAll(async () => {
   pg = new PGlite();
+  await pg.exec(`create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
+    alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on functions to anon, authenticated, service_role;`);
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
     const statements = readFileSync(path.join(dir, f), "utf8")
       .split("--> statement-breakpoint")
@@ -264,6 +270,65 @@ describe("migrations", () => {
       for (const g of r.grantees) expect(["postgres", "ai_news_app"], `${r.proname} granted to ${g}`).toContain(g);
     }
   });
+  it("put every table behind RLS with policies for the app role only (migration 0021)", async () => {
+    const { rows } = await pg.query<{ t: string; rls: boolean; roles: string[] }>(
+      `select c.relname as t, c.relrowsecurity as rls,
+              array(select unnest(p.roles)::text from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname) as roles
+       from pg_class c where c.relkind in ('r','p') and c.relnamespace = 'public'::regnamespace`,
+    );
+    expect(rows.length).toBeGreaterThanOrEqual(31);
+    for (const r of rows) {
+      expect(r.rls, `RLS off on ${r.t}`).toBe(true);
+      expect(r.roles.length, `no policy on ${r.t}`).toBeGreaterThan(0);
+      for (const role of r.roles) expect(role, `${r.t} has a policy for ${role}`).toBe("ai_news_app");
+    }
+  });
+
+  it("leave the Supabase API roles nothing in public, also on objects created later (migration 0021)", async () => {
+    await pg.exec(`create table later_table (id serial primary key); create function later_fn() returns int language sql as 'select 1';`);
+    try {
+      const { rows } = await pg.query<{ kind: string; name: string; grantee: string }>(
+        `select 'table' as kind, c.relname::text as name, a.grantee::regrole::text as grantee
+           from pg_class c, aclexplode(c.relacl) a where c.relnamespace = 'public'::regnamespace and c.relkind in ('r','p','v','m','S')
+         union all
+         select 'function', p.proname::text, case when a.grantee = 0 then 'PUBLIC' else a.grantee::regrole::text end
+           from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.pronamespace = 'public'::regnamespace`,
+      );
+      expect(rows.length).toBeGreaterThan(40);
+      for (const r of rows) expect(["postgres", "ai_news_app"], `${r.kind} ${r.name} is granted to ${r.grantee}`).toContain(r.grantee);
+      const later = [...new Set(rows.filter((r) => r.name.startsWith("later_")).map((r) => `${r.name}:${r.grantee}`))].sort();
+      expect(later).toEqual(["later_fn:ai_news_app", "later_fn:postgres", "later_table:ai_news_app", "later_table:postgres", "later_table_id_seq:ai_news_app", "later_table_id_seq:postgres"]);
+    } finally {
+      await pg.exec("drop table later_table; drop function later_fn();");
+    }
+  });
+
+  it("pin the search_path of every function (migration 0021)", async () => {
+    const { rows } = await pg.query<{ proname: string; cfg: string[] | null }>(
+      "select proname, proconfig as cfg from pg_proc where pronamespace = 'public'::regnamespace",
+    );
+    expect(rows.length).toBeGreaterThanOrEqual(14);
+    for (const r of rows) expect((r.cfg ?? []).some((c) => c.startsWith("search_path=")), r.proname).toBe(true);
+  });
+
+  it("let the app role work on the auth and platform tables with no RLS context set, as Better Auth does (migration 0021)", async () => {
+    const out = await pg.transaction(async (tx) => {
+      await tx.query("set local role ai_news_app");
+      await tx.query(`insert into "user"(id,name,email) values ('u21','U21','u21@suzu.group')`);
+      await tx.query(`insert into session(id, user_id, token, expires_at) values ('s21','u21','tok21', now() + interval '1 day')`);
+      await tx.query("update quotas set daily_limit = daily_limit where scope = 'user'");
+      const seen = await tx.query<{ n: number }>(`select count(*)::int as n from "user" where id = 'u21'`);
+      const domains = await tx.query<{ n: number }>("select count(*)::int as n from allowed_domains");
+      // Org-scoped tables stay closed without a context.
+      const projects = await tx.query<{ n: number }>("select count(*)::int as n from projects");
+      await tx.rollback();
+      return { user: seen.rows[0].n, domains: domains.rows[0].n, projects: projects.rows[0].n };
+    });
+    expect(out.user).toBe(1);
+    expect(out.domains).toBeGreaterThan(0);
+    expect(out.projects).toBe(0);
+  });
+
   it("allow several brand kits per workspace but one default, and free a project when its kit is deleted (migrations 0014–0016)", async () => {
     await pg.exec(`insert into "user"(id,name,email) values ('u14','U14','u14@suzu.group');
       insert into organization(id,name,slug) values ('o14','O14','o14');`);
