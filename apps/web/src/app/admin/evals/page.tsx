@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
 import { loadAdminEvals } from "@/lib/admin-data";
 import type { EvalArticleResult, EvalSummary } from "@/lib/eval-summary";
+import { projectLabel } from "@/lib/project-state";
 import { addEvalArticle, deleteEvalArticle, importEvalArticleFromProject, toggleEvalArticle } from "./actions";
 import { requireAdmin } from "@/lib/session";
 
@@ -106,7 +107,7 @@ export default async function EvalsPage({ searchParams }: { searchParams: Promis
                   <Badge variant="outline" className="mr-2">
                     {p.language}
                   </Badge>
-                  {p.title ?? p.url}
+                  {projectLabel(p)}
                 </span>
                 <Button type="submit" size="sm" variant="outline">
                   Import

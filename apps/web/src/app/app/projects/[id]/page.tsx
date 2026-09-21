@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { StoredFaithfulness, StoredScript } from "@/lib/llm/schemas";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { flagsEnabled } from "@/lib/flags";
-import { buildStatus, busyStep, DIRECT_RUN_ID } from "@/lib/project-state";
+import { buildStatus, busyStep, DIRECT_RUN_ID, projectLabel } from "@/lib/project-state";
 import { buildMetadata, PLATFORM_SPEC, type Analytics } from "@/lib/publish/platforms";
 import { presignGet } from "@/lib/r2";
 import { canApprove, needsFaithfulnessOverride } from "@/lib/review";
@@ -125,7 +125,7 @@ export default async function ProjectPage({
     if (!project) return null;
     // One round trip to the pooler is ~60 ms; issue the independent queries together so the
     // connection pipelines them instead of paying that ten times in a row.
-    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications, kits] =
+    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications, kits, sourceVideo] =
       await Promise.all([
         tx.query.articles.findFirst({
           where: eq(schema.articles.projectId, id),
@@ -187,10 +187,17 @@ export default async function ProjectPage({
           .from(schema.brandKits)
           .where(eq(schema.brandKits.organizationId, ws.organizationId))
           .orderBy(desc(schema.brandKits.isDefault), schema.brandKits.name),
+        project.sourceVideoAssetId
+          ? tx.query.assets.findFirst({
+              where: eq(schema.assets.id, project.sourceVideoAssetId),
+              columns: { r2Path: true, durationSec: true, attribution: true },
+            })
+          : undefined,
       ]);
     return {
       project,
       article,
+      sourceVideo,
       scripts,
       timelines,
       renders,
@@ -203,8 +210,9 @@ export default async function ProjectPage({
     };
   });
   if (!data) notFound();
-  const { project, article, scripts, timelines, renders, reviews, openComments, channels, grants, publications, kits } =
+  const { project, article, sourceVideo, scripts, timelines, renders, reviews, openComments, channels, grants, publications, kits } =
     data;
+  const isVideo = project.sourceKind === "video";
   const projectKit = kits.find((k) => k.id === project.brandKitId) ?? null;
   // Brand kits are shared across channels; the logo is the channel's and can differ per render.
   const logoChannels = channels.filter((c) => c.logoPath);
@@ -273,6 +281,7 @@ export default async function ProjectPage({
       : ({} as Record<string, boolean>),
     publisher ? Promise.all([dailyLimit(ws.userId, "publishes"), usedToday(ws.userId, "publishes")]) : [0, 0],
   ]);
+  const sourceVideoUrl = await sign(sourceVideo?.r2Path, 3600);
   const imageUrls: Record<string, string> = {};
   imageKeys.forEach((key, i) => {
     const u = imageSigned[i];
@@ -313,7 +322,7 @@ export default async function ProjectPage({
     defaults: buildMetadata({
       platform: c.platform,
       meta: scriptMeta?.[PLATFORM_SPEC[c.platform].metadataKey] ?? null,
-      fallbackTitle: project.title ?? project.url,
+      fallbackTitle: projectLabel(project),
       language: project.language,
       source: { siteName: article?.siteName ?? null, url: article?.canonicalUrl ?? project.url },
       aiDisclosure: project.aiDisclosure,
@@ -376,7 +385,7 @@ export default async function ProjectPage({
           ? { form: "build-form", label: "Dựng video", icon: <Clapperboard /> }
           : null;
   const tabs: SectionTab[] = [
-    ...(article && !confirmed ? [{ id: "article", label: "Bài báo", icon: <Newspaper /> }] : []),
+    ...(article && !confirmed ? [{ id: "article", label: project.sourceKind === "article" ? "Bài báo" : "Nội dung", icon: <Newspaper /> }] : []),
     ...(confirmed ? [{ id: "script", label: "Kịch bản", icon: <FileText /> }] : []),
     ...(scripts.length ? [{ id: "build", label: "Dựng", icon: <Clapperboard /> }] : []),
     ...(timelines.length ? [{ id: "review", label: "Duyệt", icon: <Eye /> }] : []),
@@ -395,9 +404,9 @@ export default async function ProjectPage({
             <Link href="/app" className="hover:underline">
               Dự án
             </Link>{" "}
-            / {displayHost(project.url)}
+            / {displayHost(project.url) || "nội dung tự nhập"}
           </div>
-          <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">{project.title ?? project.url}</h1>
+          <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">{projectLabel(project)}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
             <Badge
               variant={
@@ -420,14 +429,17 @@ export default async function ProjectPage({
                 chính trị: không stock / AI
               </Badge>
             ) : null}
-            <a
-              href={project.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-6 items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
-            >
-              <ExternalLink className="size-3" aria-hidden /> mở bài gốc
-            </a>
+            {isVideo ? <Badge variant="outline">từ video</Badge> : null}
+            {project.url ? (
+              <a
+                href={project.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-6 items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
+              >
+                <ExternalLink className="size-3" aria-hidden /> {isVideo ? "mở video gốc" : "mở bài gốc"}
+              </a>
+            ) : null}
           </div>
         </div>
         {writer ? (
@@ -504,31 +516,80 @@ export default async function ProjectPage({
           {!article ? (
             <Card id="article" className="scroll-mt-3">
               <CardHeader>
-                <CardTitle>{busy ? "Đang lấy bài báo…" : "Chưa lấy được bài báo"}</CardTitle>
+                <CardTitle>
+                  {isVideo
+                    ? busy
+                      ? "Đang tải video…"
+                      : "Chưa tải được video"
+                    : project.sourceKind === "text"
+                      ? busy
+                        ? "Đang lưu nội dung…"
+                        : "Chưa lưu được nội dung"
+                      : busy
+                        ? "Đang lấy bài báo…"
+                        : "Chưa lấy được bài báo"}
+                </CardTitle>
                 <CardDescription>
-                  {busy
-                    ? "Cloudflare Browser Rendering → HTTP → Firecrawl. Trang tự cập nhật khi xong."
-                    : "Thử lấy lại, dùng Firecrawl, hoặc dán nội dung bài thủ công bên dưới."}
+                  {isVideo
+                    ? busy
+                      ? "Đọc tiêu đề + chú thích (yt-dlp), rồi tải video. Trang tự cập nhật khi xong."
+                      : "Thử tải lại; nếu vẫn lỗi, dán link đầy đủ của video vào một dự án mới."
+                    : project.sourceKind === "text"
+                      ? busy
+                        ? "Trang tự cập nhật khi xong."
+                        : "Dán lại nội dung bên dưới."
+                      : busy
+                        ? "Cloudflare Browser Rendering → HTTP → Firecrawl. Trang tự cập nhật khi xong."
+                        : "Thử lấy lại, dùng Firecrawl, hoặc dán nội dung bài thủ công bên dưới."}
                 </CardDescription>
               </CardHeader>
               {!busy && writer ? (
-                <CardContent>{fallbackForms(project.id, project.inngestRunId === DIRECT_RUN_ID)}</CardContent>
+                <CardContent>
+                  {isVideo ? (
+                    <div className="flex flex-wrap gap-2">{refetchButtons(project, false)}</div>
+                  ) : project.sourceKind === "text" ? (
+                    pasteForm(project.id, false)
+                  ) : (
+                    fallbackForms(project, project.inngestRunId === DIRECT_RUN_ID)
+                  )}
+                </CardContent>
               ) : null}
             </Card>
           ) : !article.confirmedAt ? (
             <Card id="article" className="scroll-mt-3">
               <CardHeader>
-                <CardTitle>Xác nhận nội dung bài báo</CardTitle>
+                <CardTitle>{isVideo ? "Viết nội dung cho video" : "Xác nhận nội dung bài báo"}</CardTitle>
                 <CardDescription>
-                  Lấy bằng {article.fetchMethod} · {article.wordCount} từ ·{" "}
-                  {article.siteName ?? displayHost(article.canonicalUrl)}
-                  {article.author ? ` · ${article.author}` : ""}
-                  {article.publishedAt ? ` · ${article.publishedAt.toISOString().slice(0, 10)}` : ""}. Sửa nếu cần rồi
-                  xác nhận; kịch bản chỉ được tạo từ văn bản đã xác nhận.
+                  {isVideo ? (
+                    <>
+                      {article.siteName ?? "Video"}
+                      {article.author ? ` · ${article.author}` : ""}
+                      {sourceVideo?.durationSec ? ` · đã tải ${Math.round(Number(sourceVideo.durationSec))} giây` : ""}. Ô nội dung
+                      đang là chú thích của video: viết lại điều video cần kể (có thể kèm chỉ dẫn cách viết kịch bản) rồi
+                      xác nhận. Mọi cảnh sẽ dùng chính video này làm hình.
+                    </>
+                  ) : (
+                    <>
+                      Lấy bằng {article.fetchMethod} · {article.wordCount} từ ·{" "}
+                      {article.siteName ?? displayHost(article.canonicalUrl)}
+                      {article.author ? ` · ${article.author}` : ""}
+                      {article.publishedAt ? ` · ${article.publishedAt.toISOString().slice(0, 10)}` : ""}. Sửa nếu cần
+                      rồi xác nhận; kịch bản chỉ được tạo từ văn bản đã xác nhận.
+                    </>
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {article.images.length ? (
+                {isVideo && sourceVideoUrl ? (
+                  <video
+                    src={sourceVideoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="max-h-80 rounded border bg-black"
+                    aria-label="Video nguồn"
+                  />
+                ) : article.images.length ? (
                   <div className="flex gap-2 overflow-x-auto">
                     {article.images.slice(0, 6).map((im) => (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -558,24 +619,29 @@ export default async function ProjectPage({
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="text">Nội dung</Label>
+                    <Label htmlFor="text">{isVideo ? "Nội dung video cần kể" : "Nội dung"}</Label>
                     <Textarea
                       id="text"
                       name="text"
-                      rows={18}
+                      rows={isVideo ? 10 : 18}
+                      placeholder={
+                        isVideo
+                          ? "Video kể chuyện gì, chi tiết nào đáng nói… Có thể thêm chỉ dẫn, ví dụ: “mở đầu bằng câu hỏi, giọng hài hước”."
+                          : undefined
+                      }
                       defaultValue={article.text}
                       className="text-sm leading-relaxed"
                     />
                   </div>
                   <div className="flex justify-end">
                     <Button type="submit" disabled={!writer || busy} className="w-full sm:w-auto">
-                      Xác nhận văn bản
+                      {isVideo ? "Xác nhận nội dung" : "Xác nhận văn bản"}
                     </Button>
                   </div>
                 </ActionForm>
                 {/* Separate forms: they must not nest inside the confirm form. */}
-                {writer ? <div className="flex flex-wrap gap-2">{refetchButtons(project.id, busy)}</div> : null}
-                {writer ? (
+                {writer ? <div className="flex flex-wrap gap-2">{refetchButtons(project, busy)}</div> : null}
+                {writer && !isVideo ? (
                   <CollapsibleSection
                     variant="plain"
                     defaultOpen={false}
@@ -680,7 +746,7 @@ export default async function ProjectPage({
                       </Button>
                     </div>
                   </ActionForm>
-                  {writer ? <div className="mt-2 flex flex-wrap gap-2">{refetchButtons(project.id, busy)}</div> : null}
+                  {writer ? <div className="mt-2 flex flex-wrap gap-2">{refetchButtons(project, busy)}</div> : null}
                 </CollapsibleSection>
               </CardContent>
             </Card>
@@ -1023,7 +1089,7 @@ export default async function ProjectPage({
                 <VideoButton
                   src={links.video}
                   poster={links.cover}
-                  title={project.title ?? project.url}
+                  title={projectLabel(project)}
                   description={`timeline v${r.timelineVersion} · logo ${logoName(r.logoChannelId)}${r.durationSec ? ` · ${Number(r.durationSec).toFixed(0)} s` : ""}`}
                 />
               ) : null}
@@ -1064,7 +1130,26 @@ export default async function ProjectPage({
   }
 }
 
-function refetchButtons(projectId: string, busy: boolean) {
+/** Re-fetch: one "download again" for a video page, the provider choice for an article, nothing for typed content. */
+function refetchButtons(project: { id: string; sourceKind: string; url: string | null }, busy: boolean) {
+  const projectId = project.id;
+  if (!project.url || project.sourceKind === "text") return null;
+  if (project.sourceKind === "video") {
+    return (
+      <ActionForm action={refetchArticle}>
+        <input type="hidden" name="projectId" value={projectId} />
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          title="Đọc lại tiêu đề + chú thích và tải lại video. Ô nội dung sẽ trở về chú thích của video."
+        >
+          Tải lại video
+        </Button>
+      </ActionForm>
+    );
+  }
   return (
     <>
       {(["browser_rendering", "http", "firecrawl"] as const).map((m) => (
@@ -1100,10 +1185,11 @@ function pasteForm(projectId: string, busy: boolean) {
 }
 
 /** `direct`: the last attempt was a direct run that failed, so the queue is probably still down: offer the other providers the same way. */
-function fallbackForms(projectId: string, direct: boolean) {
+function fallbackForms(project: { id: string; sourceKind: string; url: string | null }, direct: boolean) {
+  const projectId = project.id;
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">{refetchButtons(projectId, false)}</div>
+      <div className="flex flex-wrap gap-2">{refetchButtons(project, false)}</div>
       {direct ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">

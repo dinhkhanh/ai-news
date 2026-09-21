@@ -39,6 +39,8 @@ export type WebVideoCandidate = {
   uploadDate: string | null;
   width: number | null;
   height: number | null;
+  /** The post's caption / description (full metadata only; search results often have none). Older deployments omit it. */
+  description?: string | null;
 };
 
 

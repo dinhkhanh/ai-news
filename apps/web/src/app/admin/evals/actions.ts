@@ -55,7 +55,7 @@ export async function importEvalArticleFromProject(_: ActionState, fd: FormData)
       .insert(schema.evalArticles)
       .values({
         language: article.language,
-        title: article.title ?? article.canonicalUrl,
+        title: article.title ?? article.canonicalUrl ?? "(untitled)",
         sourceUrl: article.canonicalUrl,
         text: article.text,
         notes: `Imported from project ${projectId}`,

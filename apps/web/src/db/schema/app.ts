@@ -218,8 +218,16 @@ export const projects = pgTable(
     ownerId: text("owner_id")
       .notNull()
       .references(() => user.id, { onDelete: "restrict" }),
-    url: text("url").notNull(),
+    /** The article or video page; null for a `text` project (content typed in by the user, no link). */
+    url: text("url"),
     canonicalUrl: text("canonical_url"),
+    /**
+     * What the project is made from: `article` = a news page (fetch chain), `video` = a video page (YouTube, TikTok,
+     * Facebook…): its file is downloaded as the footage and the user writes the content, `text` = content typed in at creation.
+     */
+    sourceKind: text("source_kind").$type<"article" | "video" | "text">().notNull().default("article"),
+    /** `video` projects: the downloaded source video (a `web_video` asset); every shot of the build is cut from it. */
+    sourceVideoAssetId: uuid("source_video_asset_id").references((): AnyPgColumn => assets.id, { onDelete: "set null" }),
     title: text("title"),
     language: languageEnum("language").notNull().default("vi"),
     state: projectStateEnum("state").notNull().default("created"),
@@ -274,7 +282,8 @@ export const articles = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    canonicalUrl: text("canonical_url").notNull(),
+    /** Null for content typed in without a link (`text` projects). */
+    canonicalUrl: text("canonical_url"),
     title: text("title"),
     author: text("author"),
     siteName: text("site_name"),
@@ -285,7 +294,7 @@ export const articles = pgTable(
     images: jsonb("images").$type<Array<{ url: string; alt?: string; width?: number; height?: number }>>().notNull().default([]),
     snapshotPath: text("snapshot_path"),
     screenshotPath: text("screenshot_path"),
-    fetchMethod: text("fetch_method"), // browser_rendering | firecrawl | manual
+    fetchMethod: text("fetch_method"), // browser_rendering | http | firecrawl | manual | video
     flags: jsonb("flags").$type<{ paywall?: boolean; liveBlog?: boolean; videoOnly?: boolean; short?: boolean }>().notNull().default({}),
     wordCount: integer("word_count").notNull().default(0),
     /** Set when the user confirms (or edits) the extracted text; scripts are generated from confirmed text only. */

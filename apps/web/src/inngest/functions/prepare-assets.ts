@@ -26,6 +26,7 @@ import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice }
 import { allocateChecked, orderByTier, SHOT_SEC, shortfall, splitBudget, tier2Queries, tierAllowed, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type SceneQuery, type VisualTier } from "@/lib/media/visual-plan";
 import { findWebVideosFor, foundForHint, storeWebVideo, webVideoEnabled, webVideoHint, type FoundWebVideo } from "@/lib/media/webvideo";
 import { deleteObject, r2Key } from "@/lib/r2";
+import { sourceVideoShots } from "@/lib/video-source";
 
 const ext = (url: string, fallback: string) => {
   const m = /\.(jpe?g|png|webp|mp4|mov)(?:$|\?)/i.exec(url);
@@ -54,6 +55,9 @@ const MAX_AI_PER_BUILD = 8;
  * frame, not under text overlays or platform UI, centred on the upper-third
  * line. A still that fails in its scene leaves the pool, so another candidate
  * or a later tier takes the shot; it only comes back when nothing else could.
+ *
+ * A `video` project skips all of that: its own video (downloaded by the fetch step) is the footage of every shot,
+ * played on continuously from scene to scene (`sourceVideoShots`), starting over if the voice-over runs longer.
  */
 export const prepareAssetsFn = inngest.createFunction(
   {
@@ -87,8 +91,10 @@ export const prepareAssetsFn = inngest.createFunction(
           : await tx.query.scripts.findFirst({ where: eq(schema.scripts.projectId, projectId), orderBy: desc(schema.scripts.version) });
         if (!script) throw new NonRetriableError("Generate a script first");
         const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), orderBy: desc(schema.articles.createdAt) });
+        const sourceVideo = project.sourceKind === "video" && project.sourceVideoAssetId ? await tx.query.assets.findFirst({ where: eq(schema.assets.id, project.sourceVideoAssetId) }) : undefined;
+        if (project.sourceKind === "video" && !sourceVideo?.r2Path) throw new NonRetriableError("The source video is missing: download it again (“Tải lại video”) before building");
         await tx.update(schema.projects).set({ busyStep: "assets", lastError: null }).where(eq(schema.projects.id, projectId));
-        return { project, script, article };
+        return { project, script, article, sourceVideo };
       });
       if (!row) return null;
       await reportProgress(pctx, { label: "Đọc kịch bản", pct: 2 });
@@ -106,8 +112,13 @@ export const prepareAssetsFn = inngest.createFunction(
         political: row.project.political,
         title: row.project.title ?? s.title,
         articleTitle: row.article?.title ?? row.project.title ?? s.title,
-        source: { name: row.article?.siteName ?? null, url: row.project.canonicalUrl ?? row.project.url },
-        images: (row.article?.images ?? []).filter((im) => !/\.(gif|svg)(?:$|\?)/i.test(im.url) && (im.width ?? 1000) >= 600).slice(0, 12),
+        // Content typed in without a link has no source to credit (the outro then shows none).
+        source: { name: row.article?.siteName ?? null, url: row.project.canonicalUrl ?? row.project.url ?? "" },
+        /** Video project: the footage every shot is cut from. */
+        sourceVideo: row.sourceVideo?.r2Path
+          ? { assetId: row.sourceVideo.id, key: row.sourceVideo.r2Path, durationSec: Number(row.sourceVideo.durationSec ?? 0), credit: row.sourceVideo.attribution, thumbnailUrl: row.sourceVideo.thumbnailUrl }
+          : null,
+        images: row.sourceVideo ? [] : (row.article?.images ?? []).filter((im) => !/\.(gif|svg)(?:$|\?)/i.test(im.url) && (im.width ?? 1000) >= 600).slice(0, 12),
         // Scripts written before `newsTerms` existed have none: their tier-2 search is the story title alone.
         scenes: s.scenes.map((sc) => ({ id: sc.id, kind: sc.kind, voiceover: sc.voiceover, onScreenText: sc.onScreenText, brollTerms: sc.brollTerms, newsTerms: sc.newsTerms ?? [], durationSec: sc.durationSec })),
       };
@@ -141,7 +152,18 @@ export const prepareAssetsFn = inngest.createFunction(
 
     /* ---- shot budget: one picture per ≤ 5 s of voice, one for the CTA ---- */
     const voiceMs = (id: string, fallbackSec: number) => voices.find((v) => v.sceneId === id)?.durationMs ?? fallbackSec * 1000;
-    const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
+    const fullNeed: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
+    /* ---- video project: the source video fills every shot, so no tier below is consulted (`need` = what is left = 0) ---- */
+    const sourceShots: Record<string, EditorScene["visual"][]> = {};
+    if (input.sourceVideo) {
+      const v = input.sourceVideo;
+      const { timings } = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((x) => x.sceneId === sc.id) ?? null, visual: null })) });
+      const cut = sourceVideoShots(input.scenes.map((sc, i) => ({ id: sc.id, sec: timings[i].durationMs / 1000, shots: fullNeed[sc.id] })), v.durationSec || SHOT_SEC);
+      for (const [id, list] of Object.entries(cut)) {
+        sourceShots[id] = list.map((c) => ({ kind: "video", key: v.key, clipDurationSec: c.clipDurationSec, trimStartSec: c.trimStartSec, credit: v.credit, assetId: v.assetId, thumbnailUrl: v.thumbnailUrl }));
+      }
+    }
+    const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, Math.max(0, fullNeed[sc.id] - (sourceShots[sc.id]?.length ?? 0))]));
     const totalNeed = total(need);
 
     /* ---- tier 1: the article's own images ---- */
@@ -181,7 +203,7 @@ export const prepareAssetsFn = inngest.createFunction(
         const perScene = queries.filter((q) => q.sceneIds.length).length;
         await reportProgress(pctx, { label: tier2Missing > 0 ? `2/4 Tìm thêm ${tier2Missing} hình từ báo khác + video web (${perScene} cảnh theo lời bình + cả tin)` : "2/4 Bài báo đủ ảnh, không cần báo khác", pct: 36 });
         if (tier2Missing <= 0) return { assets: [] as RelatedAsset[], pages: 0, found: 0, errors: [] as string[], shortfall: tier2Missing, queries };
-        const found = await findRelatedImagesFor(queries.map((q) => ({ ...q, want: queryWant(q) })), { language: input.language, excludeUrls: [input.source.url] });
+        const found = await findRelatedImagesFor(queries.map((q) => ({ ...q, want: queryWant(q) })), { language: input.language, excludeUrls: input.source.url ? [input.source.url] : [] });
         // Room for one extra picture per scene search on top of the shortfall, so every scene's own search gets stored.
         const stored = await storeRelatedImages(found.images, { buildId: input.buildId, max: tier2Missing + 2 + perScene }, pctx);
         return { assets: stored.assets, pages: found.pages, found: found.images.length, errors: [...found.errors, ...stored.errors], shortfall: tier2Missing, queries };
@@ -414,7 +436,7 @@ export const prepareAssetsFn = inngest.createFunction(
         ];
         // The most authentic picture opens the scene; every tier keeps its own order.
         const lastResort = (forced[sc.id] ?? []).flatMap((index) => (pool[index].asset ? [still(pool[index].asset!, framingFor(index, sc.id))] : []));
-        const all = [...orderByTier(shots).map((x) => x.visual), ...lastResort].slice(0, need[sc.id]);
+        const all = [...(sourceShots[sc.id] ?? []), ...orderByTier(shots).map((x) => x.visual), ...lastResort].slice(0, fullNeed[sc.id]);
         const visual: EditorScene["visual"] = all[0] ?? { kind: "solid" };
         return {
           id: sc.id,
@@ -467,7 +489,9 @@ export const prepareAssetsFn = inngest.createFunction(
           political: input.political,
           /** Tier-2 searches: one per scene for what its voice-over names, plus the story title. */
           queries,
-          need,
+          need: fullNeed,
+          /** Video project: shots cut from its own video (`sourceVideoShots`), before any tier. */
+          sourceVideo: input.sourceVideo ? { assetId: input.sourceVideo.assetId, durationSec: input.sourceVideo.durationSec, shots: total(Object.fromEntries(Object.entries(sourceShots).map(([k, l]) => [k, l.length]))) } : null,
           perScene: Object.fromEntries(
             input.scenes.map((sc) => {
               const tiers = (placed.perScene[sc.id] ?? []).map((p) => pool[p.index].tier);
@@ -494,7 +518,7 @@ export const prepareAssetsFn = inngest.createFunction(
           errors: faceScan.errors,
           costUsd: faceScan.costUsd,
         },
-        shots: { need, assign: assignment.method, unusedCandidates: pool.length - placed.used, assignCostUsd: assignment.costUsd },
+        shots: { need: fullNeed, assign: assignment.method, unusedCandidates: pool.length - placed.used, assignCostUsd: assignment.costUsd },
         music: music.pick ? { source: music.pick.source, title: music.pick.title, licence: music.pick.licence, key: music.pick.key } : null,
         musicError: music.error,
         mix: { mixKey: mix.mixKey, voiceKey: mix.voiceKey, integratedLufs: mix.integratedLufs, signature: audioSignature(doc), reused: false },
@@ -519,7 +543,7 @@ export const prepareAssetsFn = inngest.createFunction(
       const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + faceScan.costUsd + aiCostUsd + mix.costUsd;
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: "timeline.built",
-        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, need[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
+        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, fullNeed[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
       });
       return { ...row, durationSec };
     });

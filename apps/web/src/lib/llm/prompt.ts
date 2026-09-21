@@ -21,7 +21,15 @@ export async function loadTemplate(purpose: PromptPurpose, language: Language, t
   return { id: null, version: 0, body: d.body, model: d.model, purpose, language };
 }
 
-export type ArticleInput = { title: string | null; text: string; siteName?: string | null; url?: string | null; publishedAt?: Date | string | null };
+export type ArticleInput = {
+  title: string | null;
+  text: string;
+  siteName?: string | null;
+  url?: string | null;
+  publishedAt?: Date | string | null;
+  /** What the text is (`projects.source_kind`); the script request says so (`sourceNote` in script.ts). Default `article`. */
+  kind?: "article" | "video" | "text";
+};
 
 export function articleBlockText(a: ArticleInput) {
   const published = a.publishedAt ? new Date(a.publishedAt).toISOString().slice(0, 10) : null;

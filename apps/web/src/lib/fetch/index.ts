@@ -127,7 +127,7 @@ export async function fetchArticle(
 }
 
 /** Manual paste path: same shape as a fetched article so downstream code is identical. */
-export function manualArticle(input: { title: string; text: string; url: string; siteName?: string | null }): Extracted {
+export function manualArticle(input: { title: string; text: string; url: string | null; siteName?: string | null }): Extracted {
   const text = normaliseText(input.text);
   const wordCount = countWords(text);
   return {

@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
+import { autoAfterFetch } from "@/inngest/auto-pipeline";
 import { inngest } from "@/inngest/client";
 import { projectAssetsRequested, projectFetchRequested, projectScriptRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
@@ -16,6 +17,7 @@ import { busyStep, startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
 import { queueRender } from "@/lib/render-request";
 import { copyObject } from "@/lib/r2";
+import { MIN_CONTENT_WORDS } from "@/lib/video-source";
 import { assertWorkspaceWriter, type Workspace } from "@/lib/workspace";
 
 async function loadProject(ws: Workspace, projectId: string) {
@@ -26,7 +28,10 @@ async function loadProject(ws: Workspace, projectId: string) {
   return project;
 }
 
-/** Save edits to the extracted text and mark it confirmed; scripts are generated from confirmed text only. */
+/**
+ * Save edits to the extracted text and mark it confirmed; scripts are generated from confirmed text only. For a
+ * video project this is where the user's own content replaces the video's caption, and where auto mode resumes.
+ */
 export async function confirmArticle(_: ActionState, fd: FormData): Promise<ActionState> {
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
@@ -36,7 +41,8 @@ export async function confirmArticle(_: ActionState, fd: FormData): Promise<Acti
     const text = String(fd.get("text") ?? "").replace(/\r\n?/g, "\n").trim();
     const language = str(fd, "language") === "en" ? "en" : "vi";
     const words = countWords(text);
-    if (words < 40) throw new Error("The article text is too short to script (need at least 40 words)");
+    const min = MIN_CONTENT_WORDS[project.sourceKind];
+    if (words < min) throw new Error(project.sourceKind === "video" ? "Write what the video should say first" : `The text is too short to script (need at least ${min} words)`);
     const article = await withOrgContext(ws, (tx) => tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), orderBy: desc(schema.articles.createdAt) }));
     if (!article) throw new Error("No article to confirm yet");
     const edited = article.text !== text || (article.title ?? "") !== title;
@@ -48,8 +54,11 @@ export async function confirmArticle(_: ActionState, fd: FormData): Promise<Acti
       await tx.update(schema.projects).set({ title: title || project.title, language, lastError: null }).where(eq(schema.projects.id, projectId));
     });
     await log(edited ? "article.edited" : "article.confirmed", { words, language, edited }, projectId);
+    // Auto mode waited for the content of a video project: the first confirmation starts the script.
+    const next = project.autoPipeline && project.sourceKind === "video" && !article.confirmedAt ? await autoAfterFetch(ws, projectId) : null;
+    if (next) await inngest.send(next);
     revalidatePath(`/app/projects/${projectId}`);
-    return edited ? "Text saved and confirmed" : "Text confirmed";
+    return next ? "Content confirmed; writing the script automatically…" : edited ? "Text saved and confirmed" : "Text confirmed";
   });
 }
 
@@ -58,14 +67,15 @@ export async function refetchArticle(_: ActionState, fd: FormData): Promise<Acti
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
-    await loadProject(ws, projectId);
+    const project = await loadProject(ws, projectId);
+    if (!project.url) throw new Error("This project has no link to fetch; edit its content instead");
     const m = str(fd, "method");
     const method = m === "browser_rendering" || m === "http" || m === "firecrawl" ? m : undefined;
     await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectFetchRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, method }));
     await log("article.refetch_requested", { method: method ?? "auto" }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
-    return `Fetching again${method ? ` via ${method} first` : ""}…`;
+    return project.sourceKind === "video" ? "Downloading the video again…" : `Fetching again${method ? ` via ${method} first` : ""}…`;
   });
 }
 
@@ -79,7 +89,7 @@ export async function pasteArticle(_: ActionState, fd: FormData): Promise<Action
     const projectId = str(fd, "projectId");
     const title = str(fd, "title");
     const text = String(fd.get("text") ?? "").trim();
-    if (countWords(text) < 40) throw new Error("Paste at least 40 words of article text");
+    if (countWords(text) < MIN_CONTENT_WORDS.article) throw new Error(`Paste at least ${MIN_CONTENT_WORDS.article} words of article text`);
     await claimDirectRun(ws, projectId, "fetch", "Lưu nội dung dán…", { allowIdle: true });
     after(() => runFetchDirect({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
     await log("article.pasted", { words: countWords(text) }, projectId);

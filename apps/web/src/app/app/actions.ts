@@ -1,25 +1,42 @@
 "use server";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { inngest } from "@/inngest/client";
 import { projectFetchRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
+import { countWords } from "@/lib/fetch/readability";
 import { channelLogo } from "@/lib/media/logo";
+import { resolveVideoLink } from "@/lib/media/source-video";
+import { runFetchDirect } from "@/lib/pipeline/direct";
 import { parsePreset } from "@/lib/presets";
 import { startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
 import { canonicalizeUrl, isPrivateHost } from "@/lib/url";
+import { MIN_CONTENT_WORDS } from "@/lib/video-source";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 
-/** Create a project from a URL, check duplicates org-wide, and start the fetch step. */
+/**
+ * Create a project and start the fetch step. Three sources (`projects.source_kind`):
+ * - a link to a news article: fetched by the extraction chain; duplicates are checked org-wide;
+ * - a link to a video page (YouTube, TikTok, Facebook…, share links followed): the video is downloaded as the
+ *   footage and its caption pre-fills the content the user writes; duplicates are checked the same way;
+ * - content typed in (`mode=text`): stored at once as a confirmed article (a direct run, like a manual paste).
+ */
 export async function createProject(_: ActionState, fd: FormData): Promise<ActionState> {
   let target: string | null = null;
   const state = await run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
-    const url = canonicalizeUrl(str(fd, "url"));
-    if (isPrivateHost(url)) throw new Error("That address is not a public website");
+    const typed = str(fd, "mode") === "text";
+    const text = typed ? String(fd.get("text") ?? "").replace(/\r\n?/g, "\n").trim() : "";
+    const title = typed ? str(fd, "title") || text.split("\n")[0].slice(0, 90).trim() : "";
+    if (typed && countWords(text) < MIN_CONTENT_WORDS.text) throw new Error(`Write at least ${MIN_CONTENT_WORDS.text} words of content`);
+    const videoUrl = typed ? null : await resolveVideoLink(str(fd, "url"));
+    const url = typed ? null : (videoUrl ?? canonicalizeUrl(str(fd, "url")));
+    if (url && isPrivateHost(url)) throw new Error("That address is not a public website");
+    const sourceKind = typed ? "text" : videoUrl ? "video" : "article";
     const { durationSec, tone } = parsePreset(fd);
     const force = fd.get("force") === "on";
     const auto = fd.get("auto") === "on";
@@ -34,24 +51,31 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
     // Auto mode will spend a script + a render on this user's behalf: fail fast if today's quota is already gone.
     if (auto) await Promise.all([assertQuota(ws.userId, "scripts"), assertQuota(ws.userId, "render_minutes")]);
 
-    const existing = await withOrgContext(ws, (tx) =>
-      tx.query.projects.findFirst({ where: and(eq(schema.projects.organizationId, ws.organizationId), eq(schema.projects.canonicalUrl, url)) }),
-    );
+    const existing = url
+      ? await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: and(eq(schema.projects.organizationId, ws.organizationId), eq(schema.projects.canonicalUrl, url)) }))
+      : undefined;
     if (existing && !force) {
       target = `/app/projects/${existing.id}?duplicate=1`;
-      return `This article already has a project (${existing.state}). Opening it; tick "create anyway" to start another.`;
+      return `This ${sourceKind === "video" ? "video" : "article"} already has a project (${existing.state}). Opening it; tick "create anyway" to start another.`;
     }
 
     const [project] = await withOrgContext(ws, (tx) =>
       tx
         .insert(schema.projects)
-        .values({ organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, durationSec, tone, autoPipeline: auto, brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null, busyStep: "fetch", busyProgress: startProgress() })
+        .values({
+          organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, sourceKind, title: title || null, durationSec, tone, autoPipeline: auto,
+          brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null,
+          // Typed content is saved in this request's `after()`, never through the queue: nothing to fetch, nothing to wait for.
+          busyStep: "fetch", busyProgress: typed ? { ...startProgress("Lưu nội dung…"), direct: true } : startProgress(),
+        })
         .returning({ id: schema.projects.id }),
     );
-    await log("project.created", { url, durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, duplicateOf: existing?.id ?? null }, project.id);
-    await inngest.send(projectFetchRequested.create({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
+    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, duplicateOf: existing?.id ?? null }, project.id);
+    if (typed) after(() => runFetchDirect({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
+    else await inngest.send(projectFetchRequested.create({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
     target = `/app/projects/${project.id}`;
-    return auto ? "Project created; running fetch → script → build → render automatically…" : "Project created; fetching the article…";
+    if (sourceKind === "video") return auto ? "Project created; downloading the video. Write its content, and the rest runs automatically…" : "Project created; downloading the video…";
+    return auto ? "Project created; running fetch → script → build → render automatically…" : typed ? "Project created; saving your content…" : "Project created; fetching the article…";
   });
   if (target) redirect(target);
   return state;

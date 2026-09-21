@@ -1,28 +1,28 @@
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
 import { LiveStep, ProjectsWatcher } from "@/components/pipeline-status";
 import { ProjectStateIcon, stateShort } from "@/components/project-state";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { listBrandKits } from "@/lib/media/brand";
 import { listLogoChannels } from "@/lib/media/logo";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
+import { projectLabel } from "@/lib/project-state";
 import { loadProjectStatuses } from "@/lib/project-status";
 import { dailyLimit, usedToday } from "@/lib/quota";
 import { timeAgo } from "@/lib/time";
 import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { createProject } from "./actions";
+import { NewProjectSource } from "./new-project-source";
 
 export const dynamic = "force-dynamic";
 
@@ -73,20 +73,12 @@ export default async function AppHome() {
         {writer ? (
           <Card id="new">
             <CardHeader>
-              <CardTitle>Dự án mới từ bài báo</CardTitle>
-              <CardDescription>Dán link bài. Hệ thống lấy nội dung, nhận diện ngôn ngữ, rồi chờ bạn xác nhận văn bản trước khi viết kịch bản, hoặc bật «tự động» để chạy thẳng tới video.</CardDescription>
+              <CardTitle>Dự án mới</CardTitle>
+              <CardDescription>Dán link bài báo hoặc video, hoặc tự nhập nội dung. Hệ thống lấy nội dung, nhận diện ngôn ngữ, rồi chờ bạn xác nhận văn bản trước khi viết kịch bản, hoặc bật «tự động» để chạy thẳng tới video.</CardDescription>
             </CardHeader>
             <CardContent>
               <ActionForm action={createProject} className="space-y-3">
-                <div className="space-y-1">
-                  <Label htmlFor="url">Link bài báo</Label>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <Input id="url" name="url" type="url" inputMode="url" placeholder="https://vnexpress.net/…" required autoComplete="off" className="flex-1" />
-                    <Button type="submit" className="sm:shrink-0">
-                      <Plus data-icon="inline-start" /> Tạo dự án
-                    </Button>
-                  </div>
-                </div>
+                <NewProjectSource />
                 <CollapsibleSection variant="plain" defaultOpen="desktop" title="Tuỳ chọn" summary="60 giây · giọng mặc định · tự chọn bộ nhận diện" className="rounded-none">
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="space-y-1">
@@ -154,7 +146,7 @@ export default async function AppHome() {
                       <input type="checkbox" name="auto" /> tự động tới video
                     </label>
                     <label className="flex min-h-10 items-center gap-2 text-sm">
-                      <input type="checkbox" name="force" /> tạo dù đã có dự án cùng bài
+                      <input type="checkbox" name="force" /> tạo dù đã có dự án cùng bài / video
                     </label>
                   </div>
                 </CollapsibleSection>
@@ -180,7 +172,7 @@ export default async function AppHome() {
                   <Link href={`/app/projects/${p.id}`} className="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none sm:px-4">
                     <ProjectStateIcon state={p.state} />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{p.title ?? p.url}</div>
+                      <div className="truncate font-medium">{projectLabel(p)}</div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                         <span className="truncate">{displayHost(p.url)}</span>
                         {p.ownerName ? <span className="hidden sm:inline">· {p.ownerName}</span> : null}

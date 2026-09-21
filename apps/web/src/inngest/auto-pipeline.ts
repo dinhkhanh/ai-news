@@ -4,10 +4,8 @@ import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
 import { startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
+import { MIN_CONTENT_WORDS } from "@/lib/video-source";
 import { projectAssetsRequested, projectRenderRequested, projectScriptRequested } from "./events";
-
-/** Minimum article length `confirmArticle` accepts; shorter articles pause auto mode for a human look. */
-export const AUTO_MIN_WORDS = 40;
 
 type Ctx = { userId: string; organizationId: string };
 
@@ -30,13 +28,18 @@ async function pause(ctx: Ctx, projectId: string, step: string, reason: string) 
   return null;
 }
 
-/** After `fetch-article`: confirm the article on the requester's behalf and queue the script. */
+/**
+ * After `fetch-article`: confirm the article on the requester's behalf and queue the script. Content the user typed
+ * (a manual paste, a `text` project) is confirmed already and never too short to try. A `video` project waits for
+ * the user to write its content: `confirmArticle` calls this again once it is confirmed.
+ */
 export async function autoAfterFetch(ctx: Ctx, projectId: string) {
   const project = await loadAuto(ctx, projectId);
   if (!project) return null;
   const article = await withOrgContext(ctx, (tx) => tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), orderBy: desc(schema.articles.createdAt) }));
   if (!article) return pause(ctx, projectId, "script", "không có bài");
-  if (article.wordCount < AUTO_MIN_WORDS) return pause(ctx, projectId, "script", `bài chỉ có ${article.wordCount} từ, cần kiểm tra và xác nhận thủ công`);
+  if (project.sourceKind === "video" && !article.confirmedAt) return null;
+  if (article.fetchMethod !== "manual" && article.wordCount < MIN_CONTENT_WORDS[project.sourceKind]) return pause(ctx, projectId, "script", `bài chỉ có ${article.wordCount} từ, cần kiểm tra và xác nhận thủ công`);
   try {
     await assertQuota(ctx.userId, "scripts");
   } catch (e) {

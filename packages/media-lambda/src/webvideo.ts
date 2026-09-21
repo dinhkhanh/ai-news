@@ -7,6 +7,7 @@ export type YtdlpEntry = {
   webpage_url?: string;
   original_url?: string;
   title?: string;
+  description?: string | null;
   duration?: number | null;
   thumbnail?: string;
   thumbnails?: Array<{ url: string; width?: number; height?: number }>;
@@ -49,6 +50,7 @@ export function toCandidate(e: YtdlpEntry): WebVideoCandidate | null {
     uploadDate: e.upload_date ?? null,
     width: e.width ?? null,
     height: e.height ?? null,
+    description: e.description?.trim().slice(0, 5000) || null,
   };
 }
 

@@ -23,6 +23,12 @@ describe("buildMetadata", () => {
     const f = buildMetadata({ platform: "youtube", meta: null, fallbackTitle: "fallback", language: "vi", source, aiDisclosure: false });
     expect(f.title).toBe("fallback");
   });
+  it("leaves the source line out for content typed in without a link", () => {
+    const m = buildMetadata({ platform: "facebook", meta: { title: "T", description: "D", hashtags: [] }, fallbackTitle: "x", language: "vi", source: { siteName: null, url: null }, aiDisclosure: false });
+    expect(m.description).toBe("D");
+    const v = buildMetadata({ platform: "facebook", meta: { title: "T", description: "D", hashtags: [] }, fallbackTitle: "x", language: "vi", source: { siteName: "TikTok", url: "https://www.tiktok.com/@x/video/1" }, aiDisclosure: false });
+    expect(v.description).toBe("D\n\nNguồn: TikTok · https://www.tiktok.com/@x/video/1");
+  });
   it("puts caption and hashtags in the TikTok title within 2200 chars", () => {
     const m = buildMetadata({ platform: "tiktok", meta: { title: "T", description: "d".repeat(3000), hashtags: ["a", "b"] }, fallbackTitle: "x", language: "vi", source, aiDisclosure: true });
     expect(m.title.length).toBeLessThanOrEqual(2200);

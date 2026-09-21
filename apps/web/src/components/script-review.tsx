@@ -7,7 +7,7 @@ import { findRange } from "@/lib/text-match";
 import { cn } from "@/lib/utils";
 
 type Props = {
-  article: { title: string | null; text: string; siteName: string | null; url: string; screenshotUrl: string | null };
+  article: { title: string | null; text: string; siteName: string | null; url: string | null; screenshotUrl: string | null };
   script: StoredScript;
   faithfulness: StoredFaithfulness | null;
   meta: { version: number; createdAt: string; costUsd: string; inputTokens: number; outputTokens: number };
@@ -149,10 +149,14 @@ export function ScriptReview({ article, script, faithfulness, meta }: Props) {
         <article className="rounded-lg border p-4 text-sm leading-relaxed">
           <h3 className="mb-2 text-base font-medium">{article.title}</h3>
           <p className="mb-3 text-xs text-muted-foreground">
-            {article.siteName ? `${article.siteName} · ` : ""}
-            <a href={article.url} target="_blank" rel="noreferrer" className="underline">
-              {article.url}
-            </a>
+            {article.siteName ? `${article.siteName}${article.url ? " · " : ""}` : ""}
+            {article.url ? (
+              <a href={article.url} target="_blank" rel="noreferrer" className="underline">
+                {article.url}
+              </a>
+            ) : article.siteName ? null : (
+              "Nội dung tự nhập"
+            )}
           </p>
           {paragraphs.map((p) => {
             const end = p.start + p.text.length;

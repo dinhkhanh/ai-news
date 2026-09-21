@@ -14,6 +14,9 @@ export type DirectStep = (typeof DIRECT_STEPS)[number];
 /** `projects.inngest_run_id` after a failed direct fetch: the page then offers the direct re-fetch buttons as well. Cleared by the next stored article. */
 export const DIRECT_RUN_ID = "direct";
 
+/** What a project is called in lists and headings: its title, else its link, else (content typed in, not stored yet) a placeholder. */
+export const projectLabel = (p: { title: string | null; url: string | null }) => p.title ?? p.url ?? "Nội dung tự nhập";
+
 /** Fired by <ActionForm> after a successful submit so watchers re-poll at once instead of waiting for the next tick. */
 export const ACTION_EVENT = "ai-news:action";
 

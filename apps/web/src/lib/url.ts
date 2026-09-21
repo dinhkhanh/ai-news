@@ -34,8 +34,9 @@ export function canonicalizeUrl(input: string): string {
   return u.toString();
 }
 
-/** Host without a leading "www." for display and grouping. */
-export function displayHost(url: string) {
+/** Host without a leading "www." for display and grouping; "" without a URL (content typed in). */
+export function displayHost(url: string | null) {
+  if (!url) return "";
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {

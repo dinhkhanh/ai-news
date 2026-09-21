@@ -118,7 +118,8 @@ export type BuildMetadataInput = {
   meta: ScriptPlatformMeta | null | undefined;
   fallbackTitle: string;
   language: "vi" | "en";
-  source: { siteName: string | null; url: string };
+  /** `url` null: content typed in without a link; the source line then only names `siteName`, or is left out. */
+  source: { siteName: string | null; url: string | null };
   aiDisclosure: boolean;
 };
 
@@ -132,9 +133,10 @@ export function buildMetadata(input: BuildMetadataInput): PublishMetadata {
   const spec = PLATFORM_SPEC[input.platform];
   const hashtags = normaliseHashtags(input.meta?.hashtags ?? [], input.platform);
   const title = truncate(input.meta?.title || input.fallbackTitle, spec.titleMax || 2200);
-  const sourceLine = `${SOURCE_LABEL[input.language]}: ${input.source.siteName ? `${input.source.siteName} · ` : ""}${input.source.url}`;
+  const credited = [input.source.siteName, input.source.url].filter(Boolean).join(" · ");
+  const sourceLine = credited ? `${SOURCE_LABEL[input.language]}: ${credited}` : "";
   const body = (input.meta?.description ?? "").trim();
-  const lines = [body, "", sourceLine];
+  const lines = sourceLine ? [body, "", sourceLine] : [body, ""];
   if (input.aiDisclosure && !spec.disclosureFlag) lines.push(DISCLOSURE_LINE[input.language]);
   const description = lines.join("\n").trim();
   if (input.platform === "tiktok") {

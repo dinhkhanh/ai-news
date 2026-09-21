@@ -23,12 +23,32 @@ export type GenerateScriptResult = {
   latencyMs: number;
 };
 
+/**
+ * Not every project is a news article: a `video` project's text is what the user wrote about a video (the facts to
+ * tell, possibly with directions for the script), and its footage is that video; a `text` project is the user's
+ * own writing. Kept in the user message so the cached system prefix stays the template + text.
+ */
+function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language) {
+  if (kind === "video") {
+    return lang === "vi"
+      ? " Lưu ý: nguồn là một video (trang ghi ở Source), không phải bài báo. Văn bản ở trên do biên tập viên viết về video đó: đó là toàn bộ dữ kiện được dùng, và nếu có chỉ dẫn cách viết kịch bản thì làm theo chỉ dẫn, đừng đọc chỉ dẫn thành lời bình. Hình ảnh của mọi cảnh là chính video này, nên lời bình kể và bình luận về nội dung video; không bịa chi tiết ngoài văn bản."
+      : " Note: the source is a video (the page under Source), not a news article. The text above was written by the editor about that video: it is all the facts there are, and any directions it gives for the script are to be followed, never read out as voice-over. Every scene's picture is this video itself, so the voice-over tells and comments on what the video shows; invent nothing beyond the text.";
+  }
+  if (kind === "text") {
+    return lang === "vi"
+      ? " Lưu ý: văn bản ở trên do biên tập viên tự viết (không có link bài báo); nếu có chỉ dẫn cách viết kịch bản thì làm theo, đừng đọc chỉ dẫn thành lời bình."
+      : " Note: the text above was written by the editor (there is no article link); follow any directions it gives for the script, never read them out as voice-over.";
+  }
+  return "";
+}
+
 function userMessage(input: GenerateScriptInput) {
   const lang = input.language;
   const tone = toneLabel(input.tone, lang);
+  const note = sourceNote(input.article.kind, lang);
   return lang === "vi"
-    ? `Viết kịch bản từ bài báo ở trên. Thời lượng mục tiêu: ${input.durationSec} giây. Giọng điệu: ${tone}. Ngôn ngữ đầu ra: tiếng Việt.`
-    : `Write the script from the article above. Target length: ${input.durationSec} seconds. Tone: ${tone}. Output language: English.`;
+    ? `Viết kịch bản từ ${input.article.kind === "video" ? "nội dung" : "bài báo"} ở trên. Thời lượng mục tiêu: ${input.durationSec} giây. Giọng điệu: ${tone}. Ngôn ngữ đầu ra: tiếng Việt.${note}`
+    : `Write the script from the ${input.article.kind === "video" ? "content" : "article"} above. Target length: ${input.durationSec} seconds. Tone: ${tone}. Output language: English.${note}`;
 }
 
 /**

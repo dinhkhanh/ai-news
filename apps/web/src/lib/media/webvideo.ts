@@ -100,16 +100,16 @@ export const foundForHint = (c: { query: string; sceneIds: string[] }) => (c.sce
  */
 export async function storeWebVideo(
   c: WebVideoCandidate,
-  opts: { buildId: string; startSec: number; endSec: number; index: number },
+  opts: { buildId: string; startSec: number; endSec: number; index: number; /** `source`: the footage of a video project (`projects.source_video_asset_id`). */ role?: "source" },
   ctx: { userId: string; organizationId: string; projectId: string },
 ): Promise<ChosenAsset> {
   const { organizationId, projectId } = ctx;
   const providerId = `${c.site.toLowerCase()}:${c.id}@${opts.startSec}-${opts.endSec}`;
   const credit = `Video: ${c.uploader ? `${c.uploader} / ` : ""}${c.site}`;
-  const durationSec = opts.endSec - opts.startSec;
   const existing = await withOrgContext(ctx, (tx) =>
     tx.query.assets.findFirst({ where: and(eq(schema.assets.organizationId, organizationId), eq(schema.assets.provider, WEB_VIDEO_PROVIDER), eq(schema.assets.providerId, providerId)) }),
   );
+  let durationSec = existing?.durationSec ? Number(existing.durationSec) : opts.endSec - opts.startSec;
   let key = existing?.r2Path ?? r2Key.media(organizationId, projectId, `webvideo/${opts.buildId}-${opts.index}.mp4`);
   let width = existing?.width ?? c.width ?? null;
   let height = existing?.height ?? c.height ?? null;
@@ -124,6 +124,8 @@ export async function storeWebVideo(
     width = res.probe?.width ?? width;
     height = res.probe?.height ?? height;
     sizeBytes = res.probe?.sizeBytes ?? null;
+    // A section asked past the end of the video (length unknown beforehand) is only as long as the file.
+    if (res.probe?.durationSec && res.probe.durationSec < durationSec) durationSec = Math.round(res.probe.durationSec * 100) / 100;
   }
   const [row] = await withOrgContext(ctx, (tx) =>
     tx
@@ -131,7 +133,7 @@ export async function storeWebVideo(
       .values({
         organizationId, projectId, origin: "web_video", provider: WEB_VIDEO_PROVIDER, providerId, licence: "web video (editorial use, credited)", licenceUrl: null, sourceUrl: c.url, r2Path: key, hash: existing?.hash ?? null, mime: "video/mp4",
         width, height, durationSec: durationSec.toFixed(2), sizeBytes, searchTerm: null, sceneId: null, selected: false, thumbnailUrl: c.thumbnailUrl, attribution: credit,
-        meta: { buildId: opts.buildId, title: c.title, site: c.site, uploader: c.uploader, uploadDate: c.uploadDate, viewCount: c.viewCount, section: [opts.startSec, opts.endSec] },
+        meta: { buildId: opts.buildId, ...(opts.role ? { role: opts.role } : {}), title: c.title, site: c.site, uploader: c.uploader, uploadDate: c.uploadDate, viewCount: c.viewCount, section: [opts.startSec, opts.endSec] },
       })
       .returning({ id: schema.assets.id }),
   );

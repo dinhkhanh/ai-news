@@ -13,7 +13,7 @@ import { channelLogo } from "@/lib/media/logo";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { storedFrame, storedSection } from "@/lib/media/framing";
 import type { PendingCapture } from "@/lib/media/visual-plan";
-import { busyStep } from "@/lib/project-state";
+import { busyStep, projectLabel } from "@/lib/project-state";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { dailyLimit, usedToday } from "@/lib/quota";
 import { presignGet } from "@/lib/r2";
@@ -117,7 +117,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const status = await loadProjectStatus(ws, project.id);
   const props: EditorProps = {
     projectId: project.id,
-    projectTitle: project.title ?? project.url,
+    projectTitle: projectLabel(project),
     projectState: project.state,
     busyStep: busy,
     lastError: project.lastError,
@@ -175,7 +175,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
             </Link>{" "}
             / trình chỉnh sửa
           </div>
-          <h1 className="line-clamp-2 text-base font-medium tracking-tight sm:text-lg">{project.title ?? project.url}</h1>
+          <h1 className="line-clamp-2 text-base font-medium tracking-tight sm:text-lg">{projectLabel(project)}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="outline">timeline v{selected.version}</Badge>

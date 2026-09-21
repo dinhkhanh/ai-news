@@ -363,8 +363,8 @@ const Captions: React.FC<{ captions: Caption[]; brand: Brand }> = ({ captions, b
 
 /**
  * Closing block of the last scene: the channel line, the article the story
- * comes from (name + URL – the only place the article is credited) and the
- * remaining credits (music).
+ * comes from (name + URL – the only place the article is credited; left out
+ * for content typed in without a link) and the remaining credits (music).
  */
 const Outro: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   const frame = useCurrentFrame();
@@ -376,11 +376,14 @@ const Outro: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   return (
     <div style={{ position: "absolute", left: SAFE_ZONES.left, right: SAFE_ZONES.right, bottom: OUTPUT.height - textLayout(brand, "cta").outro.y1, opacity: enter, fontFamily: fontFamily(brand.fonts.body), color: brand.colours.text }}>
       {brand.outroText ? <div style={{ fontSize: 44, fontWeight: 700, lineHeight: 1.2 }}>{brand.outroText}</div> : null}
-      <div style={{ fontSize: 30, fontWeight: 700, marginTop: brand.outroText ? 14 : 0, lineHeight: 1.3 }}>
-        {timeline.language === "en" ? "Source" : "Nguồn"}: {source.name}
-      </div>
+      {/* Content typed in without a link (source "") has no source to name. */}
+      {source.name ? (
+        <div style={{ fontSize: 30, fontWeight: 700, marginTop: brand.outroText ? 14 : 0, lineHeight: 1.3 }}>
+          {timeline.language === "en" ? "Source" : "Nguồn"}: {source.name}
+        </div>
+      ) : null}
       {/* Two lines at most; a long URL is cut, the outlet name above still says where the story is from. */}
-      <div style={{ fontSize: 24, opacity: 0.8, marginTop: 4, lineHeight: 1.35, maxHeight: 24 * 1.35 * 2, overflow: "hidden", wordBreak: "break-all" }}>{source.url}</div>
+      {source.url ? <div style={{ fontSize: 24, opacity: 0.8, marginTop: 4, lineHeight: 1.35, maxHeight: 24 * 1.35 * 2, overflow: "hidden", wordBreak: "break-all" }}>{source.url}</div> : null}
       {credits.length ? <div style={{ fontSize: 24, opacity: 0.8, marginTop: 8, lineHeight: 1.35, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{credits.join(" · ")}</div> : null}
     </div>
   );

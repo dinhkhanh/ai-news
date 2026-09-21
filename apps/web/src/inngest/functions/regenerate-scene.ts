@@ -108,7 +108,7 @@ export const regenerateSceneFn = inngest.createFunction(
       const related = await step.run("related", async (): Promise<{ visuals: Visual[]; found: number; stored: number; errors: string[]; costUsd: number }> => {
         if (!newsTerms.length) return { visuals: [], found: 0, stored: 0, errors: [], costUsd: 0 };
         await reportProgress(pctx, { label: `Tìm ảnh báo khác cho cảnh ${scene.id}: “${newsTerms[0]}”`, pct: 15 });
-        const found = await findRelatedImages({ query: newsTerms[0], sceneIds: [scene.id], language: base.doc.language, excludeUrls: [base.sourceUrl], want: keep });
+        const found = await findRelatedImages({ query: newsTerms[0], sceneIds: [scene.id], language: base.doc.language, excludeUrls: base.sourceUrl ? [base.sourceUrl] : [], want: keep });
         // Pictures already in this project are skipped by the content-hash check in storeRelatedImages, so a retry brings something new.
         const stored = await storeRelatedImages(found.images, { buildId, max: keep + 1 }, pctx);
         const guard = await faceGuardAvailable();

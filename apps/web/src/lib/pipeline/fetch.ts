@@ -9,6 +9,7 @@ import { FETCH_METHOD_LABEL as PROVIDER_LABEL, fetchArticle, fetchOrder, manualA
 import { heuristicLanguage } from "@/lib/language";
 import { classifyArticle } from "@/lib/llm/classify";
 import { chooseBrandKit } from "@/lib/media/brand";
+import { downloadSourceVideo, lookupVideo, videoArticle } from "@/lib/media/source-video";
 import { reportProgress } from "@/lib/progress";
 import { DIRECT_RUN_ID, eventSuperseded } from "@/lib/project-state";
 import { putObject, r2Key } from "@/lib/r2";
@@ -31,6 +32,8 @@ export type FetchRequest = {
 
 /**
  * Pipeline step 1 (docs/PLAN.md §4.1): extract the article, snapshot it to R2,
+ * (a `video` project instead: read the video page's title + caption with yt-dlp and download the video itself,
+ * the footage of every shot; the caption is only a starting point the user rewrites before confirming),
  * detect language + sensitive topic, store the article row and move the project
  * to `fetched`. One body for both runners: the `fetch-article` Inngest function
  * passes its durable `step`, a direct run (src/lib/pipeline/direct.ts) passes
@@ -51,17 +54,26 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
     if (eventSuperseded(sentAt, { latestResultAt: article?.createdAt, progress: row.busyProgress })) return null;
     await reportProgress(pctx, { label: "Mở dự án", pct: 5 });
     await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", lastError: null }).where(eq(schema.projects.id, projectId)));
-    return { id: row.id, url: row.url, language: row.language, brandKitId: row.brandKitId, brandKitSource: row.brandKitSource };
+    return { id: row.id, url: row.url, sourceKind: row.sourceKind, language: row.language, brandKitId: row.brandKitId, brandKitSource: row.brandKitSource };
   });
   if (!project) return { next: null, result: { projectId, skipped: "superseded" as const } };
 
+  const video = !manual && project.sourceKind === "video";
   const fetched = await steps.run("extract", async () => {
-    await reportProgress(pctx, { label: manual ? "Lưu nội dung dán" : `Lấy nội dung bài (${fetchOrder(method, only).map((m) => PROVIDER_LABEL[m]).join(" → ")})`, pct: 10 });
+    await reportProgress(pctx, { label: manual ? "Lưu nội dung" : video ? "Đọc tiêu đề + chú thích video (yt-dlp)" : `Lấy nội dung bài (${fetchOrder(method, only).map((m) => PROVIDER_LABEL[m]).join(" → ")})`, pct: 10 });
     if (manual) {
-      return { method: "manual" as FetchMethod, extracted: manualArticle({ ...manual, url: project.url }), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[] };
+      return { method: "manual" as FetchMethod, extracted: manualArticle({ ...manual, url: project.url }), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[], video: null };
     }
+    if (!project.url) throw new NonRetriableError("This project has no link to fetch; edit its content instead");
+    if (video) {
+      const c = await lookupVideo(project.url).catch((e) => {
+        throw new NonRetriableError(e instanceof Error ? e.message : String(e));
+      });
+      return { method: "video" as const, extracted: videoArticle(c), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[], video: c };
+    }
+    const url = project.url;
     try {
-      const out = await fetchArticle(project.url, {
+      const out = await fetchArticle(url, {
         preferred: method,
         only,
         // Blocked or failed: say so and move on to the next provider, in the manual re-fetch as well.
@@ -70,12 +82,22 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
             ? reportProgress(pctx, { label: `${PROVIDER_LABEL[previous.method]} ${previous.blocked ? "bị chặn" : "không lấy được bài"}, chuyển sang ${PROVIDER_LABEL[next]}`, pct: 10 + 15 * fetchOrder(method, only).indexOf(next) })
             : undefined,
       });
-      return { method: out.method, extracted: out.extracted, rawHtml: out.rawHtml, screenshotB64: out.screenshot?.toString("base64") ?? null, attempts: out.attempts };
+      return { method: out.method as FetchMethod | "video", extracted: out.extracted, rawHtml: out.rawHtml, screenshotB64: out.screenshot?.toString("base64") ?? null, attempts: out.attempts, video: null };
     } catch (e) {
       // Every provider failed: not worth retrying automatically; the user picks a fallback.
       throw new NonRetriableError(e instanceof Error ? e.message : String(e));
     }
   });
+
+  // Video projects: the footage itself (the first SOURCE_VIDEO_MAX_SEC), through the NAS like every video download.
+  const sourceVideo = fetched.video
+    ? await steps.run("download-video", async () => {
+        const c = fetched.video!;
+        await reportProgress(pctx, { label: `Tải video từ ${c.site}${c.durationSec ? ` (${Math.round(c.durationSec)} s)` : ""}`, pct: 25 });
+        const a = await downloadSourceVideo(c, pctx);
+        return { assetId: a.assetId, durationSec: a.durationSec, truncated: a.truncated };
+      })
+    : null;
 
   const snapshot = await steps.run("snapshot-to-r2", async () => {
     await reportProgress(pctx, { label: "Lưu bản chụp trang", pct: 60 });
@@ -119,7 +141,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
     await reportProgress(pctx, { label: "Lưu bài báo", pct: 92 });
     const { extracted } = fetched;
     let canonicalUrl = project.url;
-    if (extracted.canonicalUrl) {
+    if (extracted.canonicalUrl && project.url && !video) {
       try {
         const c = canonicalizeUrl(extracted.canonicalUrl);
         if (new URL(c).hostname.replace(/^www\./, "") === new URL(project.url).hostname.replace(/^www\./, "")) canonicalUrl = c;
@@ -158,6 +180,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
           language: classification.language,
           sensitiveTopic: classification.sensitiveTopic,
           political: classification.political,
+          ...(sourceVideo ? { sourceVideoAssetId: sourceVideo.assetId } : {}),
           ...(kit ? { brandKitId: kit.id, brandKitSource: kit.id ? ("auto" as const) : null, brandKitReason: kit.reason } : {}),
           state: "fetched",
           busyStep: null, busyProgress: null,
@@ -181,6 +204,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
         categories: classification.categories,
         brandKit: kit ? { id: kit.id, name: kit.name, method: kit.method, reason: kit.reason } : null,
         attempts: fetched.attempts,
+        ...(sourceVideo ? { video: { assetId: sourceVideo.assetId, durationSec: sourceVideo.durationSec, truncated: sourceVideo.truncated, site: fetched.video?.site ?? null } } : {}),
       },
     });
   });

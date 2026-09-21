@@ -12,13 +12,13 @@ describe("yt-dlp search parsing", () => {
       ],
     });
     expect(parseSearchJson(`WARNING: foo\n${stdout}`)).toEqual([
-      { id: "abc", url: "https://www.youtube.com/watch?v=abc", title: "Bão số 3 đổ bộ", site: "YouTube", durationSec: 95, thumbnailUrl: "l.jpg", uploader: "VTV24", viewCount: 1200, uploadDate: null, width: null, height: null },
+      { id: "abc", url: "https://www.youtube.com/watch?v=abc", title: "Bão số 3 đổ bộ", site: "YouTube", durationSec: 95, thumbnailUrl: "l.jpg", uploader: "VTV24", viewCount: 1200, uploadDate: null, width: null, height: null, description: null },
     ]);
   });
 
   it("maps a full single-video dump (TikTok) with dimensions", () => {
-    const c = toCandidate({ id: "7", webpage_url: "https://www.tiktok.com/@x/video/7", title: "t", duration: 21.4, extractor_key: "TikTok", uploader: "x", width: 1080, height: 1920, thumbnail: "th.jpg", upload_date: "20260915" });
-    expect(c).toMatchObject({ site: "TikTok", durationSec: 21.4, width: 1080, height: 1920, thumbnailUrl: "th.jpg", uploadDate: "20260915" });
+    const c = toCandidate({ id: "7", webpage_url: "https://www.tiktok.com/@x/video/7", title: "t", duration: 21.4, extractor_key: "TikTok", uploader: "x", width: 1080, height: 1920, thumbnail: "th.jpg", upload_date: "20260915", description: "  Cả xóm ra xem #lũ #miềntrung \n" });
+    expect(c).toMatchObject({ site: "TikTok", durationSec: 21.4, width: 1080, height: 1920, thumbnailUrl: "th.jpg", uploadDate: "20260915", description: "Cả xóm ra xem #lũ #miềntrung" });
   });
 
   it("returns [] for garbage and dedupes by page url ignoring tracking params", () => {
