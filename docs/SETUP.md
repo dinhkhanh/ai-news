@@ -23,7 +23,7 @@ Order matters: database → auth → app deploy → storage → AWS → Inngest 
 
 ## Gemini-TTS voices (/app/voices)
 
-Workspace voices use Gemini-TTS (`gemini-2.5-flash-tts`) through the same Cloud Text-to-Speech client and service account (`GOOGLE_APPLICATION_CREDENTIALS_JSON`). Gemini-TTS runs on Vertex AI, so in that account's Google Cloud project: enable the **Vertex AI API** (`aiplatform.googleapis.com`) and grant the service account **Vertex AI User** (`roles/aiplatform.user`). Without them “Nghe thử” and builds with such a voice fail with “Giọng Gemini chưa dùng được…”; the platform (Chirp 3 HD) voices keep working.
+Workspace voices use Gemini-TTS (`gemini-2.5-flash-tts`) through the same Cloud Text-to-Speech client and service account (`GOOGLE_APPLICATION_CREDENTIALS_JSON`). Gemini-TTS runs on Gemini Enterprise Agent Platform (the former Vertex AI, renamed at Cloud Next 2026), so in that account's Google Cloud project: enable the **Agent Platform API** (`aiplatform.googleapis.com`) and grant the service account the **Agent Platform User** role (`roles/aiplatform.user`, formerly "Vertex AI User"). Without them “Nghe thử” and builds with such a voice fail with “Giọng Gemini chưa dùng được…”; the platform (Chirp 3 HD) voices keep working.
 
 ## Web-video API on the office NAS (YouTube downloads)
 

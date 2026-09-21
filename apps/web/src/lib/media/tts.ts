@@ -199,8 +199,9 @@ async function geminiSpeech(text: string, languageCode: string, preset: Pick<Voi
     });
     return res.audioContent as Uint8Array;
   } catch (e) {
-    // Gemini-TTS runs on Vertex AI: the project needs that API on and the service account `roles/aiplatform.user` (docs/SETUP.md).
-    if ((e as { code?: number }).code === 7) throw new Error(`Giọng Gemini chưa dùng được: bật Vertex AI API và cấp quyền roles/aiplatform.user cho service account Google TTS (${(e as Error).message.slice(0, 160)})`);
+    // Gemini-TTS runs on Gemini Enterprise Agent Platform (formerly Vertex AI): the project needs the Agent Platform API
+    // (aiplatform.googleapis.com) on and the service account the Agent Platform User role (roles/aiplatform.user); docs/SETUP.md.
+    if ((e as { code?: number }).code === 7) throw new Error(`Giọng Gemini chưa dùng được: bật Agent Platform API và cấp vai trò Agent Platform User (roles/aiplatform.user) cho service account Google TTS (${(e as Error).message.slice(0, 160)})`);
     throw e;
   }
 }
