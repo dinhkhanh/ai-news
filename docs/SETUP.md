@@ -21,6 +21,10 @@ Order matters: database → auth → app deploy → storage → AWS → Inngest 
 7. AI stills: `/admin/integrations` → **Google Vertex AI (Gemini image / Veo)**: secret = the Google Cloud project id (falls back to `project_id` of the SA JSON), optional monthly spend cap; then turn on the feature flag **AI media**. Per-user daily limit is the `ai_media` quota (`/admin/quotas`, default 5). `check-infra.ts` makes a free `countTokens` call against `gemini-3.1-flash-image`. Note: Imagen predict endpoints were retired on 2026-06-30; the app uses `generateContent` on the global endpoint.
 8. Voice listening test: `GOOGLE_APPLICATION_CREDENTIALS=sa.json pnpm --filter web exec tsx scripts/voice-test.ts`, open `apps/web/out/voice-test/index.html`, record the winner in `docs/PLAN.md` §1 and, if it changes, update the seed in the next migration.
 
+## Gemini-TTS voices (/app/voices)
+
+Workspace voices use Gemini-TTS (`gemini-2.5-flash-tts`) through the same Cloud Text-to-Speech client and service account (`GOOGLE_APPLICATION_CREDENTIALS_JSON`). Gemini-TTS runs on Vertex AI, so in that account's Google Cloud project: enable the **Vertex AI API** (`aiplatform.googleapis.com`) and grant the service account **Vertex AI User** (`roles/aiplatform.user`). Without them “Nghe thử” and builds with such a voice fail with “Giọng Gemini chưa dùng được…”; the platform (Chirp 3 HD) voices keep working.
+
 ## Web-video API on the office NAS (YouTube downloads)
 
 YouTube refuses downloads from AWS (and other datacenter) IPs, so the section downloads of visual tier 2 run on a machine with a regular ISP line. `packages/media-lambda/src/server.ts` wraps the Lambda's own `web-video` / `web-video-search` handler in a small HTTP API; the app calls it when `WEB_VIDEO_API_URL` + `WEB_VIDEO_API_TOKEN` are set and falls back to the Lambda when the box is unreachable. Clips land in the same R2 bucket.

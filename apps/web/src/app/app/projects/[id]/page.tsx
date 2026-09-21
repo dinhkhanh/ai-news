@@ -11,6 +11,8 @@ import { ProjectStateIcon, stateLabel } from "@/components/project-state";
 import { SectionTabs, StickyToolbar, type SectionTab } from "@/components/sticky-toolbar";
 import { VideoButton } from "@/components/video-dialog";
 import { ScriptReview } from "@/components/script-review";
+import { VoiceSelect } from "@/components/voice-select";
+import { listVoiceOptions } from "@/lib/media/tts";
 import { ReviewPanel } from "@/components/review-panel";
 import { PublishPanel, type PublicationView, type PublishChannel } from "@/components/publish-panel";
 import { TimelineSummary, type BuildJson } from "@/components/timeline-summary";
@@ -281,7 +283,7 @@ export default async function ProjectPage({
       : ({} as Record<string, boolean>),
     publisher ? Promise.all([dailyLimit(ws.userId, "publishes"), usedToday(ws.userId, "publishes")]) : [0, 0],
   ]);
-  const sourceVideoUrl = await sign(sourceVideo?.r2Path, 3600);
+  const [sourceVideoUrl, voices] = await Promise.all([sign(sourceVideo?.r2Path, 3600), writer ? listVoiceOptions(ws) : []]);
   const imageUrls: Record<string, string> = {};
   imageKeys.forEach((key, i) => {
     const u = imageSigned[i];
@@ -788,6 +790,10 @@ export default async function ProjectPage({
                           </NativeSelect>
                         </label>
                       ) : null}
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="build-voice">
+                        giọng đọc
+                        <VoiceSelect id="build-voice" voices={voices} value={project.voicePresetId} size="sm" className="max-w-52 flex-1" />
+                      </label>
                       <label className="flex min-h-9 items-center gap-2 text-xs text-muted-foreground">
                         <input type="checkbox" name="skipStock" /> bỏ qua stock
                       </label>

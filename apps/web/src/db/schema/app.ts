@@ -258,6 +258,8 @@ export const projects = pgTable(
      * (`channels.logo_path`). Null, or a channel without a logo = the kit's own logo. A render may pick another channel.
      */
     logoChannelId: uuid("logo_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
+    /** Voice of the voice-over, picked at creation or in the build form; null = the workspace default for the language. */
+    voicePresetId: uuid("voice_preset_id").references((): AnyPgColumn => voicePresets.id, { onDelete: "set null" }),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
     /** Approval flow (docs/PLAN.md §4.8): the timeline version a publisher approved; cleared by any later edit. */
@@ -607,15 +609,26 @@ export const voicePresets = pgTable(
     /** null = platform default preset available to all orgs */
     organizationId: text("organization_id").references(() => organization.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** Main language; a Gemini-TTS voice (`model` set) speaks either language, a classic voice only this one. */
     language: languageEnum("language").notNull(),
     voice: text("voice").notNull(),
     rate: numeric("rate", { precision: 4, scale: 2 }).notNull().default("1.00"),
     pitch: numeric("pitch", { precision: 5, scale: 2 }).notNull().default("0"),
     ssmlSupported: boolean("ssml_supported").notNull().default(false),
     isDefault: boolean("is_default").notNull().default(false),
+    /** Gemini-TTS model (`gemini-2.5-flash-tts`); null = a classic Cloud TTS voice (Chirp 3 HD / Neural2) named by `voice`. */
+    model: text("model"),
+    /** Gemini-TTS style instructions (tone, pace, emotion…), sent as `input.prompt` with every scene. */
+    prompt: text("prompt"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  (t) => [index("voice_presets_org_idx").on(t.organizationId, t.language)],
+  (t) => [
+    index("voice_presets_org_idx").on(t.organizationId, t.language),
+    /** One workspace default per language (platform rows, organization_id null, are not covered: null never collides). */
+    uniqueIndex("voice_presets_one_default_idx").on(t.organizationId, t.language).where(sql`${t.isDefault}`),
+  ],
 );
 
 export const pronunciations = pgTable(

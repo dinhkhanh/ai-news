@@ -6,7 +6,7 @@ type SceneBuild = { sceneId: string; durationMs: number; timing: string; matched
 type StockBuild = { selected: { provider: string; credit: string | null; thumbnailUrl: string | null; durationSec: number | null } | null; alternates: unknown[]; searched: number; errors: string[] };
 type TierCounts = { article: number; related: number; web_video?: number; stock: number; ai: number };
 export type BuildJson = {
-  voice?: { preset: string; scenes: SceneBuild[] };
+  voice?: { preset: string; presetName?: string; scenes: SceneBuild[] };
   stock?: Record<string, StockBuild>;
   stockEnabled?: boolean;
   /** Visual priority (article → related = web video → stock → AI) and what each tier gave per scene. */
@@ -39,7 +39,7 @@ export function TimelineSummary({ timeline, build, imageUrls, mixUrl }: { timeli
         <span>{(timeline.durationFrames / timeline.fps).toFixed(1)} s</span>
         <span>· {timeline.scenes.length} cảnh</span>
         <span>· {timeline.captions.length} phụ đề</span>
-        <span>· giọng {build.voice?.preset ?? "?"}</span>
+        <span title={build.voice?.preset}>· giọng {build.voice?.presetName ?? build.voice?.preset ?? "?"}</span>
         <span>· nhạc: {build.music ? `${build.music.title} (${build.music.source})` : "không"}</span>
         {build.musicError ? <Badge variant="destructive">Mubert lỗi, dùng thư viện</Badge> : null}
         {build.visuals ? <span>· hình: {tierSummary(build.visuals.perScene)}</span> : null}

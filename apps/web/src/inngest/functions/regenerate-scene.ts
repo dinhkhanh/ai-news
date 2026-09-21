@@ -60,11 +60,11 @@ export const regenerateSceneFn = inngest.createFunction(
         const timeline = await tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.id, timelineId)) });
         if (!timeline) throw new NonRetriableError("Timeline version not found");
         await tx.update(schema.projects).set({ busyStep: "regenerate", lastError: null }).where(eq(schema.projects.id, projectId));
-        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, timeline };
+        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: project.voicePresetId, timeline };
       });
       const { doc } = docOfRow(row.timeline);
       const stock = ((row.timeline.buildJson as { stock?: Record<string, unknown> }).stock ?? {}) as Record<string, unknown>;
-      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, version: row.timeline.version, doc, stock };
+      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, voicePresetId: row.voicePresetId, version: row.timeline.version, doc, stock };
     });
 
     const sceneIdx = base.doc.scenes.findIndex((s) => s.id === sceneId);
@@ -80,7 +80,8 @@ export const regenerateSceneFn = inngest.createFunction(
       if (text.length < 2) throw new NonRetriableError("Voice-over text is empty");
       const v = await step.run("voice", async () => {
         await reportProgress(pctx, { label: `Đọc lại lời cảnh ${scene.id} (Google TTS)`, pct: 20 });
-        const preset = await loadVoicePreset(ctx, base.doc.language);
+        // The project's voice: it is only changed together with a rebuild (build form), so it is the voice of this version.
+        const preset = await loadVoicePreset(ctx, base.doc.language, base.voicePresetId);
         const pronunciations = await loadPronunciations(ctx, base.doc.language);
         return synthesizeScene({ sceneId: scene.id, text, language: base.doc.language, preset, pronunciations, r2Key: r2Key.media(organizationId, projectId, `vo/${buildId}-${scene.id}.wav`) }, pctx);
       });

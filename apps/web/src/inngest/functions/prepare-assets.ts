@@ -105,6 +105,8 @@ export const prepareAssetsFn = inngest.createFunction(
         scriptVersion: row.script.version,
         language: row.project.language,
         tone: row.project.tone,
+        /** Chosen voice (`pickVoice` falls back to the workspace default when it cannot read this language). */
+        voicePresetId: row.project.voicePresetId,
         brandKitId: row.project.brandKitId,
         /** Only whether a channel logo will be drawn matters here (face guard); the render puts the file in. */
         hasChannelLogo: Boolean(row.project.logoChannelId),
@@ -133,7 +135,7 @@ export const prepareAssetsFn = inngest.createFunction(
     const voiceSetup = await step.run("voice-setup", async () => {
       await reportProgress(pctx, { label: `Tổng hợp giọng đọc (${input.scenes.length} cảnh)`, pct: 5, total: input.scenes.length });
       return {
-        preset: await loadVoicePreset(ctx, input.language),
+        preset: await loadVoicePreset(ctx, input.language, input.voicePresetId),
         pronunciations: await loadPronunciations(ctx, input.language),
       };
     });
@@ -481,7 +483,7 @@ export const prepareAssetsFn = inngest.createFunction(
       const buildJson = {
         buildId: input.buildId,
         scriptVersion: input.scriptVersion,
-        voice: { preset: voiceSetup.preset.voice, scenes: voices.map((v) => ({ sceneId: v.sceneId, key: v.key, durationMs: v.durationMs, timing: v.timing, matched: v.matched, words: v.words.length, chars: v.chars, spokenText: v.spokenText, pronunciations: v.pronunciationsApplied, costUsd: v.costUsd })) },
+        voice: { preset: voiceSetup.preset.voice, presetId: voiceSetup.preset.id, presetName: voiceSetup.preset.name, model: voiceSetup.preset.model, scenes: voices.map((v) => ({ sceneId: v.sceneId, key: v.key, durationMs: v.durationMs, timing: v.timing, matched: v.matched, words: v.words.length, chars: v.chars, spokenText: v.spokenText, pronunciations: v.pronunciationsApplied, costUsd: v.costUsd })) },
         /** Sourcing order and what each tier contributed per scene. */
         visuals: {
           order: VISUAL_TIERS,

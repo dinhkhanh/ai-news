@@ -10,6 +10,7 @@ import { run, str, type ActionState } from "@/lib/admin";
 import { countWords } from "@/lib/fetch/readability";
 import { channelLogo } from "@/lib/media/logo";
 import { resolveVideoLink } from "@/lib/media/source-video";
+import { findVoice } from "@/lib/media/tts";
 import { runFetchDirect } from "@/lib/pipeline/direct";
 import { parsePreset } from "@/lib/presets";
 import { startProgress } from "@/lib/project-state";
@@ -48,6 +49,8 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
     const logoChannelId = str(fd, "logoChannelId");
     const logoChannel = await channelLogo(ws, logoChannelId);
     if (logoChannelId && !logoChannel) throw new Error("That channel has no logo (any more)");
+    // Empty = the workspace default for the story's language, decided at build time.
+    const voice = await findVoice(ws, str(fd, "voicePresetId"));
     // Auto mode will spend a script + a render on this user's behalf: fail fast if today's quota is already gone.
     if (auto) await Promise.all([assertQuota(ws.userId, "scripts"), assertQuota(ws.userId, "render_minutes")]);
 
@@ -64,13 +67,13 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
         .insert(schema.projects)
         .values({
           organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, sourceKind, title: title || null, durationSec, tone, autoPipeline: auto,
-          brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null,
+          brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null, voicePresetId: voice?.id ?? null,
           // Typed content is saved in this request's `after()`, never through the queue: nothing to fetch, nothing to wait for.
           busyStep: "fetch", busyProgress: typed ? { ...startProgress("Lưu nội dung…"), direct: true } : startProgress(),
         })
         .returning({ id: schema.projects.id }),
     );
-    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, duplicateOf: existing?.id ?? null }, project.id);
+    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, voice: voice?.name ?? "default", duplicateOf: existing?.id ?? null }, project.id);
     if (typed) after(() => runFetchDirect({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
     else await inngest.send(projectFetchRequested.create({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
     target = `/app/projects/${project.id}`;

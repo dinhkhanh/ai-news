@@ -10,9 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { Label } from "@/components/ui/label";
+import { VoiceSelect } from "@/components/voice-select";
 import { NativeSelect } from "@/components/ui/native-select";
 import { listBrandKits } from "@/lib/media/brand";
 import { listLogoChannels } from "@/lib/media/logo";
+import { listVoiceOptions } from "@/lib/media/tts";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { projectLabel } from "@/lib/project-state";
@@ -29,9 +31,10 @@ export const dynamic = "force-dynamic";
 export default async function AppHome() {
   const ws = await requireWorkspace();
   const writer = canWrite(ws);
-  const [kits, logoChannels, projects, limit, used] = await Promise.all([
+  const [kits, logoChannels, voices, projects, limit, used] = await Promise.all([
     writer ? listBrandKits(ws) : [],
     writer ? listLogoChannels(ws) : [],
+    writer ? listVoiceOptions(ws) : [],
     withOrgContext(ws, (tx) =>
       tx
         .select({
@@ -79,7 +82,7 @@ export default async function AppHome() {
             <CardContent>
               <ActionForm action={createProject} className="space-y-3">
                 <NewProjectSource />
-                <CollapsibleSection variant="plain" defaultOpen="desktop" title="Tuỳ chọn" summary="60 giây · giọng mặc định · tự chọn bộ nhận diện" className="rounded-none">
+                <CollapsibleSection variant="plain" defaultOpen="desktop" title="Tuỳ chọn" summary="60 giây · giọng điệu và giọng đọc mặc định · tự chọn bộ nhận diện" className="rounded-none">
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="space-y-1">
                       <Label htmlFor="durationSec">Thời lượng</Label>
@@ -100,6 +103,10 @@ export default async function AppHome() {
                           </option>
                         ))}
                       </NativeSelect>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="voicePresetId">Giọng đọc</Label>
+                      <VoiceSelect id="voicePresetId" voices={voices} value={null} className="w-full" />
                     </div>
                     {logoChannels.length ? (
                       <div className="space-y-1">

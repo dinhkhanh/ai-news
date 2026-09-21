@@ -9,20 +9,20 @@ import { putObject } from "@/lib/r2";
 import { alignWords, type AlignResult, type SttWord, type TimedWord } from "./align";
 import { GOOGLE_LANG, googleCredentials } from "./google";
 import { applyPronunciations, splitWords, ssmlEscape } from "./pronounce";
+import { pickVoice, ttsCostUsd } from "./voices";
 
 /**
  * Voice-over synthesis (docs/PLAN.md §4.4): Google Cloud TTS with the workspace
  * voice preset and pronunciation dictionary. Word timings come from SSML marks
- * on Neural2 voices and from Speech-to-Text alignment on Chirp 3 HD voices.
+ * on Neural2 voices and from Speech-to-Text alignment on Chirp 3 HD and
+ * Gemini-TTS voices (a workspace voice: `model` + style `prompt`, media/voices.ts).
  * Audio is LINEAR16 24 kHz WAV so STT and the media Lambda get lossless input.
  */
 const SAMPLE_RATE = 24_000;
-/** USD per character (Google list prices): Chirp 3 HD $30/1M, Neural2 $16/1M, Standard $4/1M. */
-const TTS_PRICE = (voice: string) => (voice.includes("Chirp") ? 30 : voice.includes("Neural2") || voice.includes("Studio") ? 16 : 4) / 1_000_000;
 /** STT v1 standard model, billed per 15 s increment. */
 const STT_PRICE_PER_MIN = 0.024;
 
-export type VoicePreset = { id: string; name: string; voice: string; language: "vi" | "en"; rate: number; pitch: number; ssmlSupported: boolean };
+export type VoicePreset = { id: string; name: string; voice: string; language: "vi" | "en"; rate: number; pitch: number; ssmlSupported: boolean; model: string | null; prompt: string | null };
 
 let ttsV1: InstanceType<typeof textToSpeech.TextToSpeechClient> | undefined;
 let ttsBeta: InstanceType<typeof textToSpeech.v1beta1.TextToSpeechClient> | undefined;
@@ -36,20 +36,43 @@ function clients() {
   return { ttsV1, ttsBeta, stt };
 }
 
-/** Workspace default preset for the language, else the platform default. */
+/**
+ * The voice of a build (`pickVoice`): the project's voice (`projects.voice_preset_id`) when it can speak `language`,
+ * else the workspace default, else the platform default for the language.
+ */
 export async function loadVoicePreset(ctx: { userId: string; organizationId: string }, language: "vi" | "en", presetId?: string | null): Promise<VoicePreset> {
   const rows = await withOrgContext(ctx, (tx) =>
-    tx.query.voicePresets.findMany({
-      where: and(eq(schema.voicePresets.language, language), or(eq(schema.voicePresets.organizationId, ctx.organizationId), isNull(schema.voicePresets.organizationId))),
-    }),
+    tx.query.voicePresets.findMany({ where: or(eq(schema.voicePresets.organizationId, ctx.organizationId), isNull(schema.voicePresets.organizationId)) }),
   );
-  const pick =
-    (presetId && rows.find((r) => r.id === presetId)) ||
-    rows.find((r) => r.organizationId === ctx.organizationId && r.isDefault) ||
-    rows.find((r) => r.organizationId === null && r.isDefault) ||
-    rows[0];
+  const pick = pickVoice(rows, language, presetId, ctx.organizationId);
   if (!pick) throw new Error(`No voice preset for ${language}`);
-  return { id: pick.id, name: pick.name, voice: pick.voice, language, rate: Number(pick.rate), pitch: Number(pick.pitch), ssmlSupported: pick.ssmlSupported };
+  return toPreset(pick, language);
+}
+
+export type VoiceOption = { id: string; name: string; language: "vi" | "en"; model: string | null; isDefault: boolean; workspace: boolean };
+
+/** Voices a project can pick (select options): the workspace's first, then the platform's. */
+export async function listVoiceOptions(ctx: { userId: string; organizationId: string }): Promise<VoiceOption[]> {
+  const rows = await withOrgContext(ctx, (tx) =>
+    tx.query.voicePresets.findMany({ where: or(eq(schema.voicePresets.organizationId, ctx.organizationId), isNull(schema.voicePresets.organizationId)) }),
+  );
+  return rows
+    .map((r) => ({ id: r.id, name: r.name, language: r.language, model: r.model, isDefault: r.isDefault, workspace: r.organizationId !== null }))
+    .sort((a, b) => Number(b.workspace) - Number(a.workspace) || a.language.localeCompare(b.language) || a.name.localeCompare(b.name));
+}
+
+/** A voice a project of this workspace may pick (its own or the platform's); null for "" (the default). Throws for anything else. */
+export async function findVoice(ctx: { userId: string; organizationId: string }, id: string) {
+  if (!id) return null;
+  const row = await withOrgContext(ctx, (tx) =>
+    tx.query.voicePresets.findFirst({ where: and(eq(schema.voicePresets.id, id), or(eq(schema.voicePresets.organizationId, ctx.organizationId), isNull(schema.voicePresets.organizationId))), columns: { id: true, name: true } }),
+  );
+  if (!row) throw new Error("That voice no longer exists");
+  return row;
+}
+
+export function toPreset(row: typeof schema.voicePresets.$inferSelect, language: "vi" | "en"): VoicePreset {
+  return { id: row.id, name: row.name, voice: row.voice, language, rate: Number(row.rate), pitch: Number(row.pitch), ssmlSupported: row.ssmlSupported, model: row.model, prompt: row.prompt };
 }
 
 export async function loadPronunciations(ctx: { userId: string; organizationId: string }, language: "vi" | "en") {
@@ -97,6 +120,7 @@ export async function synthesizeScene(
   const words = splitWords(spoken);
   const languageCode = GOOGLE_LANG[input.language];
   const isChirp = input.preset.voice.includes("Chirp");
+  const gemini = Boolean(input.preset.model);
   const audioConfig = {
     audioEncoding: ttsProtos.google.cloud.texttospeech.v1.AudioEncoding.LINEAR16,
     sampleRateHertz: SAMPLE_RATE,
@@ -110,7 +134,10 @@ export async function synthesizeScene(
   let timing: SceneVoice["timing"] = "proportional";
   let matched = 0;
 
-  if (input.preset.ssmlSupported && !isChirp) {
+  if (gemini) {
+    // Gemini-TTS: the style prompt steers tone and pace; no timepoints, so STT aligns the words below.
+    audio = await geminiSpeech(spoken, languageCode, input.preset);
+  } else if (input.preset.ssmlSupported && !isChirp) {
     // Neural2/Studio: SSML marks before every word → exact start times from the engine.
     const ssml = `<speak>${words.map((w, i) => `<mark name="w${i}"/>${ssmlEscape(w)}`).join(" ")}</speak>`;
     const [res] = await ttsBeta.synthesizeSpeech({
@@ -136,8 +163,8 @@ export async function synthesizeScene(
     audio = res.audioContent as Uint8Array;
   }
   const durationMs = wavDurationMs(audio);
-  const ttsCost = spoken.length * TTS_PRICE(input.preset.voice);
-  await recordUsageCost({ provider: "google_tts", resource: input.preset.voice, units: spoken.length, unitType: "characters", costUsd: ttsCost, userId: ctx.userId, organizationId: ctx.organizationId, projectId: ctx.projectId, meta: { sceneId: input.sceneId, durationMs } });
+  const ttsCost = ttsCostUsd({ voice: input.preset.voice, model: input.preset.model, chars: spoken.length, promptChars: input.preset.prompt?.length ?? 0, durationMs });
+  await recordUsageCost({ provider: "google_tts", resource: input.preset.model ? `${input.preset.model}:${input.preset.voice}` : input.preset.voice, units: spoken.length, unitType: "characters", costUsd: ttsCost, userId: ctx.userId, organizationId: ctx.organizationId, projectId: ctx.projectId, meta: { sceneId: input.sceneId, durationMs, voicePreset: input.preset.id } });
 
   let sttCost = 0;
   if (!timed) {
@@ -159,6 +186,49 @@ export async function synthesizeScene(
 
   await putObject(input.r2Key, audio, "audio/wav");
   return { sceneId: input.sceneId, key: input.r2Key, durationMs, words: timed, timing, matched, chars: spoken.length, spokenText: spoken, pronunciationsApplied: applied, costUsd: ttsCost + sttCost };
+}
+
+/** One Gemini-TTS request (Cloud TTS v1, `input.prompt` + `voice.modelName`), LINEAR16 24 kHz like every other voice. */
+async function geminiSpeech(text: string, languageCode: string, preset: Pick<VoicePreset, "voice" | "model" | "prompt">): Promise<Uint8Array> {
+  const { ttsV1 } = clients();
+  try {
+    const [res] = await ttsV1.synthesizeSpeech({
+      input: { text, ...(preset.prompt?.trim() ? { prompt: preset.prompt.trim() } : {}) },
+      voice: { languageCode, name: preset.voice, modelName: preset.model ?? undefined },
+      audioConfig: { audioEncoding: ttsProtos.google.cloud.texttospeech.v1.AudioEncoding.LINEAR16, sampleRateHertz: SAMPLE_RATE },
+    });
+    return res.audioContent as Uint8Array;
+  } catch (e) {
+    // Gemini-TTS runs on Vertex AI: the project needs that API on and the service account `roles/aiplatform.user` (docs/SETUP.md).
+    if ((e as { code?: number }).code === 7) throw new Error(`Giọng Gemini chưa dùng được: bật Vertex AI API và cấp quyền roles/aiplatform.user cho service account Google TTS (${(e as Error).message.slice(0, 160)})`);
+    throw e;
+  }
+}
+
+/**
+ * "Nghe thử" at /app/voices: a short sample in a voice that is not saved yet (or is). No R2, no timings; the cost is
+ * recorded against the workspace like every synthesis.
+ */
+export async function synthesizeSample(
+  input: { text: string; language: "vi" | "en"; preset: Pick<VoicePreset, "voice" | "model" | "prompt" | "rate" | "pitch" | "ssmlSupported"> },
+  ctx: { userId: string; organizationId: string },
+): Promise<{ wav: Uint8Array; durationMs: number; costUsd: number }> {
+  const languageCode = GOOGLE_LANG[input.language];
+  const text = input.text.trim().slice(0, 600);
+  let wav: Uint8Array;
+  if (input.preset.model) wav = await geminiSpeech(text, languageCode, input.preset);
+  else {
+    const [res] = await clients().ttsV1.synthesizeSpeech({
+      input: { text },
+      voice: { languageCode, name: input.preset.voice },
+      audioConfig: { audioEncoding: ttsProtos.google.cloud.texttospeech.v1.AudioEncoding.LINEAR16, sampleRateHertz: SAMPLE_RATE, speakingRate: input.preset.rate },
+    });
+    wav = res.audioContent as Uint8Array;
+  }
+  const durationMs = wavDurationMs(wav);
+  const costUsd = ttsCostUsd({ voice: input.preset.voice, model: input.preset.model, chars: text.length, promptChars: input.preset.prompt?.length ?? 0, durationMs });
+  await recordUsageCost({ provider: "google_tts", resource: input.preset.model ? `${input.preset.model}:${input.preset.voice}` : input.preset.voice, units: text.length, unitType: "characters", costUsd, userId: ctx.userId, organizationId: ctx.organizationId, meta: { sample: true, durationMs } });
+  return { wav, durationMs, costUsd };
 }
 
 /** Speech-to-Text v1 synchronous recognition with word offsets (audio ≤ 60 s). */

@@ -162,6 +162,13 @@
       "when": 1789973680872,
       "tag": "0022_video_and_text_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789975559164,
+      "tag": "0023_user_voices",
+      "breakpoints": true
     }
   ]
 }

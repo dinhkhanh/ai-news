@@ -15,6 +15,7 @@ import { claimDirectRun, runFetchDirect, runScriptDirect } from "@/lib/pipeline/
 import { parsePreset } from "@/lib/presets";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
+import { findVoice } from "@/lib/media/tts";
 import { queueRender } from "@/lib/render-request";
 import { copyObject } from "@/lib/r2";
 import { MIN_CONTENT_WORDS } from "@/lib/video-source";
@@ -187,9 +188,12 @@ export async function requestAssets(_: ActionState, fd: FormData): Promise<Actio
         Object.assign(kitPatch, { brandKitId: kitId, brandKitSource: kitId ? "manual" : null, brandKitReason: null });
       }
     }
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress(), lastError: null, ...kitPatch }).where(eq(schema.projects.id, projectId)));
+    // The voice of this build (and of later re-voiced scenes): "" = the workspace default.
+    const voice = fd.has("voicePresetId") ? await findVoice(ws, str(fd, "voicePresetId")) : undefined;
+    const voicePatch = voice !== undefined && (voice?.id ?? null) !== project.voicePresetId ? { voicePresetId: voice?.id ?? null } : {};
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress(), lastError: null, ...kitPatch, ...voicePatch }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectAssetsRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, scriptId, skipStock }));
-    await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock, ...("brandKitId" in kitPatch ? { brandKitId: kitPatch.brandKitId } : {}) }, projectId);
+    await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock, ...("brandKitId" in kitPatch ? { brandKitId: kitPatch.brandKitId } : {}), ...("voicePresetId" in voicePatch ? { voice: voice?.name ?? "default" } : {}) }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
     return "Building voice-over, B-roll and timeline… this takes 2–4 minutes";
   });

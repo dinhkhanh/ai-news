@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderKanban, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
+import { AudioLines, FolderKanban, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
 import { NavRail } from "@/components/nav-rail";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,7 @@ export function appNavItems(admin: boolean): Item[] {
     { href: "/app/publications", label: "Đã đăng", icon: Send },
     { href: "/app/channels", label: "Kênh", icon: Radio },
     { href: "/app/brand", label: "Bộ nhận diện", icon: Palette },
+    { href: "/app/voices", label: "Giọng đọc", icon: AudioLines },
     ...(admin ? [{ href: "/admin", label: "Admin", icon: ShieldCheck }] : []),
   ];
 }
@@ -30,8 +31,8 @@ export function currentAppItem(pathname: string, admin: boolean) {
 /** Icon rail (`sm` and up). The admin area is reached from the top bar's segmented control, so it has no tile here. */
 export function AppNav() {
   const pathname = usePathname();
-  const [projects, publications, channels, brand] = appNavItems(false);
-  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand]]} isActive={(item) => isActive(pathname, item)} />;
+  const [projects, publications, channels, brand, voices] = appNavItems(false);
+  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand, voices]]} isActive={(item) => isActive(pathname, item)} />;
 }
 
 /**
