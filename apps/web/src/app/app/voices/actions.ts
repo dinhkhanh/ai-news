@@ -4,7 +4,7 @@ import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { run, str, type ActionState } from "@/lib/admin";
-import { synthesizeSample, toPreset } from "@/lib/media/tts";
+import { loadVoicePreset, synthesizeSample, toPreset } from "@/lib/media/tts";
 import { GEMINI_TTS_MODEL, isGeminiVoice, SAMPLE_TEXT, VOICE_PROMPT_MAX } from "@/lib/media/voices";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 
@@ -87,8 +87,9 @@ export async function deleteVoice(_: ActionState, fd: FormData): Promise<ActionS
 export type VoiceSample = { ok: true; audio: string; durationMs: number } | { ok: false; message: string };
 
 /**
- * "Nghe thử": a short sample, either of a saved voice (`presetId`: platform or this workspace) or of the form's
- * unsaved values. Returns the WAV as a data URL (a few hundred KB) so nothing is stored.
+ * "Nghe thử": a short sample, either of a saved voice (`presetId`: platform or this workspace), of the form's
+ * unsaved values (`voice` + `prompt`), or with neither in the workspace's default voice for the language (the
+ * pronunciation dictionary). Never applies the dictionary itself. Returns the WAV as a data URL, nothing is stored.
  */
 export async function previewVoice(input: { presetId?: string; voice?: string; prompt?: string; language: string; text?: string }): Promise<VoiceSample> {
   try {
@@ -101,8 +102,10 @@ export async function previewVoice(input: { presetId?: string; voice?: string; p
       );
       if (!row) throw new Error("Voice not found");
       preset = toPreset(row, language);
+    } else if (!input.voice) {
+      preset = await loadVoicePreset(ws, language);
     } else {
-      if (!input.voice || !isGeminiVoice(input.voice)) throw new Error("Pick a voice from the list");
+      if (!isGeminiVoice(input.voice)) throw new Error("Pick a voice from the list");
       const prompt = (input.prompt ?? "").trim();
       if (prompt.length > VOICE_PROMPT_MAX) throw new Error(`The style prompt is limited to ${VOICE_PROMPT_MAX} characters`);
       preset = { voice: input.voice, model: GEMINI_TTS_MODEL, prompt: prompt || null, rate: 1, pitch: 0, ssmlSupported: false };

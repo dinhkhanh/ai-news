@@ -169,6 +169,13 @@
       "when": 1789975559164,
       "tag": "0023_user_voices",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789979142546,
+      "tag": "0024_vnexpress_pronunciation",
+      "breakpoints": true
     }
   ]
 }

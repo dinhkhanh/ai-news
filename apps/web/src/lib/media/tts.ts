@@ -8,7 +8,7 @@ import { recordUsageCost } from "@/lib/activity";
 import { putObject } from "@/lib/r2";
 import { alignWords, type AlignResult, type SttWord, type TimedWord } from "./align";
 import { GOOGLE_LANG, googleCredentials } from "./google";
-import { applyPronunciations, splitWords, ssmlEscape } from "./pronounce";
+import { displayTimedWords, pronounce, splitWords, ssmlEscape } from "./pronounce";
 import { pickVoice, ttsCostUsd } from "./voices";
 
 /**
@@ -116,7 +116,8 @@ export async function synthesizeScene(
   ctx: { userId: string; organizationId: string; projectId: string },
 ): Promise<SceneVoice> {
   const { ttsV1, ttsBeta } = clients();
-  const { text: spoken, applied } = applyPronunciations(input.text, input.pronunciations);
+  // The dictionary is for the ear: the TTS reads `spoken`, the caption words are folded back to the text as written.
+  const { spoken, applied, groups } = pronounce(input.text, input.pronunciations);
   const words = splitWords(spoken);
   const languageCode = GOOGLE_LANG[input.language];
   const isChirp = input.preset.voice.includes("Chirp");
@@ -185,7 +186,7 @@ export async function synthesizeScene(
   }
 
   await putObject(input.r2Key, audio, "audio/wav");
-  return { sceneId: input.sceneId, key: input.r2Key, durationMs, words: timed, timing, matched, chars: spoken.length, spokenText: spoken, pronunciationsApplied: applied, costUsd: ttsCost + sttCost };
+  return { sceneId: input.sceneId, key: input.r2Key, durationMs, words: displayTimedWords(timed, groups), timing, matched, chars: spoken.length, spokenText: spoken, pronunciationsApplied: applied, costUsd: ttsCost + sttCost };
 }
 
 /** One Gemini-TTS request (Cloud TTS v1, `input.prompt` + `voice.modelName`), LINEAR16 24 kHz like every other voice. */

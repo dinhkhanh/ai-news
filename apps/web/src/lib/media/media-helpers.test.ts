@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alignWords, proportionalTimings } from "./align";
 import { chunkCaptions } from "./captions";
-import { applyPronunciations, splitWords } from "./pronounce";
+import { applyPronunciations, displayTimedWords, pronounce, splitWords, validPronunciation } from "./pronounce";
 
 describe("applyPronunciations", () => {
   const dict = [
@@ -20,6 +20,48 @@ describe("applyPronunciations", () => {
   });
   it("splits words on whitespace", () => {
     expect(splitWords("  Sáng nay,  Thành phố ")).toEqual(["Sáng", "nay,", "Thành", "phố"]);
+  });
+});
+
+describe("pronounce / displayTimedWords", () => {
+  const dict = [
+    { term: "VnExpress", replacement: "Vi En Express" },
+    { term: "TP.HCM", replacement: "Thành phố Hồ Chí Minh" },
+    { term: "HCM", replacement: "Hồ Chí Minh" },
+  ];
+  it("reads the replacement but shows the term as written, punctuation kept", () => {
+    const r = pronounce("Theo (VnExpress), giá tăng.", dict);
+    expect(r.spoken).toBe("Theo (Vi En Express), giá tăng.");
+    expect(r.groups).toEqual([{ display: "Theo", n: 1 }, { display: "(VnExpress),", n: 3 }, { display: "giá", n: 1 }, { display: "tăng.", n: 1 }]);
+    expect(splitWords(r.spoken).length).toBe(r.groups.reduce((a, g) => a + g.n, 0));
+  });
+  it("never matches a shorter term inside a replacement", () => {
+    const r = pronounce("TP.HCM mưa", dict);
+    expect(r.spoken).toBe("Thành phố Hồ Chí Minh mưa");
+    expect(r.applied).toEqual(["TP.HCM"]);
+    expect(r.groups).toEqual([{ display: "TP.HCM", n: 5 }, { display: "mưa", n: 1 }]);
+  });
+  it("folds the timed spoken words back into the written term", () => {
+    const r = pronounce("Báo VnExpress đưa tin", dict);
+    const timed = splitWords(r.spoken).map((w, i) => ({ w, s: i * 100, e: i * 100 + 90 }));
+    expect(displayTimedWords(timed, r.groups)).toEqual([
+      { w: "Báo", s: 0, e: 90 },
+      { w: "VnExpress", s: 100, e: 390 },
+      { w: "đưa", s: 400, e: 490 },
+      { w: "tin", s: 500, e: 590 },
+    ]);
+    expect(displayTimedWords(timed.slice(1), r.groups)).toHaveLength(5); // counts differ: left as spoken
+  });
+});
+
+describe("validPronunciation", () => {
+  it("accepts a plain entry and names what is wrong otherwise", () => {
+    expect(validPronunciation("VnExpress", "Vi En Express")).toBeNull();
+    expect(validPronunciation("TP. HCM", "Thành phố Hồ Chí Minh")).toBeNull();
+    expect(validPronunciation("", "x")).not.toBeNull();
+    expect(validPronunciation("TP.", "Thành phố")).toBeNull();
+    expect(validPronunciation(" GDP", "gi đi pi")).not.toBeNull();
+    expect(validPronunciation("GDP", "GDP")).not.toBeNull();
   });
 });
 

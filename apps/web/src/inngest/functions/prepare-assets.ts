@@ -444,7 +444,8 @@ export const prepareAssetsFn = inngest.createFunction(
           id: sc.id,
           kind: sc.kind,
           onScreenText: sc.onScreenText,
-          voiceover: v?.spokenText ?? sc.voiceover,
+          // The script's words; the pronunciation dictionary only changes what the TTS reads (`spokenText` in build_json).
+          voiceover: sc.voiceover,
           brollTerms: sc.brollTerms,
           newsTerms: sc.newsTerms,
           durationSec: sc.durationSec,

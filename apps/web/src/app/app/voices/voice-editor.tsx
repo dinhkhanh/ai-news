@@ -13,7 +13,7 @@ import { DEFAULT_VOICE_PROMPT, GEMINI_VOICES, SAMPLE_TEXT, VOICE_PROMPT_MAX } fr
 import { previewVoice, saveVoice, type VoiceSample } from "./actions";
 
 /** Plays one sample at a time; a new sample stops the previous one. */
-function usePreview() {
+export function usePreview() {
   const audio = useRef<HTMLAudioElement | null>(null);
   const [pending, start] = useTransition();
   const play = (input: Parameters<typeof previewVoice>[0]) =>

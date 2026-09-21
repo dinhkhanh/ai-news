@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DEFAULT_VOICE_PROMPT } from "@/lib/media/voices";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { deleteVoice, setDefaultVoice } from "./actions";
+import { VoiceTabs } from "./voice-tabs";
 import { VoiceEditor, VoicePreviewButton, type VoiceDraft } from "./voice-editor";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,7 @@ export default async function VoicesPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 sm:space-y-6">
+      <VoiceTabs active="voices" />
       <p className="text-sm text-muted-foreground">
         Giọng mặc định: {LANG_LABEL.vi} · {effectiveDefault("vi")?.name ?? "—"} — {LANG_LABEL.en} · {effectiveDefault("en")?.name ?? "—"}. Dự án không chọn giọng sẽ dùng giọng mặc định.
       </p>
