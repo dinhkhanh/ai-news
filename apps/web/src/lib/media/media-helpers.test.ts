@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alignWords, proportionalTimings } from "./align";
+import { alignWords, proportionalTimings, readTwice } from "./align";
 import { chunkCaptions } from "./captions";
 import { applyPronunciations, displayTimedWords, pronounce, splitWords, validPronunciation } from "./pronounce";
 
@@ -98,6 +98,21 @@ describe("alignWords", () => {
   it("spreads proportionally by length", () => {
     const t = proportionalTimings(["a", "bbbb"], 1000);
     expect(t[0].e - t[0].s).toBeLessThan(t[1].e - t[1].s);
+  });
+});
+
+describe("readTwice", () => {
+  const heard = (t: string) => t.split(" ").map((word, i) => ({ word, startMs: i * 300, endMs: i * 300 + 300 }));
+  it("catches a Gemini take that repeats the whole text or its last sentence", () => {
+    // Transcripts of real Gemini-TTS takes ("roi mây" misheard as "jory").
+    expect(readTwice(splitWords("Năm học mới vừa bắt đầu. Mẹ đặt mua hai cây roi mây."), heard("năm học mới vừa bắt đầu mẹ đặt mua hai cây roi mây năm học mới vừa bắt đầu mẹ đặt mua hai cây roi mây"))).toBe(true);
+    expect(readTwice(splitWords("Đơn hàng là hai cây roi mây. Người ra nhận lại là đứa trẻ."), heard("đơn hàng là hai cây jory người ra nhận là đứa trẻ Người Ra nhận lại là đứa trẻ"))).toBe(true);
+  });
+  it("accepts a single read, misheard words and repeats the script itself has", () => {
+    expect(readTwice(splitWords("Đơn hàng là hai cây roi mây. Người ra nhận lại là đứa trẻ."), heard("đơn hàng là hai cây jory người ra nhận lại là đứa trẻ"))).toBe(false);
+    expect(readTwice(splitWords("Không phải sách. Không phải vở. Là roi mây."), heard("không phải sách không phải vở là roi mây"))).toBe(false);
+    expect(readTwice(splitWords("Đi đi đi. Đi đi đi."), heard("đi đi đi đi đi đi"))).toBe(false);
+    expect(readTwice([], heard("xin chào"))).toBe(false);
   });
 });
 

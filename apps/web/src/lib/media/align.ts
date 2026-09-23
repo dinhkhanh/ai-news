@@ -17,6 +17,28 @@ export function normaliseToken(t: string) {
     .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
+/**
+ * The voice read (part of) the text more than once: some run of up to three script words is heard more often than the
+ * script says it. Gemini-TTS does this on short inputs ("A. B." comes back as "A. B. B." or "A. B. A. B.").
+ */
+export function readTwice(scriptWords: string[], stt: SttWord[]) {
+  const script = scriptWords.map(normaliseToken).filter(Boolean);
+  const heard = stt.map((w) => normaliseToken(w.word)).filter(Boolean);
+  const n = Math.min(3, script.length);
+  if (n === 0 || heard.length <= script.length) return false;
+  const grams = (t: string[]) => {
+    const m = new Map<string, number>();
+    for (let i = 0; i + n <= t.length; i++) {
+      const g = t.slice(i, i + n).join(" ");
+      m.set(g, (m.get(g) ?? 0) + 1);
+    }
+    return m;
+  };
+  const inScript = grams(script);
+  for (const [g, c] of grams(heard)) if (c > (inScript.get(g) ?? c)) return true;
+  return false;
+}
+
 /** Spread script words over [0, durationMs] weighted by character length (min 120 ms each). */
 export function proportionalTimings(words: string[], durationMs: number, offsetMs = 0): TimedWord[] {
   const weights = words.map((w) => Math.max(1, normaliseToken(w).length));

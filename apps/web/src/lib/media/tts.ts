@@ -6,7 +6,7 @@ import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { recordUsageCost } from "@/lib/activity";
 import { putObject } from "@/lib/r2";
-import { alignWords, type AlignResult, type SttWord, type TimedWord } from "./align";
+import { alignWords, readTwice, type AlignResult, type SttWord, type TimedWord } from "./align";
 import { GOOGLE_LANG, googleCredentials } from "./google";
 import { displayTimedWords, pronounce, splitWords, ssmlEscape } from "./pronounce";
 import { pickVoice, ttsCostUsd } from "./voices";
@@ -21,6 +21,8 @@ import { pickVoice, ttsCostUsd } from "./voices";
 const SAMPLE_RATE = 24_000;
 /** STT v1 standard model, billed per 15 s increment. */
 const STT_PRICE_PER_MIN = 0.024;
+/** Gemini-TTS takes per scene when a take reads the text twice (`readTwice`). */
+const GEMINI_TAKES = 3;
 
 export type VoicePreset = { id: string; name: string; voice: string; language: "vi" | "en"; rate: number; pitch: number; ssmlSupported: boolean; model: string | null; prompt: string | null };
 
@@ -134,10 +136,41 @@ export async function synthesizeScene(
   let timed: TimedWord[] | null = null;
   let timing: SceneVoice["timing"] = "proportional";
   let matched = 0;
+  let heard: SttWord[] | null = null;
+  let sttCost = 0;
+  const transcribe = async (wav: Uint8Array) => {
+    const ms = wavDurationMs(wav);
+    const out = await transcribeWords(wav, languageCode);
+    const cost = (Math.ceil(ms / 15_000) * 15 / 60) * STT_PRICE_PER_MIN;
+    sttCost += cost;
+    await recordUsageCost({ provider: "google_stt", resource: "latest_long", units: ms / 1000, unitType: "seconds", costUsd: cost, userId: ctx.userId, organizationId: ctx.organizationId, projectId: ctx.projectId, meta: { sceneId: input.sceneId } });
+    return out;
+  };
+  let ttsCost = 0;
+  const recordTts = async (wav: Uint8Array, meta: Record<string, unknown> = {}) => {
+    const ms = wavDurationMs(wav);
+    const cost = ttsCostUsd({ voice: input.preset.voice, model: input.preset.model, chars: spoken.length, promptChars: input.preset.prompt?.length ?? 0, durationMs: ms });
+    ttsCost += cost;
+    await recordUsageCost({ provider: "google_tts", resource: input.preset.model ? `${input.preset.model}:${input.preset.voice}` : input.preset.voice, units: spoken.length, unitType: "characters", costUsd: cost, userId: ctx.userId, organizationId: ctx.organizationId, projectId: ctx.projectId, meta: { sceneId: input.sceneId, durationMs: ms, voicePreset: input.preset.id, ...meta } });
+  };
 
   if (gemini) {
-    // Gemini-TTS: the style prompt steers tone and pace; no timepoints, so STT aligns the words below.
-    audio = await geminiSpeech(spoken, languageCode, input.preset);
+    // Gemini-TTS: the style prompt steers tone and pace; no timepoints, so STT aligns the words below. It sometimes reads a
+    // short text twice in one take: the transcript shows it, so that take is synthesised again (3 takes at most).
+    audio = new Uint8Array();
+    for (let take = 1; take <= GEMINI_TAKES; take++) {
+      audio = await geminiSpeech(spoken, languageCode, input.preset);
+      await recordTts(audio, { take });
+      try {
+        heard = await transcribe(audio);
+      } catch (e) {
+        console.warn("[tts] STT failed on a Gemini take", e);
+        heard = null;
+        break;
+      }
+      if (!readTwice(words, heard)) break;
+      console.warn(`[tts] ${input.sceneId}: Gemini read the text twice (take ${take}/${GEMINI_TAKES})`);
+    }
   } else if (input.preset.ssmlSupported && !isChirp) {
     // Neural2/Studio: SSML marks before every word → exact start times from the engine.
     const ssml = `<speak>${words.map((w, i) => `<mark name="w${i}"/>${ssmlEscape(w)}`).join(" ")}</speak>`;
@@ -164,20 +197,15 @@ export async function synthesizeScene(
     audio = res.audioContent as Uint8Array;
   }
   const durationMs = wavDurationMs(audio);
-  const ttsCost = ttsCostUsd({ voice: input.preset.voice, model: input.preset.model, chars: spoken.length, promptChars: input.preset.prompt?.length ?? 0, durationMs });
-  await recordUsageCost({ provider: "google_tts", resource: input.preset.model ? `${input.preset.model}:${input.preset.voice}` : input.preset.voice, units: spoken.length, unitType: "characters", costUsd: ttsCost, userId: ctx.userId, organizationId: ctx.organizationId, projectId: ctx.projectId, meta: { sceneId: input.sceneId, durationMs, voicePreset: input.preset.id } });
+  if (!gemini) await recordTts(audio);
 
-  let sttCost = 0;
   if (!timed) {
-    // Chirp 3 HD: no timepoints → transcribe the WAV and align.
+    // Chirp 3 HD and Gemini-TTS: no timepoints → transcribe the WAV (Gemini: already done per take) and align.
     try {
-      const sttWords = await transcribeWords(audio, languageCode);
-      const aligned = alignWords(words, sttWords, durationMs);
+      const aligned = alignWords(words, heard ?? (await transcribe(audio)), durationMs);
       timed = aligned.words;
       timing = aligned.method;
       matched = aligned.matched;
-      sttCost = (Math.ceil(durationMs / 15_000) * 15 / 60) * STT_PRICE_PER_MIN;
-      await recordUsageCost({ provider: "google_stt", resource: "latest_long", units: durationMs / 1000, unitType: "seconds", costUsd: sttCost, userId: ctx.userId, organizationId: ctx.organizationId, projectId: ctx.projectId, meta: { sceneId: input.sceneId, matched, method: aligned.method } });
     } catch (e) {
       console.warn("[tts] STT alignment failed, using proportional timings", e);
       timed = alignWords(words, [], durationMs).words;
