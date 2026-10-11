@@ -176,6 +176,13 @@
       "when": 1789979142546,
       "tag": "0024_vnexpress_pronunciation",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791730428876,
+      "tag": "0025_motion_graphics",
+      "breakpoints": true
     }
   ]
 }

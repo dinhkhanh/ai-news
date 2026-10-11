@@ -1,3 +1,4 @@
+import type { MotionEngine } from "@ai-news/video/motion";
 import type { Brand } from "@ai-news/video/schema";
 import type { EditorDoc } from "@/lib/media/editor";
 import type { SceneVerdict } from "@/lib/llm/schemas";
@@ -67,6 +68,8 @@ export type EditorProps = {
   sensitiveTopic: boolean;
   /** Political story: the editor offers no stock footage or AI stills for it (`visual-plan.ts`). */
   political: boolean;
+  /** Engine the motion panel preselects (`projects.motion_engine`). */
+  motionEngine: MotionEngine;
   version: VersionRow & { note: string | null; isLatest: boolean };
   versions: VersionRow[];
   doc: EditorDoc;

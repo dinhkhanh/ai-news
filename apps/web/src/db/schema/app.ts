@@ -3,6 +3,7 @@
  * organization_id and are protected by RLS (see migrations/*_rls.sql).
  */
 import { sql } from "drizzle-orm";
+import type { MotionEngine, MotionMode } from "@ai-news/video/motion";
 import type { LogoMotion } from "@ai-news/video/schema";
 import type { BusyProgress } from "@/lib/project-state";
 import {
@@ -260,6 +261,13 @@ export const projects = pgTable(
     logoChannelId: uuid("logo_channel_id").references((): AnyPgColumn => channels.id, { onDelete: "set null" }),
     /** Voice of the voice-over, picked at creation or in the build form; null = the workspace default for the language. */
     voicePresetId: uuid("voice_preset_id").references((): AnyPgColumn => voicePresets.id, { onDelete: "set null" }),
+    /**
+     * Motion graphics of the build (`@ai-news/video/motion`): `off`, `auto` = Claude picks the scenes that suit a graphic
+     * (figures, comparisons, timelines, quotes), `all` = every scene is a motion graphic (no pictures sourced).
+     * `motion_engine`: `remotion` (spec drawn by the composition) or `hyperframes` (HTML + GSAP composition).
+     */
+    motionMode: text("motion_mode").$type<MotionMode>().notNull().default("off"),
+    motionEngine: text("motion_engine").$type<MotionEngine>().notNull().default("remotion"),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
     /** Approval flow (docs/PLAN.md §4.8): the timeline version a publisher approved; cleared by any later edit. */

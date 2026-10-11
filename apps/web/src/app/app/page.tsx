@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { Label } from "@/components/ui/label";
+import { MotionSelect } from "@/components/motion-select";
 import { VoiceSelect } from "@/components/voice-select";
 import { NativeSelect } from "@/components/ui/native-select";
 import { listBrandKits } from "@/lib/media/brand";
@@ -107,6 +108,10 @@ export default async function AppHome() {
                     <div className="space-y-1">
                       <Label htmlFor="voicePresetId">Giọng đọc</Label>
                       <VoiceSelect id="voicePresetId" voices={voices} value={null} className="w-full" />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label htmlFor="new-motion-mode">Đồ hoạ chuyển động (Claude Opus 5.5)</Label>
+                      <MotionSelect idPrefix="new-motion" mode="off" engine="remotion" />
                     </div>
                     {logoChannels.length ? (
                       <div className="space-y-1">

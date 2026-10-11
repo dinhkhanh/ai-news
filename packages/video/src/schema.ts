@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { motionSpecSchema } from "./motion";
 
 /** Output spec (docs/PLAN.md §1). */
 export const OUTPUT = { width: 1080, height: 1920, fps: 30 } as const;
@@ -99,6 +100,20 @@ export function textLayout(brand: TextLayoutInput, kind: "hook" | "body" | "cta"
       fontSize: kind === "hook" ? Math.round(base * HOOK_HEADLINE_SCALE) : base,
     },
   };
+}
+
+/**
+ * Where a motion graphic may put its content: below the platform's top bar,
+ * clear of the captions (and of the outro on the closing scene), inside the
+ * left / right safe zones. Captions in the upper half leave the room below them.
+ */
+export function motionArea(brand: TextLayoutInput, kind: "hook" | "body" | "cta") {
+  const t = textLayout(brand, kind);
+  const x0 = SAFE_ZONES.left + 20;
+  const x1 = OUTPUT.width - SAFE_ZONES.right + 40;
+  if (t.captions.y0 < OUTPUT.height / 2) return { x0, x1, y0: t.captions.y1 + 40, y1: OUTPUT.height - SAFE_ZONES.bottom };
+  const bottom = Math.min(t.captions.y0, kind === "cta" ? t.outro.y0 : t.captions.y0) - 40;
+  return { x0, x1, y0: SAFE_ZONES.top + 20, y1: bottom };
 }
 
 /**
@@ -253,8 +268,22 @@ export const visualSchema = z.discriminatedUnion("kind", [
     focus: focusSchema.nullable().default(null),
   }),
   z.object({ kind: z.literal("solid") }),
+  /** Motion graphic drawn by `Motion.tsx` from a spec Claude wrote (0.15.0, `motion.ts`). `images`: R2 keys in storage, URLs at render time. */
+  z.object({
+    kind: z.literal("motion"),
+    spec: motionSpecSchema,
+    images: z.array(z.string()).default([]),
+  }),
+  /** HyperFrames composition (HTML + GSAP) Claude wrote, seeked frame by frame in a sandboxed iframe (0.15.0, `HyperFramesShot.tsx`). */
+  z.object({
+    kind: z.literal("hyperframes"),
+    html: z.string(),
+    images: z.array(z.string()).default([]),
+  }),
 ]);
 export type Visual = z.infer<typeof visualSchema>;
+/** Shots drawn by code (motion graphics): no picture, no media credit, no 5 s cadence. */
+export const isGraphicVisual = (v: { kind: string }) => v.kind === "motion" || v.kind === "hyperframes";
 
 /**
  * One visual within a scene. Scenes longer than ~5 s are cut into several

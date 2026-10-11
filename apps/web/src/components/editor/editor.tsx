@@ -18,6 +18,7 @@ import type { PlayerRef } from "@remotion/player";
 import type { Timeline } from "@ai-news/video/schema";
 import { toast } from "sonner";
 import { regenerateScene, renderTimeline, saveTimeline } from "@/app/app/projects/[id]/edit/actions";
+import type { MotionEngine } from "@ai-news/video/motion";
 import { ReviewPanel } from "@/components/review-panel";
 import { SectionTabs, StickyToolbar, type SectionTab } from "@/components/sticky-toolbar";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,7 @@ import {
   type EditorDoc,
   type EditorScene,
   type EditorVisual,
+  visualKey,
 } from "@/lib/media/editor";
 import { SHOT_SEC, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
@@ -55,8 +57,11 @@ function resolveForPlayer(t: Timeline, urls: Record<string, string>, logoUrl: st
     brand: { ...t.brand, logoSrc: logoUrl ?? u(t.brand.logoSrc), overlaySrc: u(t.brand.overlaySrc) },
     scenes: t.scenes.map((s) => {
       const visual = (v: Timeline["scenes"][number]["visual"]) => {
-        const src = v.kind === "solid" ? null : u(v.src);
-        return v.kind === "solid" || !src ? { kind: "solid" as const } : { ...v, src };
+        if (v.kind === "solid") return v;
+        // Motion graphics: their pictures by URL; one that has no URL (yet) is left out of the preview.
+        if (v.kind === "motion" || v.kind === "hyperframes") return { ...v, images: (v.images ?? []).map((k) => u(k) ?? "") };
+        const src = u(v.src);
+        return src ? { ...v, src } : { kind: "solid" as const };
       };
       return {
         ...s,
@@ -161,7 +166,10 @@ export function Editor(props: EditorProps) {
     const out: Record<string, string[]> = {};
     for (const s of doc.scenes)
       sceneShots(s).forEach(
-        (v, i) => v.kind !== "solid" && (out[v.key] = [...(out[v.key] ?? []), i === 0 ? s.id : `${s.id} #${i + 1}`]),
+        (v, i) => {
+          const k = visualKey(v);
+          if (k) out[k] = [...(out[k] ?? []), i === 0 ? s.id : `${s.id} #${i + 1}`];
+        },
       );
     return out;
   }, [doc.scenes]);
@@ -293,8 +301,8 @@ export function Editor(props: EditorProps) {
   };
 
   const regenerate = (
-    what: "voice" | "broll" | "music",
-    payload: { sceneId?: string; voiceover?: string; brollTerms?: string[] } = {},
+    what: "voice" | "broll" | "music" | "motion",
+    payload: { sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null } = {},
   ) => {
     startTransition(async () => {
       const res = await regenerateScene({ projectId: props.projectId, timelineId: props.version.id, what, ...payload });
@@ -316,7 +324,7 @@ export function Editor(props: EditorProps) {
   const canRegenerate = !regenerateHint;
 
   const thumb = (s: EditorScene) => {
-    if (s.visual.kind === "solid") return { url: null, video: false };
+    if (s.visual.kind !== "video" && s.visual.kind !== "image") return { url: null, video: false };
     if (s.visual.thumbnailUrl) return { url: s.visual.thumbnailUrl, video: false };
     return { url: urls[s.visual.key] ?? null, video: s.visual.kind === "video" };
   };
@@ -479,6 +487,7 @@ export function Editor(props: EditorProps) {
                   canRegenerate={canRegenerate}
                   regenerateHint={regenerateHint}
                   political={props.political}
+                  motionEngine={props.motionEngine}
                   onChange={updateScene}
                   onRemove={() => removeScene(selected.id)}
                   onRegenerate={(what, payload) => regenerate(what, { sceneId: selected.id, ...payload })}

@@ -7,7 +7,8 @@
  * before phase 4 are reconstructed from their JSON (`docFromTimeline`).
  * Pure module (client + server + tests): R2 keys only, never URLs.
  */
-import { brandSchema, focusSchema, type Timeline } from "@ai-news/video/schema";
+import { HYPERFRAMES_MAX_CHARS, motionSpecSchema } from "@ai-news/video/motion";
+import { brandSchema, focusSchema, isGraphicVisual, type Timeline } from "@ai-news/video/schema";
 import { z } from "zod";
 import { proportionalTimings, type TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
@@ -38,8 +39,32 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     thumbnailUrl: z.string().nullable().default(null),
   }),
   z.object({ kind: z.literal("solid") }),
+  /** Motion graphic Claude designed (engine `remotion`): a spec drawn by the composition. `images` = R2 keys its image elements use. */
+  z.object({
+    kind: z.literal("motion"),
+    spec: motionSpecSchema,
+    images: z.array(z.string().min(1)).max(8).default([]),
+    /** What the editor asked for (null = the build's automatic design). */
+    instruction: z.string().max(1000).nullable().default(null),
+  }),
+  /** Motion graphic Claude wrote as a HyperFrames composition (HTML + GSAP), engine `hyperframes`. */
+  z.object({
+    kind: z.literal("hyperframes"),
+    html: z.string().min(1).max(HYPERFRAMES_MAX_CHARS),
+    images: z.array(z.string().min(1)).max(8).default([]),
+    summary: z.string().max(400).nullable().default(null),
+    instruction: z.string().max(1000).nullable().default(null),
+  }),
 ]);
 export type EditorVisual = z.infer<typeof editorVisualSchema>;
+
+/** R2 key of a picture / clip shot; null for shots drawn by code (solid fill, motion graphics). */
+export const visualKey = (v: EditorVisual): string | null => (v.kind === "video" || v.kind === "image" ? v.key : null);
+/** Every R2 key a shot needs (its file, or the pictures a motion graphic uses). */
+export const visualKeys = (v: EditorVisual): string[] => (v.kind === "video" || v.kind === "image" ? [v.key] : v.kind === "solid" ? [] : v.images);
+/** Short label of a shot's kind for the editor (Vietnamese UI). */
+export const visualLabel = (v: EditorVisual) => (v.kind === "video" ? "clip" : v.kind === "image" ? "ảnh" : v.kind === "solid" ? "nền màu" : v.kind === "motion" ? "đồ hoạ" : "HyperFrames");
+export { isGraphicVisual };
 
 export const editorSceneSchema = z.object({
   id: z.string().min(1).max(16),
@@ -126,8 +151,9 @@ export function sceneVoiceMs(scene: Pick<EditorScene, "voice" | "durationSec" | 
   return (scene.voice?.durationMs ?? Math.round(scene.durationSec * 1000)) + scene.holdMs;
 }
 
-/** How many shots this scene still lacks for a picture change every ≤ 5 s (0 = fine). */
+/** How many shots this scene still lacks for a picture change every ≤ 5 s (0 = fine). A motion graphic moves by itself: no cadence to keep. */
 export function shotsMissing(scene: EditorScene) {
+  if (sceneShots(scene).some(isGraphicVisual)) return 0;
   return Math.max(0, shotsNeeded(sceneVoiceMs(scene)) - sceneShots(scene).length);
 }
 
@@ -148,6 +174,8 @@ export function setCaptionText(chunk: CaptionChunk, text: string): CaptionChunk 
 function toVisualInput(v: EditorVisual): SceneVisualInput {
   if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit };
   if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, focus: v.focus, credit: v.credit };
+  if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images };
+  if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images };
   return null;
 }
 
@@ -204,7 +232,7 @@ export function docKeys(doc: EditorDoc): string[] {
   const keys = new Set<string>();
   for (const s of doc.scenes) {
     if (s.voice) keys.add(s.voice.key);
-    for (const v of sceneShots(s)) if (v.kind !== "solid") keys.add(v.key);
+    for (const v of sceneShots(s)) for (const k of visualKeys(v)) keys.add(k);
   }
   if (doc.music) keys.add(doc.music.key);
   if (doc.brand.logoSrc) keys.add(doc.brand.logoSrc);
@@ -261,6 +289,8 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
     const fromTimeline = (v: Timeline["scenes"][number]["visual"], credit: string | null): EditorVisual => {
       if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null };
       if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, focus: v.focus ?? null, credit, assetId: null, thumbnailUrl: null };
+      if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images ?? [], instruction: null };
+      if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images ?? [], summary: null, instruction: null };
       return { kind: "solid" };
     };
     const visual = fromTimeline(sc.visual, sc.credit);
@@ -305,10 +335,11 @@ export function describeChanges(prev: EditorDoc, next: EditorDoc): string[] {
     if (!p) continue;
     if (p.onScreenText !== n.onScreenText) out.push(`${n.id}: sửa chữ trên màn hình`);
     if (JSON.stringify(p.visual) !== JSON.stringify(n.visual)) {
-      if (p.visual.kind === n.visual.kind && p.visual.kind !== "solid" && n.visual.kind !== "solid" && p.visual.key === n.visual.key) {
+      const pk = visualKey(p.visual);
+      if (p.visual.kind === n.visual.kind && (isGraphicVisual(n.visual) || (pk !== null && pk === visualKey(n.visual)))) {
         if (p.visual.kind === "video" && n.visual.kind === "video" && p.visual.trimStartSec !== n.visual.trimStartSec) out.push(`${n.id}: cắt clip từ ${n.visual.trimStartSec.toFixed(1)} s`);
-        else out.push(`${n.id}: chỉnh hình`);
-      } else out.push(`${n.id}: đổi ${n.visual.kind === "video" ? "clip" : n.visual.kind === "image" ? "ảnh" : "sang nền màu"}`);
+        else out.push(`${n.id}: chỉnh ${isGraphicVisual(n.visual) ? "đồ hoạ chuyển động" : "hình"}`);
+      } else out.push(`${n.id}: đổi ${n.visual.kind === "video" ? "clip" : n.visual.kind === "image" ? "ảnh" : n.visual.kind === "solid" ? "sang nền màu" : "sang đồ hoạ chuyển động"}`);
     }
     if (JSON.stringify(p.shots) !== JSON.stringify(n.shots)) out.push(p.shots.length !== n.shots.length ? `${n.id}: ${n.shots.length + 1} cảnh quay` : `${n.id}: đổi cảnh quay`);
     if (p.voice?.key !== n.voice?.key) out.push(`${n.id}: giọng đọc mới`);

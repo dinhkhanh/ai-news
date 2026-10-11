@@ -5,6 +5,7 @@
  * timeline-resolve.ts right before a render.
  */
 import { MAX_SHOT_SEC, timelineSchema, type Brand, type Focus, type Shot, type Timeline, type Visual } from "@ai-news/video/schema";
+import type { MotionSpec } from "@ai-news/video/motion";
 import type { TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
 import { markCompounds } from "./compounds";
@@ -13,6 +14,9 @@ export type SceneVoiceInput = { key: string; durationMs: number; words: TimedWor
 export type SceneVisualInput =
   | { kind: "video"; key: string; clipDurationSec: number; trimStartSec?: number; credit: string | null }
   | { kind: "image"; key: string; kenBurns?: boolean; focus?: Focus | null; credit: string | null }
+  /** Motion graphics (`@ai-news/video/motion`): `images` are R2 keys. */
+  | { kind: "motion"; spec: MotionSpec; images: string[]; credit?: null }
+  | { kind: "hyperframes"; html: string; images: string[]; credit?: null }
   | null;
 
 /** Shots a scene of this length needs so no picture stays longer than MAX_SHOT_SEC. */
@@ -62,6 +66,8 @@ export const TAIL_MS = 700;
 
 function toVisual(v: NonNullable<SceneVisualInput>): Visual {
   if (v.kind === "video") return { kind: "video", src: v.key, trimStartSec: Math.max(0, v.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, v.clipDurationSec), fit: "cover", muted: true };
+  if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images };
+  if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images };
   return { kind: "image", src: v.key, kenBurns: v.kenBurns ?? true, focus: v.focus ?? null };
 }
 
@@ -73,7 +79,7 @@ export function layoutShots(inputs: SceneVisualInput[], durationFrames: number):
   return present.map((v, i) => {
     const from = Math.round((i * durationFrames) / n);
     const end = i === n - 1 ? durationFrames : Math.round(((i + 1) * durationFrames) / n);
-    return { from, durationFrames: Math.max(1, end - from), visual: toVisual(v), credit: v.credit };
+    return { from, durationFrames: Math.max(1, end - from), visual: toVisual(v), credit: v.credit ?? null };
   });
 }
 

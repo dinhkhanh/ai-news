@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { boxShadowCss, captionLines, CREDIT_MAX_WIDTH, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { boxShadowCss, captionLines, CREDIT_MAX_WIDTH, isGraphicVisual, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+
+import { HyperFramesShot } from "./HyperFramesShot";
+import { MotionVisual } from "./Motion";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -114,7 +117,12 @@ const StillVisual: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durati
   return <CoverStill {...props} />;
 };
 
-const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand; variant?: number }> = ({ visual, durationFrames, brand, variant = 0 }) => {
+/** Where a shot sits, for the motion graphics: which overlays to keep clear of, which number format, which font. */
+type ShotContext = { kind: TimelineScene["kind"]; language: Timeline["language"] };
+
+const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand; variant?: number; context: ShotContext }> = ({ visual, durationFrames, brand, variant = 0, context }) => {
+  if (visual.kind === "motion") return <MotionVisual spec={visual.spec} images={visual.images ?? []} durationFrames={durationFrames} brand={brand} kind={context.kind} language={context.language} font={fontFamily(brand.fonts.heading)} />;
+  if (visual.kind === "hyperframes") return <HyperFramesShot html={visual.html} images={visual.images ?? []} brand={brand} kind={context.kind} font={brand.fonts.heading} />;
   if (visual.kind === "solid") {
     return <AbsoluteFill style={{ background: `linear-gradient(160deg, ${brand.colours.primary}, ${brand.colours.background})` }} />;
   }
@@ -148,18 +156,28 @@ const ShotPunch: React.FC<{ first: boolean; children: React.ReactNode }> = ({ fi
 /** The shots of a scene; a scene without explicit shots is one shot of its `visual`. Tolerates timelines stored before `shots` existed. */
 const sceneShots = (scene: TimelineScene): Shot[] => (scene.shots?.length ? scene.shots : [{ from: 0, durationFrames: scene.durationFrames, visual: scene.visual, credit: scene.credit ?? null }]);
 
-/** A scene's shots in sequence. */
-const SceneShots: React.FC<{ scene: TimelineScene; brand: Brand }> = ({ scene, brand }) => (
+/** A scene's shots in sequence. Motion graphics get no punch-in and no darkening gradient: they are designed for the frame. */
+const SceneShots: React.FC<{ scene: TimelineScene; brand: Brand; language: Timeline["language"] }> = ({ scene, brand, language }) => (
   <>
     {sceneShots(scene).map((shot, i) => (
       <Sequence key={i} from={shot.from} durationInFrames={shot.durationFrames} name={`${scene.id} shot ${i + 1}`}>
-        <ShotPunch first={i === 0}>
-          <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} />
-        </ShotPunch>
+        {isGraphicVisual(shot.visual) ? (
+          <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} context={{ kind: scene.kind, language }} />
+        ) : (
+          <>
+            <ShotPunch first={i === 0}>
+              <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} context={{ kind: scene.kind, language }} />
+            </ShotPunch>
+            <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.55) 100%)" }} />
+          </>
+        )}
       </Sequence>
     ))}
   </>
 );
+
+/** Every shot of the scene is a motion graphic: it carries its own title, so the headline card stays off. */
+const allGraphic = (scene: TimelineScene) => sceneShots(scene).every((s) => isGraphicVisual(s.visual));
 
 /* --------------------------------------------------------------- overlays */
 
@@ -428,11 +446,10 @@ export const News: React.FC<Timeline> = (timeline) => {
       {scenes.map((scene) => (
         <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationFrames} name={`${scene.id} ${scene.kind}`}>
           <SceneFade durationFrames={scene.durationFrames}>
-            <SceneShots scene={scene} brand={brand} />
-            <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.55) 100%)" }} />
+            <SceneShots scene={scene} brand={brand} language={timeline.language} />
           </SceneFade>
           {scene.overlay !== false && brand.overlaySrc && brand.overlayLayer !== "top" ? <BrandOverlay src={brand.overlaySrc} /> : null}
-          <Headline text={scene.headline} kind={scene.kind} brand={brand} />
+          {allGraphic(scene) ? null : <Headline text={scene.headline} kind={scene.kind} brand={brand} />}
           <ShotCredits scene={scene} brand={brand} />
           {scene.kind === "cta" && scene.id === last?.id ? <Outro timeline={timeline} /> : null}
         </Sequence>

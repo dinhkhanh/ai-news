@@ -29,3 +29,105 @@ export const sampleTimeline: Timeline = {
   attribution: ["Nhạc: Mubert"],
   coverAtSec: null,
 };
+
+/** Studio preview of the motion graphics (0.15.0): a `remotion` spec scene, a `hyperframes` scene, then the CTA. */
+export const sampleMotionTimeline: Timeline = {
+  ...sampleTimeline,
+  durationFrames: 18 * 30,
+  scenes: [
+    {
+      id: "s1",
+      kind: "hook",
+      from: 0,
+      durationFrames: 240,
+      headline: "Metro số 1 kéo dài thêm 12 km",
+      visual: { kind: "solid" },
+      shots: [
+        {
+          from: 0,
+          durationFrames: 240,
+          credit: null,
+          visual: {
+            kind: "motion",
+            images: [],
+            spec: {
+              mood: "brand",
+              background: "grid",
+              backgroundImage: null,
+              beats: [
+                {
+                  at: 0,
+                  align: "center",
+                  elements: [
+                    { type: "kicker", delay: 0, enter: "slide", text: null, label: "Giao thông", value: null, prefix: null, suffix: null, decimals: null, items: null, emoji: null, image: null, emphasis: null },
+                    { type: "title", delay: 0.3, enter: "rise", text: "Metro số 1 kéo dài thêm 12 km", label: null, value: null, prefix: null, suffix: null, decimals: null, items: null, emoji: null, image: null, emphasis: ["12 km"] },
+                  ],
+                },
+                {
+                  at: 3.5,
+                  align: "center",
+                  elements: [
+                    { type: "stat", delay: 0, enter: "pop", text: "vốn đầu tư dự kiến", label: null, value: 40500, prefix: null, suffix: " tỷ đồng", decimals: 0, items: null, emoji: null, image: null, emphasis: null },
+                    {
+                      type: "bars",
+                      delay: 0.8,
+                      enter: "fade",
+                      text: null,
+                      label: "Chiều dài (km)",
+                      value: null,
+                      prefix: null,
+                      suffix: null,
+                      decimals: 1,
+                      items: [
+                        { label: "Tuyến hiện tại", value: 19.7, detail: null },
+                        { label: "Đoạn mở rộng", value: 12, detail: null },
+                      ],
+                      emoji: null,
+                      image: null,
+                      emphasis: null,
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      ],
+      credit: null,
+      voiceSrc: null,
+      overlay: true,
+    },
+    {
+      id: "s2",
+      kind: "body",
+      from: 240,
+      durationFrames: 180,
+      headline: "Khởi công quý ba năm 2027",
+      visual: { kind: "solid" },
+      shots: [
+        {
+          from: 0,
+          durationFrames: 180,
+          credit: null,
+          visual: {
+            kind: "hyperframes",
+            images: [],
+            html: `<div id="stage" data-composition-id="shot" data-width="1080" data-height="1920" data-start="0" data-duration="6">
+<style>#stage{position:absolute;inset:0;background:radial-gradient(circle at 30% 30%,var(--brand-primary),var(--brand-bg))}
+.t{position:absolute;left:80px;right:140px;top:420px;font-size:110px;font-weight:900;line-height:1.05}
+.d{position:absolute;left:80px;top:860px;font-size:190px;font-weight:900;color:var(--brand-accent)}
+.bar{position:absolute;left:80px;top:1180px;height:24px;width:860px;background:var(--brand-accent);transform-origin:left center}</style>
+<div class="t" id="t">Khởi công</div><div class="d" id="d">Q3/2027</div><div class="bar" id="bar"></div>
+<script>var tl=gsap.timeline({paused:true});
+tl.from("#t",{y:80,opacity:0,duration:.7,ease:"power3.out"},0.2).from("#d",{scale:.6,opacity:0,duration:.8,ease:"back.out(1.7)"},0.8).from("#bar",{scaleX:0,duration:1.2,ease:"power2.inOut"},1.4);
+window.__timelines=window.__timelines||{};window.__timelines.shot=tl;</script></div>`,
+          },
+        },
+      ],
+      credit: null,
+      voiceSrc: null,
+      overlay: true,
+    },
+    { id: "s3", kind: "cta", from: 420, durationFrames: 120, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
+  ],
+};

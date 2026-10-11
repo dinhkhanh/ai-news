@@ -100,13 +100,17 @@ export const projectSceneRegenerateRequested = eventType("project/scene.regenera
     requestedBy: z.string(),
     /** Version to build on; must still be the latest when the result is saved. */
     timelineId: z.string(),
-    what: z.enum(["broll", "voice", "music"]),
+    what: z.enum(["broll", "voice", "music", "motion"]),
     /** Scene for broll/voice. */
     sceneId: z.string().optional(),
     /** Edited spoken text for a voice regeneration; default = the scene's current text. */
     voiceover: z.string().max(2000).optional(),
     /** Replacement English search terms for a B-roll regeneration. */
     brollTerms: z.array(z.string().max(80)).max(6).optional(),
+    /** Motion graphic: the engine, the editor's directions, and which shot (absent = one graphic for the whole scene). */
+    engine: z.enum(["remotion", "hyperframes"]).optional(),
+    instruction: z.string().max(1000).optional(),
+    shot: z.number().int().min(0).max(12).optional(),
   }),
 });
 

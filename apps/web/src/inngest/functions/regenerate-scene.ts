@@ -8,21 +8,25 @@ import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
 import { fetchSceneBroll } from "@/lib/media/broll";
-import { voicePlacement, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { isPermanentLlmError, LlmOutputError } from "@/lib/llm/client";
+import { designMotionShot } from "@/lib/llm/motion";
+import { buildFromDoc, EDITOR_FPS, setShot, voicePlacement, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { shotWords } from "@/lib/media/motion-plan";
 import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
 import { frameStill, overlayZones } from "@/lib/media/framing";
 import { aiImagesAvailable, generateSceneImages } from "@/lib/media/generate";
 import { pickMusic } from "@/lib/media/music";
 import { findRelatedImages, storeRelatedImages } from "@/lib/media/related";
 import { loadPronunciations, loadVoicePreset, synthesizeScene } from "@/lib/media/tts";
-import { shotsNeeded } from "@/lib/media/timeline";
+import { LEAD_MS, shotsNeeded } from "@/lib/media/timeline";
 import { tierAllowed } from "@/lib/media/visual-plan";
-import { r2Key } from "@/lib/r2";
+import { presignGet, r2Key } from "@/lib/r2";
 import { docOfRow, saveTimelineVersion } from "@/lib/review";
 
 /**
  * Phase 4 (docs/PLAN.md §4.7 "regenerate one scene's B-roll or VO, change
- * music"): redo one part of the editor document and store the result as a
+ * music", plus a motion graphic designed by Claude Opus 5.5 for one shot or the
+ * whole scene): redo one part of the editor document and store the result as a
  * new timeline version (kind = regenerated) on top of the version the editor
  * was looking at. A B-roll re-search follows the visual priority
  * (`visual-plan.ts`) from tier 2: other outlets' pictures of what the scene's
@@ -47,7 +51,7 @@ export const regenerateSceneFn = inngest.createFunction(
     },
   },
   async ({ event, step }) => {
-    const { projectId, organizationId, requestedBy, timelineId, what, sceneId, voiceover, brollTerms } = event.data;
+    const { projectId, organizationId, requestedBy, timelineId, what, sceneId, voiceover, brollTerms, engine, instruction, shot } = event.data;
     const ctx = { userId: requestedBy, organizationId };
     const pctx = { ...ctx, projectId };
     const buildId = nanoid(8);
@@ -60,11 +64,12 @@ export const regenerateSceneFn = inngest.createFunction(
         const timeline = await tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.id, timelineId)) });
         if (!timeline) throw new NonRetriableError("Timeline version not found");
         await tx.update(schema.projects).set({ busyStep: "regenerate", lastError: null }).where(eq(schema.projects.id, projectId));
-        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: project.voicePresetId, timeline };
+        const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), columns: { siteName: true } });
+        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: project.voicePresetId, motionEngine: project.motionEngine, sourceName: article?.siteName ?? null, timeline };
       });
       const { doc } = docOfRow(row.timeline);
       const stock = ((row.timeline.buildJson as { stock?: Record<string, unknown> }).stock ?? {}) as Record<string, unknown>;
-      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, voicePresetId: row.voicePresetId, version: row.timeline.version, doc, stock };
+      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, voicePresetId: row.voicePresetId, motionEngine: row.motionEngine, sourceName: row.sourceName, version: row.timeline.version, doc, stock };
     });
 
     const sceneIdx = base.doc.scenes.findIndex((s) => s.id === sceneId);
@@ -186,6 +191,54 @@ export const regenerateSceneFn = inngest.createFunction(
       build.related = { sceneId: scene.id, query: newsTerms[0] ?? null, found: related.found, stored: related.stored, used: related.visuals.length, errors: related.errors, faceGuardCostUsd: related.costUsd };
       if (res) build.stock = { ...base.stock, [scene.id]: { selected: res.selected, alternates: res.alternates, searched: res.searched, errors: res.errors, rankCostUsd: res.rankCostUsd } };
       if (generated?.assets.length) build.ai = { sceneId: scene.id, assets: generated.assets.map((a) => ({ assetId: a.assetId, key: a.key })), errors: generated.errors, costUsd: generated.costUsd };
+    }
+
+    if (what === "motion" && scene) {
+      const eng = engine ?? base.motionEngine;
+      // The shot's place in the built timeline: its length and where the voice-over starts relative to its first frame.
+      const { timeline } = buildFromDoc(base.doc, null);
+      const tScene = timeline.scenes[sceneIdx];
+      const shots = tScene.shots.length ? tScene.shots : [{ from: 0, durationFrames: tScene.durationFrames }];
+      const whole = shot == null || shots.length === 1;
+      const index = Math.min(shot ?? 0, shots.length - 1);
+      const target = whole ? { from: 0, durationFrames: tScene.durationFrames } : shots[index];
+      const durationSec = target.durationFrames / EDITOR_FPS;
+      const voiceStartSec = (sceneIdx === 0 ? LEAD_MS / 1000 : 0) - target.from / EDITOR_FPS;
+      // Pictures the graphic may use: the scene's own stills (at most 4), so a graphic can frame a real photo of the story.
+      const stills = [scene.visual, ...scene.shots].flatMap((v) => (v.kind === "image" ? [v.key] : [])).filter((k, i, a) => a.indexOf(k) === i).slice(0, 4);
+      const r = await step.run("motion", async () => {
+        await reportProgress(pctx, { label: `Claude Opus 5.5 dựng đồ hoạ chuyển động cho ${scene.id}${whole ? "" : ` · cảnh quay ${index + 1}`} (${eng === "hyperframes" ? "HyperFrames" : "Remotion"})`, pct: 20 });
+        const images = await Promise.all(stills.map(async (key) => ({ key, url: await presignGet(key, 3600) })));
+        try {
+          return await designMotionShot(
+            {
+              engine: eng,
+              language: base.doc.language,
+              title: base.doc.title,
+              sourceName: base.sourceName,
+              brand: base.doc.brand,
+              scene: { id: scene.id, kind: scene.kind, onScreenText: scene.onScreenText, voiceover: scene.voiceover },
+              words: shotWords(scene.voice?.words ?? [], voiceStartSec, durationSec),
+              durationSec,
+              part: whole ? null : { index: index + 1, count: shots.length },
+              images,
+              instruction: instruction ?? null,
+            },
+            pctx,
+          );
+        } catch (e) {
+          // Refusals, unusable output, billing / auth / bad requests do not fix themselves: fail with the reason for the editor.
+          if (e instanceof LlmOutputError || isPermanentLlmError(e)) throw new NonRetriableError(e instanceof Error ? e.message : String(e));
+          throw e;
+        }
+      });
+      const visual = r.visual as EditorScene["visual"];
+      next = {
+        ...base.doc,
+        scenes: base.doc.scenes.map((s, i) => (i !== sceneIdx ? s : whole ? { ...s, visual, shots: [] } : setShot(s, index, visual))),
+      };
+      changes.push(`${scene.id}: đồ hoạ chuyển động ${eng === "hyperframes" ? "HyperFrames" : "Remotion"}${whole ? " cho cả cảnh" : ` ở cảnh quay ${index + 1}`}${instruction ? ` (“${instruction.slice(0, 60)}${instruction.length > 60 ? "…" : ""}”)` : ""}`);
+      build.motion = { sceneId: scene.id, shot: whole ? null : index, engine: eng, model: r.model, attempts: r.attempts, latencyMs: r.latencyMs, costUsd: r.costUsd, instruction: instruction ?? null };
     }
 
     if (what === "music") {

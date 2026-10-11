@@ -11,10 +11,13 @@ export const MODELS = {
   script: "claude-opus-5",
   faithfulness: "claude-opus-5",
   classify: "claude-haiku-4-5",
+  /** Motion graphics design (lib/llm/motion.ts): picks the scenes and writes each shot's spec / HyperFrames composition. */
+  motion: "claude-opus-5-5",
 } as const;
 
 /** USD per million tokens (Anthropic first-party rates). Cache write = 1.25x input, cache read = 0.1x input. */
 const PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-5-5": { input: 4, output: 20 },
   "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },

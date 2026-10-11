@@ -70,7 +70,7 @@ export function TimelineSummary({ timeline, build, imageUrls, mixUrl }: { timeli
           const v = voiceById.get(sc.id);
           const st = build.stock?.[sc.id];
           const tiers = build.visuals?.perScene[sc.id];
-          const thumb = sc.visual.kind === "solid" ? null : (st?.selected?.thumbnailUrl ?? imageUrls[sc.visual.src] ?? null);
+          const thumb = sc.visual.kind !== "video" && sc.visual.kind !== "image" ? null : (st?.selected?.thumbnailUrl ?? imageUrls[sc.visual.src] ?? null);
           return (
             <div key={sc.id} className="flex gap-3 rounded-lg border p-2 text-sm">
               <div className="h-24 w-14 shrink-0 overflow-hidden rounded-md bg-muted">

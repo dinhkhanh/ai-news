@@ -20,6 +20,7 @@ import { queueRender } from "@/lib/render-request";
 import { copyObject } from "@/lib/r2";
 import { MIN_CONTENT_WORDS } from "@/lib/video-source";
 import { assertWorkspaceWriter, type Workspace } from "@/lib/workspace";
+import { parseMotion } from "@/components/motion-select";
 
 async function loadProject(ws: Workspace, projectId: string) {
   const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) }));
@@ -191,9 +192,12 @@ export async function requestAssets(_: ActionState, fd: FormData): Promise<Actio
     // The voice of this build (and of later re-voiced scenes): "" = the workspace default.
     const voice = fd.has("voicePresetId") ? await findVoice(ws, str(fd, "voicePresetId")) : undefined;
     const voicePatch = voice !== undefined && (voice?.id ?? null) !== project.voicePresetId ? { voicePresetId: voice?.id ?? null } : {};
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress(), lastError: null, ...kitPatch, ...voicePatch }).where(eq(schema.projects.id, projectId)));
+    // Motion graphics of this build (and the engine the editor preselects later).
+    const motion = fd.has("motionMode") ? parseMotion(fd, { mode: project.motionMode, engine: project.motionEngine }) : null;
+    const motionPatch = motion && (motion.mode !== project.motionMode || motion.engine !== project.motionEngine) ? { motionMode: motion.mode, motionEngine: motion.engine } : {};
+    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "assets", busyProgress: startProgress(), lastError: null, ...kitPatch, ...voicePatch, ...motionPatch }).where(eq(schema.projects.id, projectId)));
     await inngest.send(projectAssetsRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, scriptId, skipStock }));
-    await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock, ...("brandKitId" in kitPatch ? { brandKitId: kitPatch.brandKitId } : {}), ...("voicePresetId" in voicePatch ? { voice: voice?.name ?? "default" } : {}) }, projectId);
+    await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock, ...("brandKitId" in kitPatch ? { brandKitId: kitPatch.brandKitId } : {}), ...("voicePresetId" in voicePatch ? { voice: voice?.name ?? "default" } : {}), ...("motionMode" in motionPatch ? { motion: `${motionPatch.motionMode}/${motionPatch.motionEngine}` } : {}) }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
     return "Building voice-over, B-roll and timeline… this takes 2–4 minutes";
   });

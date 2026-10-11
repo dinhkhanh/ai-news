@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { MOTION_ENGINES, type MotionEngine } from "@ai-news/video/motion";
 import type { VisualOption } from "@/components/editor/types";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
@@ -58,7 +59,7 @@ export async function renderTimeline(input: { projectId: string; timelineId: str
 }
 
 /** Redo one scene's B-roll or voice-over, or pick new music, as a background step that stores a new version. */
-export async function regenerateScene(input: { projectId: string; timelineId: string; what: "broll" | "voice" | "music"; sceneId?: string; voiceover?: string; brollTerms?: string[] }): Promise<EditorActionResult> {
+export async function regenerateScene(input: { projectId: string; timelineId: string; what: "broll" | "voice" | "music" | "motion"; sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null }): Promise<EditorActionResult> {
   try {
     const { ws, log } = await assertWorkspaceWriter();
     const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, input.projectId) }));
@@ -72,13 +73,17 @@ export async function regenerateScene(input: { projectId: string; timelineId: st
     if (!timeline) throw new Error("Timeline not found");
     const voiceover = input.voiceover?.trim().slice(0, 2000) || undefined;
     const brollTerms = input.brollTerms?.map((t) => t.trim().slice(0, 80)).filter(Boolean).slice(0, 6);
+    // Motion graphic: Claude Opus 5.5 designs the shot (or the whole scene when `shot` is null).
+    const engine = input.what === "motion" ? (MOTION_ENGINES.includes(input.engine as MotionEngine) ? (input.engine as MotionEngine) : project.motionEngine) : undefined;
+    const instruction = input.what === "motion" ? input.instruction?.trim().slice(0, 1000) || undefined : undefined;
+    const shot = input.what === "motion" && input.shot != null ? Math.max(0, Math.min(12, Math.round(input.shot))) : undefined;
     await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "regenerate", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, input.projectId)));
     await inngest.send(
-      projectSceneRegenerateRequested.create({ projectId: input.projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: input.timelineId, what: input.what, sceneId: input.sceneId, voiceover, brollTerms: brollTerms?.length ? brollTerms : undefined }),
+      projectSceneRegenerateRequested.create({ projectId: input.projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: input.timelineId, what: input.what, sceneId: input.sceneId, voiceover, brollTerms: brollTerms?.length ? brollTerms : undefined, engine, instruction, shot }),
     );
-    await log("scene.regenerate_requested", { timelineId: input.timelineId, version: timeline.version, what: input.what, sceneId: input.sceneId ?? null, textEdited: Boolean(voiceover), terms: brollTerms ?? null }, input.projectId);
+    await log("scene.regenerate_requested", { timelineId: input.timelineId, version: timeline.version, what: input.what, sceneId: input.sceneId ?? null, textEdited: Boolean(voiceover), terms: brollTerms ?? null, ...(engine ? { engine, shot: shot ?? "scene", instruction: instruction ?? null } : {}) }, input.projectId);
     revalidatePath(`/app/projects/${input.projectId}/edit`);
-    const label = input.what === "voice" ? "Đang đọc lại lời" : input.what === "broll" ? "Đang tìm B-roll mới" : "Đang chọn nhạc mới";
+    const label = input.what === "voice" ? "Đang đọc lại lời" : input.what === "broll" ? "Đang tìm B-roll mới" : input.what === "motion" ? `Claude đang dựng đồ hoạ chuyển động (${engine === "hyperframes" ? "HyperFrames" : "Remotion"})` : "Đang chọn nhạc mới";
     return { ok: true, message: `${label}… kết quả sẽ thành phiên bản v${timeline.version + 1}` };
   } catch (e) {
     return fail(e);

@@ -12,7 +12,7 @@ import { logActivity } from "@/lib/activity";
 import type { StoredScript } from "@/lib/llm/schemas";
 import { loadBrand } from "@/lib/media/brand";
 import { fetchSceneBroll, type ChosenAsset, type SceneStock } from "@/lib/media/broll";
-import { audioSignature, buildFromDoc, editorDocSchema, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { audioSignature, buildFromDoc, EDITOR_FPS, editorDocSchema, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
 import { frameStill, overlayZones, type FrameFaces, type Framing } from "@/lib/media/framing";
 import { aiImagesAvailable, generateSceneImages } from "@/lib/media/generate";
@@ -21,7 +21,9 @@ import { assignImages } from "@/lib/media/rank";
 import { findRelatedImagesFor, storeRelatedImages, type RelatedAsset } from "@/lib/media/related";
 import { mixDocAudio } from "@/lib/media/remix";
 import { downloadToR2, stockProvidersAvailable } from "@/lib/media/stock";
-import { sceneTimings, shotsNeeded } from "@/lib/media/timeline";
+import { designMotionShot, planMotionScenes } from "@/lib/llm/motion";
+import { motionScenes, shotWords } from "@/lib/media/motion-plan";
+import { LEAD_MS, sceneTimings, shotsNeeded } from "@/lib/media/timeline";
 import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice } from "@/lib/media/tts";
 import { allocateChecked, orderByTier, SHOT_SEC, shortfall, splitBudget, tier2Queries, tierAllowed, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type SceneQuery, type VisualTier } from "@/lib/media/visual-plan";
 import { findWebVideosFor, foundForHint, storeWebVideo, webVideoEnabled, webVideoHint, type FoundWebVideo } from "@/lib/media/webvideo";
@@ -112,6 +114,9 @@ export const prepareAssetsFn = inngest.createFunction(
         hasChannelLogo: Boolean(row.project.logoChannelId),
         /** Political story (fetch classification): only real pictures of the story, never stock footage or AI stills. */
         political: row.project.political,
+        /** Motion graphics (Claude Opus 5.5): none, the scenes Claude picks, or every scene; drawn by Remotion or HyperFrames. */
+        motionMode: row.project.motionMode,
+        motionEngine: row.project.motionEngine,
         title: row.project.title ?? s.title,
         articleTitle: row.article?.title ?? row.project.title ?? s.title,
         // Content typed in without a link has no source to credit (the outro then shows none).
@@ -152,9 +157,41 @@ export const prepareAssetsFn = inngest.createFunction(
       ),
     );
 
-    /* ---- shot budget: one picture per ≤ 5 s of voice, one for the CTA ---- */
+    /* ---- motion graphics: Claude Opus 5.5 designs the chosen scenes against their word timings; such a scene takes no
+     * pictures (`need` 0 below). A design that fails leaves its scene to the picture tiers, as if it had not been chosen. ---- */
+    const motionPlan = await step.run("motion-plan", async () => {
+      if (input.motionMode === "off") return { sceneIds: [] as string[], reasons: {} as Record<string, string>, costUsd: 0, error: null as string | null };
+      await reportProgress(pctx, { label: input.motionMode === "all" ? `Đồ hoạ chuyển động cho cả ${input.scenes.length} cảnh` : "Claude chọn cảnh làm đồ hoạ chuyển động", pct: 29 });
+      const plan = input.motionMode === "auto" ? await planMotionScenes({ language: input.language, title: input.title, scenes: input.scenes }, pctx) : null;
+      return { sceneIds: motionScenes(input.motionMode, input.scenes, plan ? plan.sceneIds : null), reasons: plan?.reasons ?? {}, costUsd: plan?.costUsd ?? 0, error: plan?.error ?? null };
+    });
+    const motionTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })) });
+    const motionResults = await Promise.all(
+      motionPlan.sceneIds.map((id) =>
+        step.run(`motion-${id}`, async () => {
+          const i = input.scenes.findIndex((sc) => sc.id === id);
+          const sc = input.scenes[i];
+          const t = motionTiming.timings[i];
+          const durationSec = t.durationFrames / EDITOR_FPS;
+          // The graphic is one shot covering the whole scene; the first scene's voice starts after the lead-in.
+          const words = shotWords(voices.find((v) => v.sceneId === id)?.words ?? [], i === 0 ? LEAD_MS / 1000 : 0, durationSec);
+          try {
+            const r = await designMotionShot({ engine: input.motionEngine, language: input.language, title: input.title, sourceName: input.source.name, brand: brand.brand, scene: sc, words, durationSec, part: null, images: [], instruction: null }, pctx);
+            await tickProgress(pctx, { label: `Đồ hoạ chuyển động (${input.motionEngine === "hyperframes" ? "HyperFrames" : "Remotion"})`, total: motionPlan.sceneIds.length, from: 29, to: 30 });
+            return { sceneId: id, visual: r.visual as EditorScene["visual"] | null, model: r.model, attempts: r.attempts, costUsd: r.costUsd, error: null as string | null };
+          } catch (e) {
+            console.warn("[assets] motion graphic failed, the scene keeps pictures", id, e);
+            return { sceneId: id, visual: null, model: null, attempts: 0, costUsd: 0, error: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
+          }
+        }),
+      ),
+    );
+    const motionVisual: Record<string, EditorScene["visual"]> = Object.fromEntries(motionResults.flatMap((r) => (r.visual ? [[r.sceneId, r.visual]] : [])));
+    const motionCostUsd = motionPlan.costUsd + motionResults.reduce((a, r) => a + r.costUsd, 0);
+
+    /* ---- shot budget: one picture per ≤ 5 s of voice, one for the CTA; a motion graphic is the scene's one shot ---- */
     const voiceMs = (id: string, fallbackSec: number) => voices.find((v) => v.sceneId === id)?.durationMs ?? fallbackSec * 1000;
-    const fullNeed: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
+    const fullNeed: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, motionVisual[sc.id] ? 1 : sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
     /* ---- video project: the source video fills every shot, so no tier below is consulted (`need` = what is left = 0) ---- */
     const sourceShots: Record<string, EditorScene["visual"][]> = {};
     if (input.sourceVideo) {
@@ -165,7 +202,7 @@ export const prepareAssetsFn = inngest.createFunction(
         sourceShots[id] = list.map((c) => ({ kind: "video", key: v.key, clipDurationSec: c.clipDurationSec, trimStartSec: c.trimStartSec, credit: v.credit, assetId: v.assetId, thumbnailUrl: v.thumbnailUrl }));
       }
     }
-    const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, Math.max(0, fullNeed[sc.id] - (sourceShots[sc.id]?.length ?? 0))]));
+    const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, motionVisual[sc.id] ? 0 : Math.max(0, fullNeed[sc.id] - (sourceShots[sc.id]?.length ?? 0))]));
     const totalNeed = total(need);
 
     /* ---- tier 1: the article's own images ---- */
@@ -438,7 +475,7 @@ export const prepareAssetsFn = inngest.createFunction(
         ];
         // The most authentic picture opens the scene; every tier keeps its own order.
         const lastResort = (forced[sc.id] ?? []).flatMap((index) => (pool[index].asset ? [still(pool[index].asset!, framingFor(index, sc.id))] : []));
-        const all = [...(sourceShots[sc.id] ?? []), ...orderByTier(shots).map((x) => x.visual), ...lastResort].slice(0, fullNeed[sc.id]);
+        const all = motionVisual[sc.id] ? [motionVisual[sc.id]] : [...(sourceShots[sc.id] ?? []), ...orderByTier(shots).map((x) => x.visual), ...lastResort].slice(0, fullNeed[sc.id]);
         const visual: EditorScene["visual"] = all[0] ?? { kind: "solid" };
         return {
           id: sc.id,
@@ -524,6 +561,16 @@ export const prepareAssetsFn = inngest.createFunction(
         shots: { need: fullNeed, assign: assignment.method, unusedCandidates: pool.length - placed.used, assignCostUsd: assignment.costUsd },
         music: music.pick ? { source: music.pick.source, title: music.pick.title, licence: music.pick.licence, key: music.pick.key } : null,
         musicError: music.error,
+        /** Motion graphics: the project's mode / engine, Claude's picks (auto) and each scene's design. */
+        motion: {
+          mode: input.motionMode,
+          engine: input.motionEngine,
+          planned: motionPlan.sceneIds,
+          reasons: motionPlan.reasons,
+          planError: motionPlan.error,
+          scenes: motionResults.map((r) => ({ sceneId: r.sceneId, ok: Boolean(r.visual), model: r.model, attempts: r.attempts, error: r.error, costUsd: r.costUsd })),
+          costUsd: motionCostUsd,
+        },
         mix: { mixKey: mix.mixKey, voiceKey: mix.voiceKey, integratedLufs: mix.integratedLufs, signature: audioSignature(doc), reused: false },
         brandKitId: brand.id,
         doc,
@@ -543,10 +590,10 @@ export const prepareAssetsFn = inngest.createFunction(
           .where(eq(schema.projects.id, projectId));
         return t;
       });
-      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + faceScan.costUsd + aiCostUsd + mix.costUsd;
+      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + faceScan.costUsd + aiCostUsd + mix.costUsd + motionCostUsd;
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: "timeline.built",
-        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, fullNeed[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
+        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, fullNeed[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, motionScenes: Object.keys(motionVisual), motionEngine: Object.keys(motionVisual).length ? input.motionEngine : null, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
       });
       return { ...row, durationSec };
     });

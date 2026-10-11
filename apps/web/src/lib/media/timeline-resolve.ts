@@ -5,7 +5,12 @@ import { presignGet, resolveSrc } from "@/lib/r2";
 /** Replace every R2 key in the timeline with a presigned URL (valid long enough for a Lambda render). */
 export async function resolveTimelineSrcs(t: Timeline, expiresIn = 3 * 3600): Promise<Timeline> {
   const r = (k: string | null) => (k ? resolveSrc(k, expiresIn) : Promise.resolve(null));
-  const visual = async (v: Timeline["scenes"][number]["visual"]) => (v.kind === "solid" ? v : { ...v, src: await resolveSrc(v.src, expiresIn) });
+  const visual = async (v: Timeline["scenes"][number]["visual"]): Promise<Timeline["scenes"][number]["visual"]> => {
+    if (v.kind === "solid") return v;
+    // Motion graphics carry their pictures as a list of keys (`{{image:N}}` / spec `image` indexes).
+    if (v.kind === "motion" || v.kind === "hyperframes") return { ...v, images: await Promise.all((v.images ?? []).map((k) => resolveSrc(k, expiresIn))) };
+    return { ...v, src: await resolveSrc(v.src, expiresIn) };
+  };
   const scenes = await Promise.all(
     t.scenes.map(async (s) => ({
       ...s,

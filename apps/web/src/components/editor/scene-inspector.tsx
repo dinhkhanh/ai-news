@@ -9,10 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { TextLayoutInput } from "@ai-news/video/schema";
 import type { SceneVerdict } from "@/lib/llm/schemas";
-import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, type EditorScene, type EditorVisual } from "@/lib/media/editor";
+import type { MotionEngine } from "@ai-news/video/motion";
+import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, visualKey, visualLabel, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 import { FRAMING_ISSUE_LABEL, frameStill, overlayZones, type FrameFaces } from "@/lib/media/framing";
 import { DEFAULT_MANUAL_SECTION_SEC, formatTimecode, MAX_MANUAL_SECTION_SEC, parseTimecode, webVideoPageUrl, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
+import { MotionPanel } from "./motion-panel";
 import type { VisualOption } from "./types";
 
 type Props = {
@@ -37,7 +39,9 @@ type Props = {
   political: boolean;
   onChange: (scene: EditorScene) => void;
   onRemove: () => void;
-  onRegenerate: (what: "voice" | "broll", payload: { voiceover?: string; brollTerms?: string[] }) => void;
+  onRegenerate: (what: "voice" | "broll" | "motion", payload: { voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null }) => void;
+  /** The project's motion engine, preselected in the motion panel. */
+  motionEngine: MotionEngine;
   onSeek: () => void;
   /** An uploaded / linked file became a swap option (with its presigned URL for the preview). */
   onOptionAdded: (option: VisualOption, url: string) => void;
@@ -104,7 +108,7 @@ function OptionThumb({ o, url, selected, usedAt, onPick }: { o: VisualOption; ur
 }
 
 /** Everything editable on one scene: headline, shots (swap/upload/link/trim/hold), captions, voice and B-roll regeneration, faithfulness. */
-export function SceneInspector({ projectId, scene, index, total, options, overlay, hasOverlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, political, onChange, onRemove, onRegenerate, onSeek, onOptionAdded, onOptionFramed, onCaptureNeeded }: Props) {
+export function SceneInspector({ projectId, scene, index, total, options, overlay, hasOverlay, urls, usedKeys, verdict, disabled, canRegenerate, regenerateHint, political, motionEngine, onChange, onRemove, onRegenerate, onSeek, onOptionAdded, onOptionFramed, onCaptureNeeded }: Props) {
   const [voiceText, setVoiceText] = useState(scene.voiceover);
   const [terms, setTerms] = useState(scene.brollTerms.join(", "));
   const [showAll, setShowAll] = useState(false);
@@ -131,10 +135,10 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
   const missing = shotsMissing(scene);
   const perShotSec = voiceMs / 1000 / shots.length;
   const usedElsewhere = (key: string) => (usedKeys[key] ?? []).filter((at) => !at.startsWith(`${scene.id} `) && at !== scene.id);
-  const currentKey = shot.kind === "solid" ? null : shot.key;
+  const currentKey = visualKey(shot);
   const dupHere = currentKey ? usedElsewhere(currentKey) : [];
   // Where the active shot came from (a web-video page + its section, an outlet page, a linked file), from the matching option.
-  const shotOption = shot.kind === "solid" ? null : (options.find((o) => (shot.assetId && o.assetId === shot.assetId) || o.key === shot.key) ?? null);
+  const shotOption = shot.kind === "video" || shot.kind === "image" ? (options.find((o) => (shot.assetId && o.assetId === shot.assetId) || o.key === shot.key) ?? null) : null;
   const shotSource = shotOption?.sourceUrl ?? null;
   const shotSection = shotOption?.section ?? null;
   // A shot cut from a video page pre-fills the fetch form with that page and section, so another portion is one edit away
@@ -272,7 +276,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
     }
   };
 
-  const thumbOf = (v: EditorVisual) => (v.kind === "solid" ? { src: null, video: false } : v.thumbnailUrl ? { src: v.thumbnailUrl, video: false } : { src: urls[v.key] ?? null, video: v.kind === "video" });
+  const thumbOf = (v: EditorVisual) => (v.kind !== "video" && v.kind !== "image" ? { src: null, video: false } : v.thumbnailUrl ? { src: v.thumbnailUrl, video: false } : { src: urls[v.key] ?? null, video: v.kind === "video" });
 
   return (
     <div className="space-y-4 text-sm">
@@ -325,10 +329,10 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
           {shots.map((v, i) => {
             const t = thumbOf(v);
             return (
-              <button key={i} type="button" onClick={() => setShotIdx(i)} className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded-md border bg-gradient-to-br from-slate-900 to-slate-700 pointer-coarse:h-28 pointer-coarse:w-16", i === active && "ring-2 ring-primary")} title={v.kind === "solid" ? "nền màu" : v.key}>
+              <button key={i} type="button" onClick={() => setShotIdx(i)} className={cn("relative h-24 w-14 shrink-0 overflow-hidden rounded-md border bg-gradient-to-br from-slate-900 to-slate-700 pointer-coarse:h-28 pointer-coarse:w-16", i === active && "ring-2 ring-primary")} title={visualKey(v) ?? visualLabel(v)}>
                 <Thumb src={t.src} video={t.video} />
                 <span className="absolute left-0 top-0 rounded-br bg-black/70 px-1 text-[10px] text-white">{i + 1}</span>
-                <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 text-[9px] text-white">{v.kind === "video" ? "clip" : v.kind === "image" ? "ảnh" : "nền màu"}</span>
+                <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 text-[9px] text-white">{visualLabel(v)}</span>
               </button>
             );
           })}
@@ -347,7 +351,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
-            Cảnh quay {active + 1}: {shot.kind === "video" ? `clip ${shot.clipDurationSec.toFixed(0)} s · ${shot.credit ?? ""}` : shot.kind === "image" ? `ảnh · ${shot.credit ?? ""}` : "nền màu"}
+            Cảnh quay {active + 1}: {shot.kind === "video" ? `clip ${shot.clipDurationSec.toFixed(0)} s · ${shot.credit ?? ""}` : shot.kind === "image" ? `ảnh · ${shot.credit ?? ""}` : shot.kind === "solid" ? "nền màu" : `đồ hoạ chuyển động (${shot.kind === "motion" ? "Remotion" : "HyperFrames"})`}
             {shotSource ? (
               <>
                 {" "}
@@ -417,6 +421,18 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
             {busy ? <p className="text-[11px] text-muted-foreground">{busy}</p> : null}
           </div>
         ) : null}
+
+        <MotionPanel
+          scene={scene}
+          shot={shot}
+          active={active}
+          shotCount={shots.length}
+          disabled={disabled}
+          canRegenerate={canRegenerate}
+          defaultEngine={motionEngine}
+          onEdit={setActive}
+          onGenerate={(payload) => onRegenerate("motion", payload)}
+        />
 
         {shot.kind === "video" ? (
           <div className="flex flex-wrap items-end gap-3">

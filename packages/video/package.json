@@ -1,13 +1,14 @@
 {
   "name": "@ai-news/video",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
     "./compositions": "./src/compositions/index.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./motion": "./src/motion.ts"
   },
   "scripts": {
     "dev": "remotion studio src/index.ts",
@@ -29,7 +30,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "remotion": "4.0.525",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/react": "^19",
