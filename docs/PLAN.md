@@ -32,7 +32,7 @@ Updated 2026-09-16.
 | Media utility | AWS Lambda + FFmpeg layer + yt-dlp: loudnorm, ducking, cover frame, QA probe, web-video trim. |
 | Editor | Remotion Player preview + custom track UI (dnd-kit). Timeline is versioned JSON. |
 | Article fetch | Cloudflare Browser Rendering REST + Mozilla Readability → Firecrawl → manual paste. |
-| LLM | Claude Opus 5 `claude-opus-5` (script, faithfulness, metadata): structured outputs, adaptive thinking, prompt caching, server-side fallback. Haiku 4.5 `claude-haiku-4-5` for ranking, language detection, sensitive-topic flag. |
+| LLM | Claude Opus 5.5 `claude-opus-5-5` (script, faithfulness, metadata, motion graphics; was Opus 5 until 2026-10-11): structured outputs, adaptive thinking, prompt caching, server-side fallback. Haiku 4.5 `claude-haiku-4-5` for ranking, language detection, sensitive-topic flag. |
 | Stock | Pexels, Pixabay. English search terms. Min 1080p, vertical or croppable. |
 | AI media | Google Veo (video), Imagen (stills). Per-project cap. |
 | TTS | Google Cloud Text-to-Speech, Node client. Word timings: SSML `<mark>` per word on Neural2; Speech-to-Text on Chirp 3 HD. |

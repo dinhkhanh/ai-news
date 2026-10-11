@@ -8,8 +8,8 @@ import { readSecret } from "@/lib/vault";
 
 /** Models per docs/PLAN.md §2. Template `model` overrides the script/faithfulness default. */
 export const MODELS = {
-  script: "claude-opus-5",
-  faithfulness: "claude-opus-5",
+  script: "claude-opus-5-5",
+  faithfulness: "claude-opus-5-5",
   classify: "claude-haiku-4-5",
   /** Motion graphics design (lib/llm/motion.ts): picks the scenes and writes each shot's spec / HyperFrames composition. */
   motion: "claude-opus-5-5",

@@ -111,7 +111,7 @@ export default async function PromptsPage({ searchParams }: { searchParams: Prom
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label htmlFor="model">Model override</Label>
-                  <Input id="model" name="model" placeholder="claude-opus-5" defaultValue={promoted?.model ?? builtIn?.model ?? ""} />
+                  <Input id="model" name="model" placeholder="claude-opus-5-5" defaultValue={promoted?.model ?? builtIn?.model ?? ""} />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="notes">Change note</Label>

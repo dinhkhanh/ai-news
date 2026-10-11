@@ -52,7 +52,7 @@ function userMessage(input: GenerateScriptInput) {
 }
 
 /**
- * Script generation (docs/PLAN.md §4.2): Claude Opus 5, adaptive thinking,
+ * Script generation (docs/PLAN.md §4.2): Claude Opus 5.5 at effort high, adaptive thinking,
  * structured output, cached system prefix (template + article), server-side
  * refusal fallback so a policy decline on the primary model still yields a script.
  */

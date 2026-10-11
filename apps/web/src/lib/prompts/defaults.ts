@@ -110,10 +110,10 @@ Verdict per scene:
 For every scene quote the article sentence that serves as evidence when one exists; otherwise set evidence to null and explain briefly in note what is unsupported and how to fix it. Be strict on figures, dates and proper nouns. Judge sourcing only, not style.`;
 
 export const DEFAULT_TEMPLATES: Array<{ purpose: PromptPurpose; language: Language; model: string; body: string }> = [
-  { purpose: "script", language: "vi", model: "claude-opus-5", body: SCRIPT_VI },
-  { purpose: "script", language: "en", model: "claude-opus-5", body: SCRIPT_EN },
-  { purpose: "faithfulness", language: "vi", model: "claude-opus-5", body: FAITHFULNESS_VI },
-  { purpose: "faithfulness", language: "en", model: "claude-opus-5", body: FAITHFULNESS_EN },
+  { purpose: "script", language: "vi", model: "claude-opus-5-5", body: SCRIPT_VI },
+  { purpose: "script", language: "en", model: "claude-opus-5-5", body: SCRIPT_EN },
+  { purpose: "faithfulness", language: "vi", model: "claude-opus-5-5", body: FAITHFULNESS_VI },
+  { purpose: "faithfulness", language: "en", model: "claude-opus-5-5", body: FAITHFULNESS_EN },
 ];
 
 export function defaultTemplate(purpose: PromptPurpose, language: Language) {

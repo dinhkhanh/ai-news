@@ -7,7 +7,7 @@ import { evidenceAppears } from "./evidence";
 import { FaithfulnessSchema, type Script, type StoredFaithfulness } from "./schemas";
 
 /**
- * Faithfulness pass (docs/PLAN.md §4.2): a second Opus 5 call judges every
+ * Faithfulness pass (docs/PLAN.md §4.2): a second Opus 5.5 call judges every
  * scene against the article. Unsupported scenes are surfaced in the review view
  * and, in phase 5, block publishing without a publisher override.
  */
