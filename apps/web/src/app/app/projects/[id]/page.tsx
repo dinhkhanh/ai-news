@@ -12,6 +12,7 @@ import { SectionTabs, StickyToolbar, type SectionTab } from "@/components/sticky
 import { VideoButton } from "@/components/video-dialog";
 import { ScriptReview } from "@/components/script-review";
 import { MotionSelect } from "@/components/motion-select";
+import { SketchSelect } from "@/components/sketch-select";
 import { VoiceSelect } from "@/components/voice-select";
 import { listVoiceOptions } from "@/lib/media/tts";
 import { ReviewPanel } from "@/components/review-panel";
@@ -798,6 +799,10 @@ export default async function ProjectPage({
                       <label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" htmlFor="build-motion-mode">
                         đồ hoạ chuyển động
                         <MotionSelect idPrefix="build-motion" mode={project.motionMode} engine={project.motionEngine} size="sm" className="flex min-w-0 flex-1 flex-wrap gap-2" />
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="build-photo-sketch">
+                        ảnh vẽ tay
+                        <SketchSelect id="build-photo-sketch" value={project.photoSketch} size="sm" className="max-w-64 flex-1" />
                       </label>
                       <label className="flex min-h-9 items-center gap-2 text-xs text-muted-foreground">
                         <input type="checkbox" name="skipStock" /> bỏ qua stock

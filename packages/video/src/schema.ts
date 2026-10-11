@@ -249,6 +249,34 @@ export const focusSchema = z.object({
 });
 export type Focus = z.infer<typeof focusSchema>;
 
+/**
+ * Hand-drawn look of a downloaded photo (0.16.0, `Sketch.tsx`): the shot opens
+ * on the photo, then a ragged pencil edge sweeps across and leaves a drawing of
+ * it – the picture is transformed on screen, not just shown (platforms'
+ * "unoriginal content" rules). Drawn in the composition from the photo itself,
+ * so nothing is generated and no detail is invented. `pencil` = graphite on
+ * paper, `ink` = pen lines with hatched shadows, `colour` = coloured pencil
+ * over a soft wash of the photo's colours.
+ */
+export const SKETCH_STYLES = ["pencil", "ink", "colour"] as const;
+export type SketchStyle = (typeof SKETCH_STYLES)[number];
+export const sketchSchema = z.object({ style: z.enum(SKETCH_STYLES) });
+export type Sketch = z.infer<typeof sketchSchema>;
+/** Project setting (`projects.photo_sketch`): which style the build gives every downloaded photo, or `off`. */
+export const PHOTO_SKETCH_MODES = ["off", ...SKETCH_STYLES] as const;
+export type PhotoSketch = (typeof PHOTO_SKETCH_MODES)[number];
+
+/**
+ * When the drawing takes over in a shot of `durationFrames`: the photo alone
+ * for the first ~30 % (at least 0.4 s), the sweep for ~25 % (0.3–1 s), the
+ * drawing for the rest – most of the shot is the drawing.
+ */
+export function sketchTiming(durationFrames: number, fps: number = OUTPUT.fps) {
+  const start = Math.min(Math.max(Math.round(0.3 * durationFrames), Math.round(0.4 * fps)), Math.round(0.5 * durationFrames));
+  const length = Math.min(Math.max(Math.round(0.25 * durationFrames), Math.round(0.3 * fps)), fps, Math.max(1, durationFrames - start));
+  return { start, end: start + length };
+}
+
 export const visualSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("video"),
@@ -266,6 +294,8 @@ export const visualSchema = z.discriminatedUnion("kind", [
     kenBurns: z.boolean().default(true),
     /** Null = centred cover fit (no faces found, or never checked). */
     focus: focusSchema.nullable().default(null),
+    /** Turns into a hand-drawn version of itself during the shot (0.16.0); null = the photo throughout. */
+    sketch: sketchSchema.nullable().default(null),
   }),
   z.object({ kind: z.literal("solid") }),
   /** Motion graphic drawn by `Motion.tsx` from a spec Claude wrote (0.15.0, `motion.ts`). `images`: R2 keys in storage, URLs at render time. */

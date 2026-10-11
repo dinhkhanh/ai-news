@@ -117,6 +117,8 @@ export const prepareAssetsFn = inngest.createFunction(
         /** Motion graphics (Claude Opus 5.5): none, the scenes Claude picks, or every scene; drawn by Remotion or HyperFrames. */
         motionMode: row.project.motionMode,
         motionEngine: row.project.motionEngine,
+        /** Hand-drawn photos: every downloaded still turns into a drawing of itself (`off` | pencil | ink | colour). */
+        photoSketch: row.project.photoSketch,
         title: row.project.title ?? s.title,
         articleTitle: row.article?.title ?? row.project.title ?? s.title,
         // Content typed in without a link has no source to credit (the outro then shows none).
@@ -460,7 +462,9 @@ export const prepareAssetsFn = inngest.createFunction(
     const doc: EditorDoc = await step.run("compose-doc", async () => {
       await reportProgress(pctx, { label: "Ghép cảnh, chia shot ≤ 5 giây", pct: 82 });
       const clip = (st: ChosenAsset): EditorScene["visual"] => ({ kind: "video", key: st.key, clipDurationSec: st.durationSec ?? 5, trimStartSec: 0, credit: st.credit, assetId: st.assetId, thumbnailUrl: st.thumbnailUrl });
-      const still = (im: ChosenAsset, f?: Framing): EditorScene["visual"] => ({ kind: "image", key: im.key, kenBurns: f?.kenBurns ?? true, focus: f?.focus ?? null, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl });
+      // Downloaded photos (article, other outlets) take the project's hand-drawn style; AI stills (`drawn` false) are already original.
+      const sketch = input.photoSketch === "off" ? null : { style: input.photoSketch };
+      const still = (im: ChosenAsset, f?: Framing, drawn = true): EditorScene["visual"] => ({ kind: "image", key: im.key, kenBurns: f?.kenBurns ?? true, focus: f?.focus ?? null, sketch: drawn ? sketch : null, credit: im.credit, assetId: im.assetId, thumbnailUrl: im.thumbnailUrl });
       const scenes: EditorScene[] = input.scenes.map((sc) => {
         const v = voices.find((x) => x.sceneId === sc.id) ?? null;
         const s = stock[sc.id];
@@ -471,7 +475,7 @@ export const prepareAssetsFn = inngest.createFunction(
             return it.asset ? [{ tier: it.tier, visual: it.video ? segment(it.asset, p.segment) : still(it.asset, framingFor(p.index, sc.id)) }] : [];
           }),
           ...(s ? [...(s.selected ? [s.selected] : []), ...s.alternates].slice(0, afterStills[sc.id]).map((c) => ({ tier: "stock" as VisualTier, visual: clip(c) })) : []),
-          ...(ai[sc.id]?.assets ?? []).map((a) => ({ tier: "ai" as VisualTier, visual: still(a) })),
+          ...(ai[sc.id]?.assets ?? []).map((a) => ({ tier: "ai" as VisualTier, visual: still(a, undefined, false) })),
         ];
         // The most authentic picture opens the scene; every tier keeps its own order.
         const lastResort = (forced[sc.id] ?? []).flatMap((index) => (pool[index].asset ? [still(pool[index].asset!, framingFor(index, sc.id))] : []));
@@ -561,6 +565,8 @@ export const prepareAssetsFn = inngest.createFunction(
         shots: { need: fullNeed, assign: assignment.method, unusedCandidates: pool.length - placed.used, assignCostUsd: assignment.costUsd },
         music: music.pick ? { source: music.pick.source, title: music.pick.title, licence: music.pick.licence, key: music.pick.key } : null,
         musicError: music.error,
+        /** Hand-drawn photos: the project's style and how many shots got it. */
+        sketch: { style: input.photoSketch, shots: doc.scenes.reduce((a, s) => a + [s.visual, ...s.shots].filter((v) => v.kind === "image" && v.sketch).length, 0) },
         /** Motion graphics: the project's mode / engine, Claude's picks (auto) and each scene's design. */
         motion: {
           mode: input.motionMode,
@@ -593,7 +599,7 @@ export const prepareAssetsFn = inngest.createFunction(
       const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + faceScan.costUsd + aiCostUsd + mix.costUsd + motionCostUsd;
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: "timeline.built",
-        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, fullNeed[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, motionScenes: Object.keys(motionVisual), motionEngine: Object.keys(motionVisual).length ? input.motionEngine : null, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
+        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, fullNeed[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, motionScenes: Object.keys(motionVisual), motionEngine: Object.keys(motionVisual).length ? input.motionEngine : null, photoSketch: input.photoSketch, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
       });
       return { ...row, durationSec };
     });

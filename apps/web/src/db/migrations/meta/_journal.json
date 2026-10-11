@@ -183,6 +183,13 @@
       "when": 1791730428876,
       "tag": "0025_motion_graphics",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791735607153,
+      "tag": "0026_photo_sketch",
+      "breakpoints": true
     }
   ]
 }

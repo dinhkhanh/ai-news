@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
-import { boxShadowCss, captionLines, CREDIT_MAX_WIDTH, isGraphicVisual, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type Visual } from "../schema";
+import { boxShadowCss, captionLines, CREDIT_MAX_WIDTH, isGraphicVisual, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type SketchStyle, type Visual } from "../schema";
 
 import { HyperFramesShot } from "./HyperFramesShot";
 import { MotionVisual } from "./Motion";
+import { Picture, SketchReveal } from "./Sketch";
 
 const beVietnamPro = loadBeVietnamPro("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
 const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["latin", "vietnamese"] });
@@ -80,16 +81,16 @@ const LandscapeFrame: React.FC<{ size: MediaSize; scale: number; brand: Brand; r
   );
 };
 
-/** A landscape still in the `LandscapeFrame`, with the gentle Ken Burns. */
-const LandscapeStill: React.FC<{ src: string; size: MediaSize; durationFrames: number; kenBurns: boolean; variant: number; brand: Brand }> = ({ src, size, durationFrames, kenBurns, variant, brand }) => {
+/** A landscape still in the `LandscapeFrame`, with the gentle Ken Burns. `look`: the photo (null) or its drawing (`Sketch.tsx`). */
+const LandscapeStill: React.FC<{ src: string; size: MediaSize; durationFrames: number; kenBurns: boolean; variant: number; brand: Brand; look: SketchStyle | null }> = ({ src, size, durationFrames, kenBurns, variant, brand, look }) => {
   const frame = useCurrentFrame();
   const range = variant % 2 === 1 ? LANDSCAPE_KEN_BURNS.out : LANDSCAPE_KEN_BURNS.in;
   const scale = kenBurns ? interpolate(frame, [0, durationFrames], [range[0], range[1]], { extrapolateRight: "clamp" }) : 1;
-  return <LandscapeFrame size={size} scale={scale} brand={brand} render={(layer) => <Img src={src} style={layer === "backdrop" ? { width: "100%", height: "100%", objectFit: "cover" } : { display: "block", width: "100%", height: "100%", objectFit: "fill" }} />} />;
+  return <LandscapeFrame size={size} scale={scale} brand={brand} render={(layer) => <Picture src={src} look={look} style={layer === "backdrop" ? { width: "100%", height: "100%", objectFit: "cover" } : { display: "block", width: "100%", height: "100%", objectFit: "fill" }} />} />;
 };
 
 /** A portrait or square still: cover-fitted, anchored on the faces by the face guard (`focus`), with the Ken Burns move. */
-const CoverStill: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durationFrames: number; brand: Brand; variant: number }> = ({ visual, durationFrames, brand, variant }) => {
+const CoverStill: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durationFrames: number; brand: Brand; variant: number; look: SketchStyle | null }> = ({ visual, durationFrames, brand, variant, look }) => {
   const frame = useCurrentFrame();
   // Alternate zoom-in / zoom-out and pan direction from shot to shot so consecutive stills do not feel identical.
   const zoomOut = variant % 2 === 1;
@@ -102,8 +103,9 @@ const CoverStill: React.FC<{ visual: Extract<Visual, { kind: "image" }>; duratio
   return (
     <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
       <AbsoluteFill style={{ transform: `scale(${scale}) translateX(${tx}px)`, transformOrigin: `${pct(f.originX)} ${pct(f.originY)}` }}>
-        <Img
+        <Picture
           src={visual.src}
+          look={look}
           style={{ position: "absolute", width: pct(f.zoom), height: pct(f.zoom), left: pct(-(f.zoom - 1) * f.x), top: pct(-(f.zoom - 1) * f.y), objectFit: "cover", objectPosition: `${pct(f.x)} ${pct(f.y)}` }}
         />
       </AbsoluteFill>
@@ -111,10 +113,18 @@ const CoverStill: React.FC<{ visual: Extract<Visual, { kind: "image" }>; duratio
   );
 };
 
+/** A still; with `sketch` it opens on the photo and turns into a drawing of itself (`SketchReveal`, 0.16.0). */
 const StillVisual: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durationFrames: number; brand: Brand; variant: number }> = (props) => {
   const size = useMediaSize(props.visual.src, "image");
-  if (size && isLandscape(size.width, size.height)) return <LandscapeStill src={props.visual.src} size={size} durationFrames={props.durationFrames} kenBurns={props.visual.kenBurns !== false} variant={props.variant} brand={props.brand} />;
-  return <CoverStill {...props} />;
+  const draw = (look: SketchStyle | null) =>
+    size && isLandscape(size.width, size.height) ? (
+      <LandscapeStill src={props.visual.src} size={size} durationFrames={props.durationFrames} kenBurns={props.visual.kenBurns !== false} variant={props.variant} brand={props.brand} look={look} />
+    ) : (
+      <CoverStill {...props} look={look} />
+    );
+  // Timelines stored before 0.16.0 have no `sketch`.
+  const sketch = props.visual.sketch ?? null;
+  return sketch ? <SketchReveal style={sketch.style} durationFrames={props.durationFrames} render={draw} /> : draw(null);
 };
 
 /** Where a shot sits, for the motion graphics: which overlays to keep clear of, which number format, which font. */

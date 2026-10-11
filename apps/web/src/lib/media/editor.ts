@@ -8,7 +8,7 @@
  * Pure module (client + server + tests): R2 keys only, never URLs.
  */
 import { HYPERFRAMES_MAX_CHARS, motionSpecSchema } from "@ai-news/video/motion";
-import { brandSchema, focusSchema, isGraphicVisual, type Timeline } from "@ai-news/video/schema";
+import { brandSchema, focusSchema, isGraphicVisual, sketchSchema, type SketchStyle, type Timeline } from "@ai-news/video/schema";
 import { z } from "zod";
 import { proportionalTimings, type TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
@@ -34,6 +34,8 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     kenBurns: z.boolean().default(true),
     /** Crop anchor from the face guard (`framing.ts`); null = centred. */
     focus: focusSchema.nullable().default(null),
+    /** Turns into a hand-drawn version of itself during the shot (pencil / ink / colour); null = the photo throughout. */
+    sketch: sketchSchema.nullable().default(null),
     credit: z.string().nullable().default(null),
     assetId: z.string().nullable().default(null),
     thumbnailUrl: z.string().nullable().default(null),
@@ -138,6 +140,21 @@ export function replaceTailShots(scene: EditorScene, visuals: EditorVisual[]): E
   return { ...scene, visual: next[0], shots: next.slice(1) };
 }
 
+/**
+ * Give every photo of the scene the hand-drawn `style` (null = back to the photo). `keep(v)` true leaves a
+ * picture as it is (AI stills: already original, nothing to transform).
+ */
+export function setSceneSketch(scene: EditorScene, style: SketchStyle | null, keep: (v: Extract<EditorVisual, { kind: "image" }>) => boolean = () => false): EditorScene {
+  const fix = (v: EditorVisual): EditorVisual => (v.kind === "image" && !keep(v) ? { ...v, sketch: style ? { style } : null } : v);
+  return { ...scene, visual: fix(scene.visual), shots: scene.shots.map(fix) };
+}
+
+/** Photos of the document and how many of them turn into drawings (`keep` as in `setSceneSketch`). */
+export function sketchCount(doc: Pick<EditorDoc, "scenes">, keep: (v: Extract<EditorVisual, { kind: "image" }>) => boolean = () => false) {
+  const photos = doc.scenes.flatMap((s) => sceneShots(s)).filter((v): v is Extract<EditorVisual, { kind: "image" }> => v.kind === "image" && !keep(v));
+  return { photos: photos.length, drawn: photos.filter((v) => v.sketch).length };
+}
+
 /** Remove shot `index`; removing the first promotes the next one. A scene always keeps at least one shot. */
 export function removeShot(scene: EditorScene, index: number): EditorScene {
   const all = sceneShots(scene);
@@ -173,7 +190,7 @@ export function setCaptionText(chunk: CaptionChunk, text: string): CaptionChunk 
 
 function toVisualInput(v: EditorVisual): SceneVisualInput {
   if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit };
-  if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, focus: v.focus, credit: v.credit };
+  if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, focus: v.focus, sketch: v.sketch, credit: v.credit };
   if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images };
   if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images };
   return null;
@@ -288,7 +305,7 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
     const st = b.stock?.[sc.id]?.selected ?? null;
     const fromTimeline = (v: Timeline["scenes"][number]["visual"], credit: string | null): EditorVisual => {
       if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null };
-      if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, focus: v.focus ?? null, credit, assetId: null, thumbnailUrl: null };
+      if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, focus: v.focus ?? null, sketch: v.sketch ?? null, credit, assetId: null, thumbnailUrl: null };
       if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images ?? [], instruction: null };
       if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images ?? [], summary: null, instruction: null };
       return { kind: "solid" };
@@ -317,6 +334,11 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
   return editorDocSchema.parse({ v: 1, title: t.title, language: t.language, source: t.source, brand: t.brand, scenes, music, coverAtSec: t.coverAtSec ?? null });
 }
 
+/** Vietnamese names of the hand-drawn styles (editor, build forms, version history). */
+export const SKETCH_LABEL: Record<SketchStyle, string> = { pencil: "bút chì", ink: "bút mực", colour: "bút màu" };
+/** A shot without its sketch setting, to tell a sketch toggle from a picture swap. */
+const plain = (v: EditorVisual) => (v.kind === "image" ? { ...v, sketch: null } : v);
+
 /** Human-readable diff for the version history (Vietnamese UI). */
 export function describeChanges(prev: EditorDoc, next: EditorDoc): string[] {
   const out: string[] = [];
@@ -338,10 +360,15 @@ export function describeChanges(prev: EditorDoc, next: EditorDoc): string[] {
       const pk = visualKey(p.visual);
       if (p.visual.kind === n.visual.kind && (isGraphicVisual(n.visual) || (pk !== null && pk === visualKey(n.visual)))) {
         if (p.visual.kind === "video" && n.visual.kind === "video" && p.visual.trimStartSec !== n.visual.trimStartSec) out.push(`${n.id}: cắt clip từ ${n.visual.trimStartSec.toFixed(1)} s`);
+        else if (p.visual.kind === "image" && n.visual.kind === "image" && (p.visual.sketch?.style ?? null) !== (n.visual.sketch?.style ?? null)) out.push(`${n.id}: ${n.visual.sketch ? `ảnh thành tranh ${SKETCH_LABEL[n.visual.sketch.style]}` : "bỏ hiệu ứng tranh vẽ"}`);
         else out.push(`${n.id}: chỉnh ${isGraphicVisual(n.visual) ? "đồ hoạ chuyển động" : "hình"}`);
       } else out.push(`${n.id}: đổi ${n.visual.kind === "video" ? "clip" : n.visual.kind === "image" ? "ảnh" : n.visual.kind === "solid" ? "sang nền màu" : "sang đồ hoạ chuyển động"}`);
     }
-    if (JSON.stringify(p.shots) !== JSON.stringify(n.shots)) out.push(p.shots.length !== n.shots.length ? `${n.id}: ${n.shots.length + 1} cảnh quay` : `${n.id}: đổi cảnh quay`);
+    if (JSON.stringify(p.shots) !== JSON.stringify(n.shots)) {
+      const sketches = (sh: EditorVisual[]) => sh.map((v) => (v.kind === "image" ? (v.sketch?.style ?? null) : null)).join(",");
+      const sameButSketch = p.shots.length === n.shots.length && JSON.stringify(p.shots.map(plain)) === JSON.stringify(n.shots.map(plain));
+      out.push(p.shots.length !== n.shots.length ? `${n.id}: ${n.shots.length + 1} cảnh quay` : sameButSketch && sketches(p.shots) !== sketches(n.shots) ? `${n.id}: đổi hiệu ứng tranh vẽ` : `${n.id}: đổi cảnh quay`);
+    }
     if (p.voice?.key !== n.voice?.key) out.push(`${n.id}: giọng đọc mới`);
     else if (JSON.stringify(sceneCaptions(p)) !== JSON.stringify(sceneCaptions(n))) out.push(`${n.id}: sửa phụ đề`);
     if (p.holdMs !== n.holdMs) out.push(`${n.id}: giữ thêm ${n.holdMs} ms`);

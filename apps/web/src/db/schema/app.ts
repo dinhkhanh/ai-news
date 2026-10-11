@@ -4,6 +4,7 @@
  */
 import { sql } from "drizzle-orm";
 import type { MotionEngine, MotionMode } from "@ai-news/video/motion";
+import type { PhotoSketch } from "@ai-news/video/schema";
 import type { LogoMotion } from "@ai-news/video/schema";
 import type { BusyProgress } from "@/lib/project-state";
 import {
@@ -268,6 +269,12 @@ export const projects = pgTable(
      */
     motionMode: text("motion_mode").$type<MotionMode>().notNull().default("off"),
     motionEngine: text("motion_engine").$type<MotionEngine>().notNull().default("remotion"),
+    /**
+     * Hand-drawn photos (composition 0.16.0): `off`, or the style (`pencil` | `ink` | `colour`) the build gives every
+     * downloaded photo (article, other outlets, stock; not AI stills): each such shot opens on the photo and turns
+     * into a drawing of it, so the video transforms the pictures it borrows. Per shot in the editor afterwards.
+     */
+    photoSketch: text("photo_sketch").$type<PhotoSketch>().notNull().default("off"),
     lockVersion: integer("lock_version").notNull().default(0),
     lastError: text("last_error"),
     /** Approval flow (docs/PLAN.md §4.8): the timeline version a publisher approved; cleared by any later edit. */

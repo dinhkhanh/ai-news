@@ -65,11 +65,11 @@ export const regenerateSceneFn = inngest.createFunction(
         if (!timeline) throw new NonRetriableError("Timeline version not found");
         await tx.update(schema.projects).set({ busyStep: "regenerate", lastError: null }).where(eq(schema.projects.id, projectId));
         const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), columns: { siteName: true } });
-        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: project.voicePresetId, motionEngine: project.motionEngine, sourceName: article?.siteName ?? null, timeline };
+        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: project.voicePresetId, motionEngine: project.motionEngine, photoSketch: project.photoSketch, sourceName: article?.siteName ?? null, timeline };
       });
       const { doc } = docOfRow(row.timeline);
       const stock = ((row.timeline.buildJson as { stock?: Record<string, unknown> }).stock ?? {}) as Record<string, unknown>;
-      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, voicePresetId: row.voicePresetId, motionEngine: row.motionEngine, sourceName: row.sourceName, version: row.timeline.version, doc, stock };
+      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, voicePresetId: row.voicePresetId, motionEngine: row.motionEngine, photoSketch: row.photoSketch, sourceName: row.sourceName, version: row.timeline.version, doc, stock };
     });
 
     const sceneIdx = base.doc.scenes.findIndex((s) => s.id === sceneId);
@@ -139,7 +139,8 @@ export const regenerateSceneFn = inngest.createFunction(
             framing = frameStill(r.frame, zones);
             if (!framing.ok) continue;
           }
-          visuals.push({ kind: "image", key: a.key, kenBurns: framing.kenBurns, focus: framing.focus, credit: a.credit, assetId: a.assetId, thumbnailUrl: a.thumbnailUrl });
+          // Other outlets' photos take the project's hand-drawn style, as in the build.
+          visuals.push({ kind: "image", key: a.key, kenBurns: framing.kenBurns, focus: framing.focus, sketch: base.photoSketch === "off" ? null : { style: base.photoSketch }, credit: a.credit, assetId: a.assetId, thumbnailUrl: a.thumbnailUrl });
         }
         return { visuals: visuals.slice(0, keep), found: found.images.length, stored: stored.assets.length, errors, costUsd };
       });
@@ -168,7 +169,7 @@ export const regenerateSceneFn = inngest.createFunction(
               return generateSceneImages({ id: scene.id, onScreenText: scene.onScreenText, brollTerms: terms }, { count: Math.min(keep, a.remaining), buildId, language: base.doc.language, projectId: a.projectId }, pctx);
             })
           : null;
-      const stills: Visual[] = (generated?.assets ?? []).map((a) => ({ kind: "image" as const, key: a.key, kenBurns: true, focus: null, credit: a.credit, assetId: a.assetId, thumbnailUrl: a.thumbnailUrl }));
+      const stills: Visual[] = (generated?.assets ?? []).map((a) => ({ kind: "image" as const, key: a.key, kenBurns: true, focus: null, sketch: null, credit: a.credit, assetId: a.assetId, thumbnailUrl: a.thumbnailUrl }));
 
       const fresh: Visual[] = [...related.visuals, ...clips, ...stills];
       if (!fresh.length) {

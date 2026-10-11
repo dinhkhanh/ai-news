@@ -18,7 +18,7 @@ export const sampleTimeline: Timeline = {
   brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {}, outroText: "Theo dõi để cập nhật tin mới" }),
   scenes: [
     { id: "s1", kind: "hook", from: 0, durationFrames: 120, headline: "Metro số 1 kéo dài thêm 12 km", visual: { kind: "solid" }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true },
-    { id: "s2", kind: "body", from: 120, durationFrames: 150, headline: "Khởi công quý ba năm 2027", visual: { kind: "image", src: LANDSCAPE_PHOTO, kenBurns: true, focus: null }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true },
+    { id: "s2", kind: "body", from: 120, durationFrames: 150, headline: "Khởi công quý ba năm 2027", visual: { kind: "image", src: LANDSCAPE_PHOTO, kenBurns: true, focus: null, sketch: null }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true },
     { id: "s3", kind: "cta", from: 270, durationFrames: 90, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
   ],
   captions: [
@@ -130,4 +130,27 @@ window.__timelines=window.__timelines||{};window.__timelines.shot=tl;</script></
     },
     { id: "s3", kind: "cta", from: 420, durationFrames: 120, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
   ],
+};
+
+/** A portrait "photo" (one figure in front of a building) for the sketch sample's cover-fitted shots. */
+const PORTRAIT_PHOTO = `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1400"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9cc3e6"/><stop offset="1" stop-color="#e9dcc2"/></linearGradient></defs><rect width="900" height="1400" fill="url(#s)"/><rect x="60" y="240" width="320" height="900" fill="#b8a48a"/><rect x="520" y="160" width="320" height="980" fill="#8e9aa8"/><g fill="#5d6b7a">${Array.from({ length: 8 }, (_, r) => `<rect x="560" y="${200 + r * 110}" width="70" height="70"/><rect x="730" y="${200 + r * 110}" width="70" height="70"/>`).join("")}</g><circle cx="450" cy="620" r="130" fill="#e3b591"/><path d="M200 1400 Q230 820 450 790 Q670 820 700 1400 Z" fill="#2f4a6b"/></svg>`,
+)}`;
+
+/** Studio preview of the hand-drawn stills (0.16.0): one shot per style, each opening on the photo. */
+export const sampleSketchTimeline: Timeline = {
+  ...sampleTimeline,
+  durationFrames: 15 * 30,
+  scenes: (["pencil", "ink", "colour"] as const).map((style, i) => ({
+    id: `s${i + 1}`,
+    kind: i === 0 ? ("hook" as const) : i === 2 ? ("cta" as const) : ("body" as const),
+    from: i * 150,
+    durationFrames: 150,
+    headline: i === 2 ? "" : ["Bút chì", "Bút mực"][i],
+    visual: { kind: "image" as const, src: i === 1 ? LANDSCAPE_PHOTO : PORTRAIT_PHOTO, kenBurns: true, focus: null, sketch: { style } },
+    shots: [],
+    credit: "Ảnh: VnExpress",
+    voiceSrc: null,
+    overlay: true,
+  })),
 };

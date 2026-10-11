@@ -6,11 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import type { TextLayoutInput } from "@ai-news/video/schema";
+import { SKETCH_STYLES, type SketchStyle, type TextLayoutInput } from "@ai-news/video/schema";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import type { MotionEngine } from "@ai-news/video/motion";
-import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setShot, shotsMissing, visualKey, visualLabel, type EditorScene, type EditorVisual } from "@/lib/media/editor";
+import { removeShot, sceneCaptions, sceneShots, sceneVoiceMs, setCaptionText, setSceneSketch, setShot, shotsMissing, SKETCH_LABEL, visualKey, visualLabel, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 import { FRAMING_ISSUE_LABEL, frameStill, overlayZones, type FrameFaces } from "@/lib/media/framing";
 import { DEFAULT_MANUAL_SECTION_SEC, formatTimecode, MAX_MANUAL_SECTION_SEC, parseTimecode, webVideoPageUrl, type PendingCapture } from "@/lib/media/visual-plan";
 import { cn } from "@/lib/utils";
@@ -78,7 +79,7 @@ function probeMedia(src: string, kind: "image" | "video"): Promise<{ width: numb
 const fromOption = (o: VisualOption, durationSec?: number | null): EditorVisual =>
   o.kind === "video"
     ? { kind: "video", key: o.key, clipDurationSec: durationSec ?? o.durationSec ?? 5, trimStartSec: 0, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl }
-    : { kind: "image", key: o.key, kenBurns: true, focus: null, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl };
+    : { kind: "image", key: o.key, kenBurns: true, focus: null, sketch: null, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl };
 
 function Thumb({ src, video, className }: { src: string | null; video: boolean; className?: string }) {
   if (!src) return null;
@@ -171,7 +172,11 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
   const guard = shotFrame ? frameStill(shotFrame, zonesOf(scene)) : null;
 
   const setActive = (visual: EditorVisual) => onChange(setShot(scene, active, visual));
-  const pick = (o: VisualOption) => onChange(reframe(setShot(scene, active, fromOption(o))));
+  // A new picture in a hand-drawn shot is drawn too: the look belongs to the shot, not to the file.
+  const keepLook = (v: EditorVisual): EditorVisual => (v.kind === "image" && shot.kind === "image" && shot.sketch ? { ...v, sketch: shot.sketch } : v);
+  const pick = (o: VisualOption) => onChange(reframe(setShot(scene, active, keepLook(fromOption(o)))));
+  // AI stills are original already: "every photo of the scene" leaves them as they are.
+  const isAiStill = (v: { key: string }) => options.some((o) => o.key === v.key && o.provider === "gemini_image");
   const addShot = () => {
     onChange({ ...scene, shots: [...scene.shots, { kind: "solid" }] });
     setShotIdx(shots.length);
@@ -189,7 +194,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
       option = { ...option, durationSec: p.durationSec };
     }
     onOptionAdded(option, res.url);
-    const added = fromOption(option);
+    const added = keepLook(fromOption(option));
     // The new option is not in `options` yet, so frame it from the faces the server just returned.
     const f = added.kind === "image" && option.frame ? frameStill(option.frame, zonesOf(scene)) : null;
     setActive(added.kind === "image" && f ? { ...added, focus: f.focus, kenBurns: f.kenBurns } : added);
@@ -453,9 +458,37 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
             <span className="pb-2 text-xs text-muted-foreground">Clip ngắn hơn cảnh quay sẽ lặp lại.</span>
           </div>
         ) : shot.kind === "image" ? (
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={shot.kenBurns} disabled={disabled} onChange={(e) => shot.kind === "image" && setActive({ ...shot, kenBurns: e.target.checked })} /> hiệu ứng Ken Burns (phóng chậm)
-          </label>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={shot.kenBurns} disabled={disabled} onChange={(e) => shot.kind === "image" && setActive({ ...shot, kenBurns: e.target.checked })} /> hiệu ứng Ken Burns (phóng chậm)
+            </label>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <Label htmlFor="shot-sketch" className="shrink-0 text-xs">
+                Ảnh thành tranh vẽ tay
+              </Label>
+              <NativeSelect
+                id="shot-sketch"
+                fieldSize="sm"
+                value={shot.sketch?.style ?? ""}
+                disabled={disabled}
+                onChange={(e) => shot.kind === "image" && setActive({ ...shot, sketch: e.target.value ? { style: e.target.value as SketchStyle } : null })}
+                title="Cảnh quay mở bằng ảnh thật, rồi một nét bút quét qua biến ảnh thành tranh vẽ tay của chính nó (cùng khung, cùng chuyển động). Video biến đổi hình đi mượn thay vì chiếu lại, hợp quy định về nội dung không nguyên bản của các nền tảng."
+                className="w-40"
+              >
+                <option value="">không (giữ ảnh gốc)</option>
+                {SKETCH_STYLES.map((st) => (
+                  <option key={st} value={st}>
+                    {SKETCH_LABEL[st]}
+                  </option>
+                ))}
+              </NativeSelect>
+              {!disabled && shots.filter((v) => v.kind === "image").length > 1 ? (
+                <Button type="button" size="xs" variant="ghost" onClick={() => onChange(setSceneSketch(scene, shot.sketch?.style ?? null, isAiStill))} title="Áp dụng lựa chọn này cho mọi ảnh của cảnh (trừ ảnh AI)">
+                  áp dụng cho mọi ảnh của cảnh
+                </Button>
+              ) : null}
+            </div>
+          </div>
         ) : null}
         <div className="flex items-center gap-3">
           <Label htmlFor="hold" className="shrink-0">

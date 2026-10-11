@@ -2,7 +2,7 @@ import { Composition } from "remotion";
 import { News } from "./compositions/News";
 import { TestCard } from "./compositions/TestCard";
 import { OUTPUT, testCardSchema, timelineSchema, type Timeline } from "./schema";
-import { sampleMotionTimeline, sampleTimeline } from "./sample";
+import { sampleMotionTimeline, sampleSketchTimeline, sampleTimeline } from "./sample";
 
 export const RemotionRoot: React.FC = () => (
   <>
@@ -38,6 +38,18 @@ export const RemotionRoot: React.FC = () => (
       fps={OUTPUT.fps}
       durationInFrames={sampleMotionTimeline.durationFrames}
       defaultProps={sampleMotionTimeline}
+      calculateMetadata={({ props }) => ({ durationInFrames: props.durationFrames, fps: OUTPUT.fps })}
+    />
+    {/* Studio only: photos turning into drawings (pencil, ink, colour). */}
+    <Composition
+      id="NewsSketchSample"
+      component={News}
+      schema={timelineSchema}
+      width={OUTPUT.width}
+      height={OUTPUT.height}
+      fps={OUTPUT.fps}
+      durationInFrames={sampleSketchTimeline.durationFrames}
+      defaultProps={sampleSketchTimeline}
       calculateMetadata={({ props }) => ({ durationInFrames: props.durationFrames, fps: OUTPUT.fps })}
     />
   </>

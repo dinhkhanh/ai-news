@@ -19,6 +19,7 @@ import { canonicalizeUrl, isPrivateHost } from "@/lib/url";
 import { MIN_CONTENT_WORDS } from "@/lib/video-source";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 import { parseMotion } from "@/components/motion-select";
+import { parsePhotoSketch } from "@/components/sketch-select";
 
 /**
  * Create a project and start the fetch step. Three sources (`projects.source_kind`):
@@ -53,6 +54,7 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
     // Empty = the workspace default for the story's language, decided at build time.
     const voice = await findVoice(ws, str(fd, "voicePresetId"));
     const motion = parseMotion(fd, { mode: "off", engine: "remotion" });
+    const photoSketch = parsePhotoSketch(fd, "off");
     // Auto mode will spend a script + a render on this user's behalf: fail fast if today's quota is already gone.
     if (auto) await Promise.all([assertQuota(ws.userId, "scripts"), assertQuota(ws.userId, "render_minutes")]);
 
@@ -70,13 +72,13 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
         .values({
           organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, sourceKind, title: title || null, durationSec, tone, autoPipeline: auto,
           brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null, voicePresetId: voice?.id ?? null,
-          motionMode: motion.mode, motionEngine: motion.engine,
+          motionMode: motion.mode, motionEngine: motion.engine, photoSketch,
           // Typed content is saved in this request's `after()`, never through the queue: nothing to fetch, nothing to wait for.
           busyStep: "fetch", busyProgress: typed ? { ...startProgress("Lưu nội dung…"), direct: true } : startProgress(),
         })
         .returning({ id: schema.projects.id }),
     );
-    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, voice: voice?.name ?? "default", motion: motion.mode === "off" ? "off" : `${motion.mode}/${motion.engine}`, duplicateOf: existing?.id ?? null }, project.id);
+    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, voice: voice?.name ?? "default", motion: motion.mode === "off" ? "off" : `${motion.mode}/${motion.engine}`, photoSketch, duplicateOf: existing?.id ?? null }, project.id);
     if (typed) after(() => runFetchDirect({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
     else await inngest.send(projectFetchRequested.create({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
     target = `/app/projects/${project.id}`;

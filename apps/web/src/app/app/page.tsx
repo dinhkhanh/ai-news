@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { Label } from "@/components/ui/label";
 import { MotionSelect } from "@/components/motion-select";
+import { SketchSelect } from "@/components/sketch-select";
 import { VoiceSelect } from "@/components/voice-select";
 import { NativeSelect } from "@/components/ui/native-select";
 import { listBrandKits } from "@/lib/media/brand";
@@ -112,6 +113,10 @@ export default async function AppHome() {
                     <div className="space-y-1 sm:col-span-2">
                       <Label htmlFor="new-motion-mode">Đồ hoạ chuyển động (Claude Opus 5.5)</Label>
                       <MotionSelect idPrefix="new-motion" mode="off" engine="remotion" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="new-photo-sketch">Ảnh vẽ tay</Label>
+                      <SketchSelect id="new-photo-sketch" value="off" className="w-full" />
                     </div>
                     {logoChannels.length ? (
                       <div className="space-y-1">

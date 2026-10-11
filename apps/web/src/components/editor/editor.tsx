@@ -15,7 +15,7 @@ import {
   Save,
 } from "lucide-react";
 import type { PlayerRef } from "@remotion/player";
-import type { Timeline } from "@ai-news/video/schema";
+import { SKETCH_STYLES, type SketchStyle, type Timeline } from "@ai-news/video/schema";
 import { toast } from "sonner";
 import { regenerateScene, renderTimeline, saveTimeline } from "@/app/app/projects/[id]/edit/actions";
 import type { MotionEngine } from "@ai-news/video/motion";
@@ -30,8 +30,11 @@ import {
   buildFromDoc,
   replaceTailShots,
   sceneShots,
+  setSceneSketch,
   setShot,
   shotsMissing,
+  SKETCH_LABEL,
+  sketchCount,
   type EditorDoc,
   type EditorScene,
   type EditorVisual,
@@ -336,6 +339,11 @@ export function Editor(props: EditorProps) {
   const setOverlayAll = (on: boolean) =>
     setDoc((d) => ({ ...d, scenes: d.scenes.map((s) => ({ ...s, overlay: on })) }));
 
+  // Hand-drawn photos for the whole video; AI stills are original already and stay as they are.
+  const isAiStill = (v: { key: string }) => options.some((o) => o.key === v.key && o.provider === "gemini_image");
+  const sketches = sketchCount(doc, isAiStill);
+  const setSketchAll = (style: SketchStyle | null) => setDoc((d) => ({ ...d, scenes: d.scenes.map((s) => setSceneSketch(s, style, isAiStill)) }));
+
   const coverFrame = doc.coverAtSec != null ? Math.round(doc.coverAtSec * FPS) : null;
 
   // On phones the inspector sits below the scene list: selecting a scene brings it into view.
@@ -575,6 +583,31 @@ export function Editor(props: EditorProps) {
                 .
               </p>
             )}
+            {sketches.photos ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  Ảnh vẽ tay: {sketches.drawn}/{sketches.photos} ảnh
+                </span>
+                <NativeSelect
+                  id="sketch-all"
+                  aria-label="Ảnh vẽ tay cho mọi ảnh"
+                  fieldSize="sm"
+                  value=""
+                  disabled={readOnly}
+                  onChange={(e) => e.target.value && setSketchAll(e.target.value === "off" ? null : (e.target.value as SketchStyle))}
+                  title="Mỗi ảnh mở bằng ảnh thật rồi chuyển thành tranh vẽ tay của chính nó. Ảnh AI giữ nguyên. Chỉnh từng ảnh ở khung cảnh quay."
+                  className="min-w-0 flex-1"
+                >
+                  <option value="">Đổi cho mọi ảnh…</option>
+                  {SKETCH_STYLES.map((st) => (
+                    <option key={st} value={st}>
+                      tranh {SKETCH_LABEL[st]}
+                    </option>
+                  ))}
+                  <option value="off">giữ ảnh gốc</option>
+                </NativeSelect>
+              </div>
+            ) : null}
             <p className="text-[11px] text-muted-foreground">
               {props.previewLogo
                 ? `Logo đang xem: kênh ${props.previewLogo.channelName}. `

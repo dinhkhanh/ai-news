@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { brandSchema } from "@ai-news/video/schema";
-import { audioSignature, buildFromDoc, describeChanges, docFromTimeline, docKeys, editorDocSchema, GAP_MS, LEAD_MS, moveScene, removeShot, replaceTailShots, sceneCaptions, setCaptionText, setShot, shotsMissing, TAIL_MS, voicePlacement, type EditorDoc, type EditorVisual } from "./editor";
+import { brandSchema, sketchTiming, timelineSchema } from "@ai-news/video/schema";
+import { audioSignature, buildFromDoc, describeChanges, docFromTimeline, docKeys, editorDocSchema, GAP_MS, LEAD_MS, moveScene, removeShot, replaceTailShots, sceneCaptions, setCaptionText, setSceneSketch, setShot, shotsMissing, sketchCount, TAIL_MS, voicePlacement, type EditorDoc, type EditorVisual } from "./editor";
 import { layoutShots, shotsNeeded } from "./timeline";
 
 const words = (text: string, ms: number) => {
@@ -17,7 +17,7 @@ const doc: EditorDoc = editorDocSchema.parse({
   brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {} }),
   scenes: [
     { id: "s1", kind: "hook", onScreenText: "Metro kéo dài", voiceover: "Sáng nay thành phố công bố kế hoạch.", brollTerms: ["metro"], durationSec: 3, voice: { key: "media/o/p/vo/b1-s1.wav", durationMs: 3000, words: words("Sáng nay thành phố công bố kế hoạch.", 3000) }, visual: { kind: "video", key: "media/o/p/broll/b1-s1.mp4", clipDurationSec: 8, trimStartSec: 0, credit: "Video: Pexels", assetId: null, thumbnailUrl: null }, holdMs: 0, captions: null },
-    { id: "s2", kind: "body", onScreenText: "Khởi công 2027", voiceover: "Tuyến mới dài mười hai ki lô mét.", brollTerms: [], durationSec: 2.5, voice: { key: "media/o/p/vo/b1-s2.wav", durationMs: 2500, words: words("Tuyến mới dài mười hai ki lô mét.", 2500) }, visual: { kind: "image", key: "media/o/p/aroll/b1-0.jpg", kenBurns: true, focus: null, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null }, holdMs: 0, captions: null },
+    { id: "s2", kind: "body", onScreenText: "Khởi công 2027", voiceover: "Tuyến mới dài mười hai ki lô mét.", brollTerms: [], durationSec: 2.5, voice: { key: "media/o/p/vo/b1-s2.wav", durationMs: 2500, words: words("Tuyến mới dài mười hai ki lô mét.", 2500) }, visual: { kind: "image", key: "media/o/p/aroll/b1-0.jpg", kenBurns: true, focus: null, sketch: null, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null }, holdMs: 0, captions: null },
     { id: "s3", kind: "cta", onScreenText: "", voiceover: "Theo dõi để cập nhật.", brollTerms: [], durationSec: 1.5, voice: { key: "media/o/p/vo/b1-s3.wav", durationMs: 1500, words: words("Theo dõi để cập nhật.", 1500) }, visual: { kind: "solid" }, holdMs: 0, captions: null },
   ],
   music: { key: "media/o/p/music/b1.mp3", gainDb: -12, attribution: "Nhạc: Mubert", title: "Mubert abc", source: "mubert", licence: "Mubert" },
@@ -50,7 +50,7 @@ describe("buildFromDoc", () => {
 });
 
 describe("shots", () => {
-  const img = (n: number): EditorVisual => ({ kind: "image", key: `media/o/p/aroll/b1-${n}.jpg`, kenBurns: true, focus: null, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null });
+  const img = (n: number): EditorVisual => ({ kind: "image", key: `media/o/p/aroll/b1-${n}.jpg`, kenBurns: true, focus: null, sketch: null, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null });
   it("needs one shot per 5 s", () => {
     expect(shotsNeeded(3000)).toBe(1);
     expect(shotsNeeded(5000)).toBe(1);
@@ -182,7 +182,7 @@ describe("describeChanges + docKeys", () => {
   });
 
 describe("replaceTailShots", () => {
-  const img = (key: string): EditorVisual => ({ kind: "image", key, kenBurns: true, focus: null, credit: null, assetId: null, thumbnailUrl: null });
+  const img = (key: string): EditorVisual => ({ kind: "image", key, kenBurns: true, focus: null, sketch: null, credit: null, assetId: null, thumbnailUrl: null });
   const clip = (n: number): EditorVisual => ({ kind: "video", key: "cap.mp4", clipDurationSec: 5, trimStartSec: n * 5, credit: "Video: x / YouTube", assetId: "a", thumbnailUrl: null });
   const scene = { ...doc.scenes[0], visual: img("article.jpg"), shots: [img("stock1.jpg"), img("ai1.png")] };
 
@@ -197,4 +197,52 @@ describe("replaceTailShots", () => {
     expect(next.visual).toEqual(clip(0));
   });
 });
+});
+
+describe("hand-drawn photos", () => {
+  const img = (key: string): EditorVisual => ({ kind: "image", key, kenBurns: true, focus: null, sketch: null, credit: null, assetId: null, thumbnailUrl: null });
+  const clip: EditorVisual = { kind: "video", key: "c.mp4", clipDurationSec: 5, trimStartSec: 0, credit: null, assetId: null, thumbnailUrl: null };
+  const scene = { ...doc.scenes[1], visual: img("article.jpg"), shots: [clip, img("ai1.png")] };
+  const withScene = (s: typeof scene): EditorDoc => ({ ...doc, scenes: doc.scenes.map((x, i) => (i === 1 ? s : x)) });
+  const isAi = (v: { key: string }) => v.key.startsWith("ai");
+
+  it("draws every photo of a scene except the ones kept, never a clip", () => {
+    const drawn = setSceneSketch(scene, "ink", isAi);
+    expect(drawn.visual).toMatchObject({ kind: "image", sketch: { style: "ink" } });
+    expect(drawn.shots[0]).toEqual(clip);
+    expect(drawn.shots[1]).toMatchObject({ sketch: null });
+    expect(sketchCount(withScene(drawn), isAi)).toEqual({ photos: 1, drawn: 1 });
+    expect(setSceneSketch(drawn, null).visual).toMatchObject({ sketch: null });
+  });
+  it("reaches the timeline and comes back from it", () => {
+    const d = withScene(setSceneSketch(scene, "pencil"));
+    const { timeline } = buildFromDoc(d, null);
+    expect(timeline.scenes[1].shots[0].visual).toMatchObject({ kind: "image", sketch: { style: "pencil" } });
+    expect(timeline.scenes[1].shots[2].visual).toMatchObject({ kind: "image", sketch: { style: "pencil" } });
+    expect(docFromTimeline(timeline, {}).scenes[1].visual).toMatchObject({ sketch: { style: "pencil" } });
+  });
+  it("reads timelines stored before 0.16.0 as photos", () => {
+    const { timeline } = buildFromDoc(doc, null);
+    const old = JSON.parse(JSON.stringify(timeline));
+    delete old.scenes[1].visual.sketch;
+    delete old.scenes[1].shots[0].visual.sketch;
+    const parsed = timelineSchema.parse(old);
+    expect(parsed.scenes[1].visual).toMatchObject({ kind: "image", sketch: null });
+  });
+  it("names the change in the version history", () => {
+    const first = withScene(scene);
+    expect(describeChanges(first, withScene({ ...scene, visual: { ...(scene.visual as Extract<EditorVisual, { kind: "image" }>), sketch: { style: "colour" } } }))).toContain("s2: ảnh thành tranh bút màu");
+    expect(describeChanges(first, withScene(setSceneSketch(scene, "ink", (v) => v.key === "article.jpg")))).toContain("s2: đổi hiệu ứng tranh vẽ");
+  });
+  it("shows the photo first and the drawing for most of the shot", () => {
+    // Shots run 2–5 s (`MAX_SHOT_SEC`); a 1 s shot still gets both, the photo slightly longer.
+    expect(sketchTiming(30, 30)).toEqual({ start: 12, end: 21 });
+    for (const frames of [60, 90, 150]) {
+      const t = sketchTiming(frames, 30);
+      expect(t.start).toBeGreaterThanOrEqual(Math.min(12, frames / 2));
+      expect(t.end).toBeGreaterThan(t.start);
+      expect(t.end - t.start).toBeLessThanOrEqual(30);
+      expect(frames - t.end).toBeGreaterThanOrEqual(t.start - 1);
+    }
+  });
 });
