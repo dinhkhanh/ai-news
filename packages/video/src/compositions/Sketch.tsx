@@ -16,8 +16,8 @@ import { OUTPUT, sketchTiming, type SketchStyle } from "../schema";
  * Cost (0.16.1): Lambda renders on the CPU, where blurs, blends and SVG
  * turbulence over a 1080×1920 frame take seconds, so recomputing them every
  * frame timed renders out. The drawing is therefore made once per picture
- * (`drawSketch`, canvas 2D), as `BOIL_VARIANTS` canvases that differ only in
- * their wobble, and every frame just shows one of them with the shot's crop
+ * (`drawSketch`, canvas 2D, no SVG turbulence: it is far too slow on a CPU),
+ * as `BOIL_VARIANTS` canvases that differ only in their wobble, and every frame just shows one of them with the shot's crop
  * and Ken Burns – about the cost of a plain photo. Deterministic (fixed seeds),
  * so Lambda chunks render the same pixels.
  */
@@ -34,13 +34,37 @@ const MAX_DRAWING_PX = 2200;
 /**
  * The sweep: three frames wide, opaque on the left, transparent on the right,
  * with a slanted, torn edge in the middle third. Sliding it from right to left
- * (`mask-position` 90 % → 10 %) uncovers the drawing behind a ragged pencil edge.
+ * (`mask-position` 90 % → 10 %) uncovers the drawing behind a ragged pencil
+ * edge. Drawn once per tab on a quarter-size canvas (an SVG turbulence mask
+ * of 3240×1920 was too slow to rasterise on Lambda's CPU) and used as a PNG.
  */
 const W = OUTPUT.width;
 const H = OUTPUT.height;
-const SWEEP = `url("data:image/svg+xml;utf8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${3 * W}" height="${H}" viewBox="0 0 ${3 * W} ${H}"><filter id="t" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency=".011 .02" numOctaves="3" seed="5"/><feDisplacementMap in="SourceGraphic" scale="140" xChannelSelector="R" yChannelSelector="G"/><feGaussianBlur stdDeviation="5"/></filter><path d="M-200 -200 L${1.5 * W + 260} -200 L${1.5 * W - 260} ${H + 200} L-200 ${H + 200} Z" fill="#000" filter="url(#t)"/></svg>`,
-)}")`;
+let sweepUrl: string | null = null;
+function sweepMask() {
+  if (sweepUrl) return sweepUrl;
+  const q = 4;
+  const w = (3 * W) / q;
+  const h = H / q;
+  const c = canvas(w, h);
+  const g = ctx2d(c);
+  const rnd = prng(5);
+  // The edge: a slant across the frame, roughened by a smooth wave plus fine jitter (torn paper).
+  const wave = waves(rnd, 3, 40, 160);
+  g.filter = "blur(1.5px)";
+  g.beginPath();
+  g.moveTo(-10, -10);
+  for (let y = -10; y <= h + 10; y += 2) {
+    const slant = 1.5 * W + 260 - (520 * y) / h;
+    g.lineTo(slant / q + wave(y) * 9 + (rnd() - 0.5) * 3, y);
+  }
+  g.lineTo(-10, h + 10);
+  g.closePath();
+  g.fillStyle = "#000";
+  g.fill();
+  sweepUrl = `url("${c.toDataURL("image/png")}")`;
+  return sweepUrl;
+}
 
 /** How the photo is drawn per style (lengths in px of the 1080-wide frame; `power` darkens the strokes). */
 const LOOK: Record<SketchStyle, { blur: number; power: number; grey: string; hatch: number; wash: boolean }> = {
@@ -110,23 +134,50 @@ function hatchTile(px: number) {
   return c;
 }
 
-/** SVG filters the canvas `filter` refers to by id: the wash posterise and the wobble variants. */
-function svgFilters(id: string, px: number) {
+/** The SVG filter the canvas `filter` refers to by id: the wash's posterise (a per-pixel table, cheap). */
+function washFilter(id: string) {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("width", "0");
   svg.setAttribute("height", "0");
   svg.style.position = "absolute";
   const levels = "0.3 0.5 0.68 0.84 0.96";
-  svg.innerHTML =
-    `<filter id="${id}-wash" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR type="discrete" tableValues="${levels}"/><feFuncG type="discrete" tableValues="${levels}"/><feFuncB type="discrete" tableValues="${levels}"/></feComponentTransfer></filter>` +
-    Array.from(
-      { length: BOIL_VARIANTS },
-      (_, k) =>
-        `<filter id="${id}-boil${k}" x="0" y="0" width="1" height="1"><feTurbulence type="fractalNoise" baseFrequency="${(0.018 / px).toFixed(5)}" numOctaves="2" seed="${k + 1}" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="${(6 * px).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/></filter>`,
-    ).join("");
+  svg.innerHTML = `<filter id="${id}-wash" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR type="discrete" tableValues="${levels}"/><feFuncG type="discrete" tableValues="${levels}"/><feFuncB type="discrete" tableValues="${levels}"/></feComponentTransfer></filter>`;
   document.body.appendChild(svg);
   return svg;
+}
+
+/** A smooth seeded wave in [-1, 1]: a few sines with random wavelengths (`min`–`max` px) and phases. */
+function waves(rnd: () => number, n: number, min: number, max: number) {
+  const parts = Array.from({ length: n }, () => ({ k: (2 * Math.PI) / (min + rnd() * (max - min)), phase: rnd() * 2 * Math.PI, a: 0.5 + rnd() * 0.5 }));
+  const sum = parts.reduce((a, p) => a + p.a, 0);
+  return (x: number) => parts.reduce((a, p) => a + p.a * Math.sin(p.k * x + p.phase), 0) / sum;
+}
+
+/**
+ * Hand-drawn wobble without per-pixel filters: rows of the drawing shifted
+ * sideways along one smooth wave, then columns shifted up / down along
+ * another – a few hundred strip copies, cheap even on Lambda's CPU.
+ */
+function wobble(src: HTMLCanvasElement, seed: number, px: number) {
+  const w = src.width;
+  const h = src.height;
+  const rnd = prng(seed);
+  const amp = 2.2 * px;
+  const band = Math.max(2, Math.round(3 * px));
+  const across = waves(rnd, 3, 50 * px, 220 * px);
+  const down = waves(rnd, 3, 50 * px, 220 * px);
+  const rows = canvas(w, h);
+  const rg = ctx2d(rows);
+  rg.fillStyle = PAPER;
+  rg.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += band) rg.drawImage(src, 0, y, w, band, across(y) * amp, y, w, band);
+  const out = canvas(w, h);
+  const og = ctx2d(out);
+  og.fillStyle = PAPER;
+  og.fillRect(0, 0, w, h);
+  for (let x = 0; x < w; x += band) og.drawImage(rows, x, 0, band, h, x, down(x) * amp, band, h);
+  return out;
 }
 
 let drawingSeq = 0;
@@ -150,7 +201,7 @@ function drawSketch(img: HTMLImageElement, style: SketchStyle): Drawing {
   const shown = nw > nh ? OUTPUT.width / nw : Math.max(OUTPUT.width / nw, OUTPUT.height / nh);
   const px = c / shown;
   const id = `sk${++drawingSeq}`;
-  const defs = svgFilters(id, px);
+  const defs = l.wash ? washFilter(id) : null;
   try {
     // Lines: grey ÷ blurred negative (colour dodge), then strokes darkened by multiplying with themselves.
     const lines = canvas(w, h);
@@ -199,19 +250,11 @@ function drawSketch(img: HTMLImageElement, style: SketchStyle): Drawing {
     og.fillStyle = grain;
     og.fillRect(0, 0, w, h);
 
-    // The wobble variants: the same drawing, displaced by a differently seeded noise each.
-    const variants = Array.from({ length: BOIL_VARIANTS }, (_, k) => {
-      const v = canvas(w, h);
-      const vg = ctx2d(v);
-      vg.fillStyle = PAPER;
-      vg.fillRect(0, 0, w, h);
-      vg.filter = `url(#${id}-boil${k})`;
-      vg.drawImage(out, 0, 0);
-      return v;
-    });
+    // The wobble variants: the same drawing, displaced along differently seeded waves.
+    const variants = Array.from({ length: BOIL_VARIANTS }, (_, k) => wobble(out, k + 1, px));
     return { width: w, height: h, variants };
   } finally {
-    defs.remove();
+    defs?.remove();
   }
 }
 
@@ -321,9 +364,10 @@ export const SketchReveal: React.FC<{ style: SketchStyle; durationFrames: number
   const p = interpolate(frame, [t.start, t.end], [0.9, 0.1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.inOut(Easing.cubic) });
   const before = frame < t.start;
   const after = frame >= t.end;
-  const mask: React.CSSProperties = after
+  const sweep = after ? null : sweepMask();
+  const mask: React.CSSProperties = !sweep
     ? {}
-    : { maskImage: SWEEP, WebkitMaskImage: SWEEP, maskSize: "300% 100%", WebkitMaskSize: "300% 100%", maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", maskPosition: `${p * 100}% 0`, WebkitMaskPosition: `${p * 100}% 0` };
+    : { maskImage: sweep, WebkitMaskImage: sweep, maskSize: "300% 100%", WebkitMaskSize: "300% 100%", maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", maskPosition: `${p * 100}% 0`, WebkitMaskPosition: `${p * 100}% 0` };
   // Both copies stay mounted (no image reload mid-shot in the Player); the hidden one is not painted.
   return (
     <AbsoluteFill>
