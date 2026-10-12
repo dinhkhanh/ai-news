@@ -10,7 +10,7 @@ import { logActivity } from "@/lib/activity";
 import { fetchSceneBroll } from "@/lib/media/broll";
 import { isPermanentLlmError, LlmOutputError } from "@/lib/llm/client";
 import { designMotionShot } from "@/lib/llm/motion";
-import { buildFromDoc, EDITOR_FPS, setShot, voicePlacement, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { backdropCandidates, buildFromDoc, EDITOR_FPS, setShot, voicePlacement, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { shotWords } from "@/lib/media/motion-plan";
 import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
 import { frameStill, overlayZones } from "@/lib/media/framing";
@@ -51,7 +51,7 @@ export const regenerateSceneFn = inngest.createFunction(
     },
   },
   async ({ event, step }) => {
-    const { projectId, organizationId, requestedBy, timelineId, what, sceneId, voiceover, brollTerms, engine, instruction, shot } = event.data;
+    const { projectId, organizationId, requestedBy, timelineId, what, sceneId, voiceover, brollTerms, engine, instruction, shot, backdrop: backdropPick } = event.data;
     const ctx = { userId: requestedBy, organizationId };
     const pctx = { ...ctx, projectId };
     const buildId = nanoid(8);
@@ -207,6 +207,8 @@ export const regenerateSceneFn = inngest.createFunction(
       const voiceStartSec = (sceneIdx === 0 ? LEAD_MS / 1000 : 0) - target.from / EDITOR_FPS;
       // Pictures the graphic may use: the scene's own stills (at most 4), so a graphic can frame a real photo of the story.
       const stills = [scene.visual, ...scene.shots].flatMap((v) => (v.kind === "image" ? [v.key] : [])).filter((k, i, a) => a.indexOf(k) === i).slice(0, 4);
+      // The clip the editor chose to play behind the graphic: only one of the scene's own clips (or a graphic's current backdrop).
+      const clip = backdropPick ? (backdropCandidates(scene).find((b) => b.key === backdropPick.key && Math.abs(b.trimStartSec - backdropPick.trimStartSec) < 0.01) ?? null) : null;
       const r = await step.run("motion", async () => {
         await reportProgress(pctx, { label: `Claude Opus 5.5 dựng đồ hoạ chuyển động cho ${scene.id}${whole ? "" : ` · cảnh quay ${index + 1}`} (${eng === "hyperframes" ? "HyperFrames" : "Remotion"})`, pct: 20 });
         const images = await Promise.all(stills.map(async (key) => ({ key, url: await presignGet(key, 3600) })));
@@ -223,6 +225,7 @@ export const regenerateSceneFn = inngest.createFunction(
               durationSec,
               part: whole ? null : { index: index + 1, count: shots.length },
               images,
+              backdrop: clip ? { ...clip, description: `${clip.clipDurationSec.toFixed(0)} s of real footage from this scene${clip.credit ? ` (${clip.credit})` : ""}`, required: true } : null,
               instruction: instruction ?? null,
             },
             pctx,
@@ -239,7 +242,7 @@ export const regenerateSceneFn = inngest.createFunction(
         scenes: base.doc.scenes.map((s, i) => (i !== sceneIdx ? s : whole ? { ...s, visual, shots: [] } : setShot(s, index, visual))),
       };
       changes.push(`${scene.id}: đồ hoạ chuyển động ${eng === "hyperframes" ? "HyperFrames" : "Remotion"}${whole ? " cho cả cảnh" : ` ở cảnh quay ${index + 1}`}${instruction ? ` (“${instruction.slice(0, 60)}${instruction.length > 60 ? "…" : ""}”)` : ""}`);
-      build.motion = { sceneId: scene.id, shot: whole ? null : index, engine: eng, model: r.model, attempts: r.attempts, latencyMs: r.latencyMs, costUsd: r.costUsd, instruction: instruction ?? null };
+      build.motion = { sceneId: scene.id, shot: whole ? null : index, engine: eng, model: r.model, attempts: r.attempts, latencyMs: r.latencyMs, costUsd: r.costUsd, instruction: instruction ?? null, backdrop: clip?.key ?? null };
     }
 
     if (what === "music") {

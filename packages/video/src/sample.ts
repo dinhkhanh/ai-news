@@ -50,6 +50,7 @@ export const sampleMotionTimeline: Timeline = {
           visual: {
             kind: "motion",
             images: [],
+            backdrop: null,
             spec: {
               mood: "brand",
               background: "grid",
@@ -112,6 +113,7 @@ export const sampleMotionTimeline: Timeline = {
           visual: {
             kind: "hyperframes",
             images: [],
+            backdrop: null,
             html: `<div id="stage" data-composition-id="shot" data-width="1080" data-height="1920" data-start="0" data-duration="6">
 <style>#stage{position:absolute;inset:0;background:radial-gradient(circle at 30% 30%,var(--brand-primary),var(--brand-bg))}
 .t{position:absolute;left:80px;right:140px;top:420px;font-size:110px;font-weight:900;line-height:1.05}

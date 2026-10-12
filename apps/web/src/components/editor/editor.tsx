@@ -61,8 +61,11 @@ function resolveForPlayer(t: Timeline, urls: Record<string, string>, logoUrl: st
     scenes: t.scenes.map((s) => {
       const visual = (v: Timeline["scenes"][number]["visual"]) => {
         if (v.kind === "solid") return v;
-        // Motion graphics: their pictures by URL; one that has no URL (yet) is left out of the preview.
-        if (v.kind === "motion" || v.kind === "hyperframes") return { ...v, images: (v.images ?? []).map((k) => u(k) ?? "") };
+        // Motion graphics: their pictures and backdrop clip by URL; one that has no URL (yet) is left out of the preview.
+        if (v.kind === "motion" || v.kind === "hyperframes") {
+          const backdropSrc = v.backdrop ? u(v.backdrop.src) : null;
+          return { ...v, images: (v.images ?? []).map((k) => u(k) ?? ""), backdrop: v.backdrop && backdropSrc ? { ...v.backdrop, src: backdropSrc } : null };
+        }
         const src = u(v.src);
         return src ? { ...v, src } : { kind: "solid" as const };
       };
@@ -305,7 +308,7 @@ export function Editor(props: EditorProps) {
 
   const regenerate = (
     what: "voice" | "broll" | "music" | "motion",
-    payload: { sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null } = {},
+    payload: { sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { key: string; trimStartSec: number } | null } = {},
   ) => {
     startTransition(async () => {
       const res = await regenerateScene({ projectId: props.projectId, timelineId: props.version.id, what, ...payload });

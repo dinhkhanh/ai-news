@@ -277,6 +277,19 @@ export function sketchTiming(durationFrames: number, fps: number = OUTPUT.fps) {
   return { start, end: start + length };
 }
 
+/**
+ * Real footage playing behind a motion graphic (0.17.0): a muted clip, cover-fitted, looped when the shot is longer,
+ * dimmed so the graphic reads over it. Drawn by Remotion under both engines (`MotionBackdrop.tsx`); the shot's
+ * credit is the clip's.
+ */
+export const backdropSchema = z.object({
+  src: z.string(),
+  /** Seconds into the clip to start from. */
+  trimStartSec: z.number().nonnegative().default(0),
+  clipDurationSec: z.number().positive(),
+});
+export type Backdrop = z.infer<typeof backdropSchema>;
+
 export const visualSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("video"),
@@ -303,12 +316,16 @@ export const visualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("motion"),
     spec: motionSpecSchema,
     images: z.array(z.string()).default([]),
+    /** Footage behind the graphic, drawn when the spec's background is `video` (0.17.0); null = none. */
+    backdrop: backdropSchema.nullable().default(null),
   }),
   /** HyperFrames composition (HTML + GSAP) Claude wrote, seeked frame by frame in a sandboxed iframe (0.15.0, `HyperFramesShot.tsx`). */
   z.object({
     kind: z.literal("hyperframes"),
     html: z.string(),
     images: z.array(z.string()).default([]),
+    /** Footage behind the composition, whose page is then transparent (0.17.0); null = none. */
+    backdrop: backdropSchema.nullable().default(null),
   }),
 ]);
 export type Visual = z.infer<typeof visualSchema>;

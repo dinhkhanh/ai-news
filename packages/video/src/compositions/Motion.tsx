@@ -1,7 +1,8 @@
 import React from "react";
 import { AbsoluteFill, Easing, Img, interpolate, Sequence, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { formatMotionNumber, normaliseMotionSpec, type MotionBeat, type MotionElement, type MotionItem, type MotionSpec } from "../motion";
-import { motionArea, type Brand, type TimelineScene } from "../schema";
+import { motionArea, type Backdrop, type Brand, type TimelineScene } from "../schema";
+import { MotionBackdrop } from "./MotionBackdrop";
 
 /**
  * Motion graphic of one shot (engine `remotion`): the spec's beats one after
@@ -24,10 +25,17 @@ function palette(mood: MotionSpec["mood"], brand: Brand): Palette {
 
 /* ------------------------------------------------------------ background */
 
-const Background: React.FC<{ spec: MotionSpec; p: Palette; images: string[] }> = ({ spec, p, images }) => {
+/** The mood's background colour at `pct` % opacity (the brand colour may itself be translucent: no string maths on it). */
+const tint = (colour: string, pct: number) => `color-mix(in srgb, ${colour} ${pct}%, transparent)`;
+
+const Background: React.FC<{ spec: MotionSpec; p: Palette; images: string[]; backdrop: Backdrop | null }> = ({ spec, p, images, backdrop }) => {
   const frame = useCurrentFrame();
   const { durationInFrames, fps } = useVideoConfig();
   const t = frame / fps;
+  // Real footage: tinted by the mood, darker at the top bar and towards the captions, lighter in the middle.
+  if (spec.background === "video" && backdrop) {
+    return <MotionBackdrop backdrop={backdrop} durationFrames={durationInFrames} scrim={`linear-gradient(180deg, ${tint(p.bg, 78)} 0%, ${tint(p.bg, 50)} 40%, ${tint(p.bg, 58)} 65%, ${tint(p.bg, 88)} 100%)`} />;
+  }
   const img = spec.background === "image" && spec.backgroundImage != null ? images[spec.backgroundImage] : undefined;
   const base = <AbsoluteFill style={{ background: `linear-gradient(165deg, ${p.bg2} 0%, ${p.bg} 70%)` }} />;
   if (img) {
@@ -366,7 +374,7 @@ const Beat: React.FC<{ beat: MotionBeat; durationFrames: number; area: ReturnTyp
   );
 };
 
-export const MotionVisual: React.FC<{ spec: MotionSpec; images: string[]; durationFrames: number; brand: Brand; kind: TimelineScene["kind"]; language: "vi" | "en"; font: string }> = ({ spec: raw, images, durationFrames, brand, kind, language, font }) => {
+export const MotionVisual: React.FC<{ spec: MotionSpec; images: string[]; backdrop: Backdrop | null; durationFrames: number; brand: Brand; kind: TimelineScene["kind"]; language: "vi" | "en"; font: string }> = ({ spec: raw, images, backdrop, durationFrames, brand, kind, language, font }) => {
   const { fps } = useVideoConfig();
   const spec = normaliseMotionSpec(raw, durationFrames / fps);
   const p = palette(spec.mood, brand);
@@ -374,7 +382,7 @@ export const MotionVisual: React.FC<{ spec: MotionSpec; images: string[]; durati
   const starts = spec.beats.map((b) => Math.min(durationFrames - 1, Math.round(b.at * fps)));
   return (
     <AbsoluteFill style={{ backgroundColor: p.bg, overflow: "hidden" }}>
-      <Background spec={spec} p={p} images={images} />
+      <Background spec={spec} p={p} images={images} backdrop={backdrop} />
       {spec.beats.map((beat, i) => {
         const from = starts[i];
         // A beat fades out in its last frames and the next one enters after it: never two layouts on screen at once.

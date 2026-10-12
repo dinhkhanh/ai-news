@@ -18,6 +18,17 @@ import { buildTimeline, GAP_MS, LEAD_MS, shotsNeeded, TAIL_MS, type BuildInput, 
 const timedWordSchema = z.object({ w: z.string(), s: z.number(), e: z.number(), j: z.boolean().optional() });
 const captionChunkSchema = z.object({ text: z.string().max(200), startMs: z.number(), endMs: z.number(), words: z.array(timedWordSchema) });
 
+/** A clip playing behind a motion graphic (composition 0.17.0): the fields of a video shot, credited on the graphic's shot. */
+export const editorBackdropSchema = z.object({
+  key: z.string().min(1),
+  clipDurationSec: z.number().positive(),
+  trimStartSec: z.number().nonnegative().default(0),
+  credit: z.string().nullable().default(null),
+  assetId: z.string().nullable().default(null),
+  thumbnailUrl: z.string().nullable().default(null),
+});
+export type EditorBackdrop = z.infer<typeof editorBackdropSchema>;
+
 export const editorVisualSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("video"),
@@ -46,6 +57,8 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("motion"),
     spec: motionSpecSchema,
     images: z.array(z.string().min(1)).max(8).default([]),
+    /** Footage behind the graphic, drawn when `spec.background` is `video`; null = none. */
+    backdrop: editorBackdropSchema.nullable().default(null),
     /** What the editor asked for (null = the build's automatic design). */
     instruction: z.string().max(1000).nullable().default(null),
   }),
@@ -54,6 +67,8 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("hyperframes"),
     html: z.string().min(1).max(HYPERFRAMES_MAX_CHARS),
     images: z.array(z.string().min(1)).max(8).default([]),
+    /** Footage behind the composition (its page is then transparent); null = none. */
+    backdrop: editorBackdropSchema.nullable().default(null),
     summary: z.string().max(400).nullable().default(null),
     instruction: z.string().max(1000).nullable().default(null),
   }),
@@ -62,8 +77,21 @@ export type EditorVisual = z.infer<typeof editorVisualSchema>;
 
 /** R2 key of a picture / clip shot; null for shots drawn by code (solid fill, motion graphics). */
 export const visualKey = (v: EditorVisual): string | null => (v.kind === "video" || v.kind === "image" ? v.key : null);
-/** Every R2 key a shot needs (its file, or the pictures a motion graphic uses). */
-export const visualKeys = (v: EditorVisual): string[] => (v.kind === "video" || v.kind === "image" ? [v.key] : v.kind === "solid" ? [] : v.images);
+/** Every R2 key a shot needs (its file, or the pictures and backdrop clip a motion graphic uses). */
+export const visualKeys = (v: EditorVisual): string[] => (v.kind === "video" || v.kind === "image" ? [v.key] : v.kind === "solid" ? [] : [...v.images, ...(v.backdrop ? [v.backdrop.key] : [])]);
+
+/** A video shot as a backdrop clip. */
+export const backdropOf = (v: Extract<EditorVisual, { kind: "video" }>): EditorBackdrop => ({ key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit, assetId: v.assetId, thumbnailUrl: v.thumbnailUrl });
+
+/** Clips of a scene that can play behind a motion graphic: its video shots and the graphics' current backdrops, each once. */
+export function backdropCandidates(scene: Pick<EditorScene, "visual" | "shots">): EditorBackdrop[] {
+  const out: EditorBackdrop[] = [];
+  for (const v of [scene.visual, ...scene.shots]) {
+    const b = v.kind === "video" ? backdropOf(v) : v.kind === "motion" || v.kind === "hyperframes" ? v.backdrop : null;
+    if (b && !out.some((o) => o.key === b.key && o.trimStartSec === b.trimStartSec)) out.push(b);
+  }
+  return out;
+}
 /** Short label of a shot's kind for the editor (Vietnamese UI). */
 export const visualLabel = (v: EditorVisual) => (v.kind === "video" ? "clip" : v.kind === "image" ? "ảnh" : v.kind === "solid" ? "nền màu" : v.kind === "motion" ? "đồ hoạ" : "HyperFrames");
 export { isGraphicVisual };
@@ -191,8 +219,8 @@ export function setCaptionText(chunk: CaptionChunk, text: string): CaptionChunk 
 function toVisualInput(v: EditorVisual): SceneVisualInput {
   if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit };
   if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, focus: v.focus, sketch: v.sketch, credit: v.credit };
-  if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images };
-  if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images };
+  if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images, backdrop: v.backdrop, credit: v.backdrop?.credit ?? null };
+  if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images, backdrop: v.backdrop, credit: v.backdrop?.credit ?? null };
   return null;
 }
 
@@ -306,8 +334,9 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
     const fromTimeline = (v: Timeline["scenes"][number]["visual"], credit: string | null): EditorVisual => {
       if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null };
       if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, focus: v.focus ?? null, sketch: v.sketch ?? null, credit, assetId: null, thumbnailUrl: null };
-      if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images ?? [], instruction: null };
-      if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images ?? [], summary: null, instruction: null };
+      const backdrop = (v.kind === "motion" || v.kind === "hyperframes") && v.backdrop ? { key: v.backdrop.src, clipDurationSec: v.backdrop.clipDurationSec, trimStartSec: v.backdrop.trimStartSec, credit, assetId: null, thumbnailUrl: null } : null;
+      if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images ?? [], backdrop, instruction: null };
+      if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images ?? [], backdrop, summary: null, instruction: null };
       return { kind: "solid" };
     };
     const visual = fromTimeline(sc.visual, sc.credit);

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import type { EditorScene, EditorVisual } from "@/lib/media/editor";
+import { backdropCandidates, backdropOf, type EditorBackdrop, type EditorScene, type EditorVisual } from "@/lib/media/editor";
 
 export const MOTION_ENGINE_LABEL: Record<MotionEngine, string> = {
   remotion: "Remotion · mẫu đồ hoạ theo thương hiệu",
@@ -37,8 +37,10 @@ type Props = {
   defaultEngine: MotionEngine;
   /** Replace the active shot (inline edits of a generated graphic). */
   onEdit: (visual: EditorVisual) => void;
-  onGenerate: (payload: { engine: MotionEngine; instruction?: string; shot: number | null }) => void;
+  onGenerate: (payload: { engine: MotionEngine; instruction?: string; shot: number | null; backdrop: { key: string; trimStartSec: number } | null }) => void;
 };
+
+const backdropId = (b: EditorBackdrop | null) => (b ? `${b.trimStartSec}@${b.key}` : "");
 
 /**
  * "Đồ hoạ chuyển động" in the inspector: Claude Opus 5.5 designs a motion
@@ -46,12 +48,27 @@ type Props = {
  * or for the whole scene (one graphic replacing every shot), with either
  * engine (`@ai-news/video/motion`). Runs in the background like the other
  * regenerations (a new version). A generated spec's words can be fixed here
- * without another call; a HyperFrames shot shows its HTML.
+ * without another call; a HyperFrames shot shows its HTML. "Video nền" picks
+ * one of the scene's clips to play behind the graphic (dimmed): preselected
+ * when the shot is a clip, passed to the next design, and swapped in place on
+ * a graphic that already exists.
  */
 export function MotionPanel({ scene, shot, active, shotCount, disabled, canRegenerate, defaultEngine, onEdit, onGenerate }: Props) {
   const [engine, setEngine] = useState<MotionEngine>(shot.kind === "hyperframes" ? "hyperframes" : shot.kind === "motion" ? "remotion" : defaultEngine);
   const [instruction, setInstruction] = useState("");
-  const payload = (whole: boolean) => ({ engine, instruction: instruction.trim() || undefined, shot: whole ? null : active });
+  const graphic = shot.kind === "motion" || shot.kind === "hyperframes";
+  const clips = backdropCandidates(scene);
+  const [clipId, setClipId] = useState(backdropId(shot.kind === "video" ? backdropOf(shot) : graphic ? shot.backdrop : null));
+  const clip = clips.find((c) => backdropId(c) === clipId) ?? null;
+  const payload = (whole: boolean) => ({ engine, instruction: instruction.trim() || undefined, shot: whole ? null : active, backdrop: clip ? { key: clip.key, trimStartSec: clip.trimStartSec } : null });
+  const pickClip = (id: string) => {
+    setClipId(id);
+    if (!graphic) return;
+    const next = clips.find((c) => backdropId(c) === id) ?? null;
+    // An existing graphic takes the clip right away; a Remotion spec switches its background to the footage and back.
+    if (shot.kind === "motion") onEdit({ ...shot, backdrop: next, spec: { ...shot.spec, background: next ? "video" : shot.spec.background === "video" ? "gradient" : shot.spec.background } });
+    else onEdit({ ...shot, backdrop: next });
+  };
 
   return (
     <div className="space-y-2 rounded-lg border p-2.5">
@@ -74,6 +91,21 @@ export function MotionPanel({ scene, shot, active, shotCount, disabled, canRegen
         placeholder="Gợi ý (tuỳ chọn): “biểu đồ so sánh 2 năm”, “chữ to từng từ theo lời đọc”, “tông đỏ khẩn cấp”…"
         className="text-sm"
       />
+      {clips.length ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor="motion-backdrop" className="text-xs">
+            Video nền
+          </Label>
+          <NativeSelect id="motion-backdrop" fieldSize="sm" value={clipId} onChange={(e) => pickClip(e.target.value)} disabled={graphic ? disabled : !canRegenerate} className="max-w-64">
+            <option value="">Không – nền vẽ</option>
+            {clips.map((c, i) => (
+              <option key={backdropId(c)} value={backdropId(c)}>
+                {`Clip ${i + 1} · ${c.clipDurationSec.toFixed(0)} s${c.trimStartSec ? ` từ ${c.trimStartSec.toFixed(0)} s` : ""}${c.credit ? ` · ${c.credit}` : ""}`}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" variant="outline" disabled={!canRegenerate} onClick={() => onGenerate(payload(false))}>
           {shot.kind === "motion" || shot.kind === "hyperframes" ? `Tạo lại đồ hoạ cảnh quay ${active + 1}` : `Thay cảnh quay ${active + 1} bằng đồ hoạ`}
@@ -84,7 +116,10 @@ export function MotionPanel({ scene, shot, active, shotCount, disabled, canRegen
           </Button>
         ) : null}
       </div>
-      <p className="text-[11px] text-muted-foreground">Chỉ dùng dữ kiện trong lời đọc của cảnh; chạy nền ~1 phút, thành phiên bản mới. Phụ đề vẫn hiện bên dưới đồ hoạ.</p>
+      <p className="text-[11px] text-muted-foreground">
+        Chỉ dùng dữ kiện trong lời đọc của cảnh; chạy nền ~1 phút, thành phiên bản mới. Phụ đề vẫn hiện bên dưới đồ hoạ.
+        {clips.length ? " Video nền phát mờ phía sau đồ hoạ; đổi video nền của đồ hoạ HyperFrames chỉ hiện ra khi mã của nó để nền trong suốt." : ""}
+      </p>
 
       {shot.kind === "motion" ? <SpecTexts spec={shot.spec} disabled={disabled} onChange={(spec) => onEdit({ ...shot, spec })} /> : null}
       {shot.kind === "hyperframes" ? (

@@ -131,8 +131,9 @@ const StillVisual: React.FC<{ visual: Extract<Visual, { kind: "image" }>; durati
 type ShotContext = { kind: TimelineScene["kind"]; language: Timeline["language"] };
 
 const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Brand; variant?: number; context: ShotContext }> = ({ visual, durationFrames, brand, variant = 0, context }) => {
-  if (visual.kind === "motion") return <MotionVisual spec={visual.spec} images={visual.images ?? []} durationFrames={durationFrames} brand={brand} kind={context.kind} language={context.language} font={fontFamily(brand.fonts.heading)} />;
-  if (visual.kind === "hyperframes") return <HyperFramesShot html={visual.html} images={visual.images ?? []} brand={brand} kind={context.kind} font={brand.fonts.heading} />;
+  // Timelines stored before 0.17.0 have no `backdrop`.
+  if (visual.kind === "motion") return <MotionVisual spec={visual.spec} images={visual.images ?? []} backdrop={visual.backdrop ?? null} durationFrames={durationFrames} brand={brand} kind={context.kind} language={context.language} font={fontFamily(brand.fonts.heading)} />;
+  if (visual.kind === "hyperframes") return <HyperFramesShot html={visual.html} images={visual.images ?? []} backdrop={visual.backdrop ?? null} durationFrames={durationFrames} brand={brand} kind={context.kind} font={brand.fonts.heading} />;
   if (visual.kind === "solid") {
     return <AbsoluteFill style={{ background: `linear-gradient(160deg, ${brand.colours.primary}, ${brand.colours.background})` }} />;
   }

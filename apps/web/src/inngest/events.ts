@@ -111,6 +111,8 @@ export const projectSceneRegenerateRequested = eventType("project/scene.regenera
     engine: z.enum(["remotion", "hyperframes"]).optional(),
     instruction: z.string().max(1000).optional(),
     shot: z.number().int().min(0).max(12).optional(),
+    /** Motion graphic: the scene's clip to play behind it (`backdropCandidates`, by key + start); absent / null = none. */
+    backdrop: z.object({ key: z.string().min(1), trimStartSec: z.number().nonnegative() }).nullable().optional(),
   }),
 });
 

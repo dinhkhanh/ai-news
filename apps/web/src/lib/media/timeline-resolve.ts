@@ -7,8 +7,11 @@ export async function resolveTimelineSrcs(t: Timeline, expiresIn = 3 * 3600): Pr
   const r = (k: string | null) => (k ? resolveSrc(k, expiresIn) : Promise.resolve(null));
   const visual = async (v: Timeline["scenes"][number]["visual"]): Promise<Timeline["scenes"][number]["visual"]> => {
     if (v.kind === "solid") return v;
-    // Motion graphics carry their pictures as a list of keys (`{{image:N}}` / spec `image` indexes).
-    if (v.kind === "motion" || v.kind === "hyperframes") return { ...v, images: await Promise.all((v.images ?? []).map((k) => resolveSrc(k, expiresIn))) };
+    // Motion graphics carry their pictures as a list of keys (`{{image:N}}` / spec `image` indexes) and maybe a backdrop clip.
+    if (v.kind === "motion" || v.kind === "hyperframes") {
+      const [images, backdrop] = await Promise.all([Promise.all((v.images ?? []).map((k) => resolveSrc(k, expiresIn))), v.backdrop ? resolveSrc(v.backdrop.src, expiresIn).then((src) => ({ ...v.backdrop!, src })) : null]);
+      return { ...v, images, backdrop };
+    }
     return { ...v, src: await resolveSrc(v.src, expiresIn) };
   };
   const scenes = await Promise.all(

@@ -3,7 +3,7 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { checkHyperframesHtml, HYPERFRAMES_COMPOSITION_ID, hyperframesOutputSchema, motionSpecSchema, normaliseMotionSpec, sanitiseHyperframesHtml, type MotionEngine, type MotionSpec } from "@ai-news/video/motion";
 import { motionArea, OUTPUT, type Brand } from "@ai-news/video/schema";
-import type { EditorVisual } from "@/lib/media/editor";
+import type { EditorBackdrop, EditorVisual } from "@/lib/media/editor";
 import { autoMotionCap, timingLine } from "@/lib/media/motion-plan";
 import { anthropic, LlmOutputError, MODELS, recordLlmUsage, type LlmContext } from "./client";
 
@@ -96,6 +96,12 @@ export type MotionShotInput = {
   part: { index: number; count: number } | null;
   /** Pictures the graphic may use: R2 key + a URL Claude can look at. */
   images: Array<{ key: string; url: string }>;
+  /**
+   * Real footage that can play behind the graphic (drawn by the renderer, dimmed), described in words: Claude
+   * cannot watch it. `required` = the editor chose it, so the graphic must leave it visible; otherwise Claude
+   * decides whether the shot is better over footage or over a drawn background.
+   */
+  backdrop: (EditorBackdrop & { description: string; required: boolean }) | null;
   /** The editor's directions, or null for the build's automatic design. */
   instruction: string | null;
 };
@@ -109,7 +115,8 @@ Rules for every motion graphic:
 - Burnt-in captions of the voice-over are drawn by the video below your graphic, so do not repeat the whole voice-over: show the key idea, the number, the structure.
 - Sync with the speech: a word or figure appears about 0.2 s before it is spoken (word timings are given in seconds from the shot's first frame). Keep the last state on screen until the shot ends.
 - Vertical 1080×1920 frame. The platform's UI covers the top 220 px, the right 180 px and the bottom 420 px; the captions sit right above that.
-- Bold, legible, high contrast, generous spacing, one focal point at a time. Movement is purposeful: entrances, count-ups, bars growing, lines drawing. No flashing.`;
+- Bold, legible, high contrast, generous spacing, one focal point at a time. Movement is purposeful: entrances, count-ups, bars growing, lines drawing. No flashing.
+- Real footage behind the graphic (only when a video clip is provided): the renderer plays the clip full frame, muted and dimmed, under your graphic. It suits a hook, a kinetic title, a quote, a list or a single big figure over the place or scene the voice-over is about; a dense chart reads better on a drawn background. Over footage, keep large areas open so the clip shows, and put every line of text on a solid or frosted card / panel or give it a strong shadow – never thin text straight on moving video.`;
 
 function remotionSystem(lang: "vi" | "en") {
   return `You are a senior motion designer for a news channel's short vertical videos. You design one shot as a JSON spec that a fixed renderer draws with the channel's brand colours.
@@ -129,7 +136,7 @@ Elements (fields not listed are null):
 - icon: \`emoji\` – one large emoji floating, as an accent next to a title or stat.
 - image: \`image\` = index of a provided picture, \`text\` = caption. Only when pictures are provided.
 
-\`mood\`: brand (the kit's colours, default), dark, light (paper, for explainers), alert (breaking / danger only). \`background\`: gradient, grid (data), dots, rays (energy, the hook), image (\`backgroundImage\` = a provided picture, dimmed).
+\`mood\`: brand (the kit's colours, default), dark, light (paper, for explainers), alert (breaking / danger only); with a video background it tints the footage. \`background\`: gradient, grid (data), dots, rays (energy, the hook), image (\`backgroundImage\` = a provided picture, dimmed), video (the provided clip plays behind, tinted by the mood; only when a clip is provided). Over video the renderer puts titles, stats and lists on the frame as usual; prefer 1–2 elements per beat so the footage stays visible.
 ${COMMON_RULES(lang)}`;
 }
 
@@ -155,6 +162,7 @@ Technical constraints (the render fails otherwise):
 - Canvas 1080×1920. Put text between x 80 and 960, y 240 and ${Math.round(safeBottom)} (below that are the captions). Background art may fill the whole frame.
 - Available CSS variables: --brand-primary, --brand-accent, --brand-bg, --brand-text, --brand-highlight, --font (the brand font, Be Vietnam Pro / Inter, weights 500–900; Vietnamese diacritics supported), --safe-bottom.
 - Pictures: only the provided ones, as <img src="{{image:N}}"> (N = index); otherwise draw with CSS and inline SVG (charts, icons, maps as simple shapes).
+- Video clip (only when one is provided): you cannot embed it (no <video>); the renderer plays it under the page. To use it, give #stage and every full-frame layer a transparent background (a partial gradient vignette is fine) and answer videoBackground: true; to paint your own background instead, answer false and the clip is not shown.
 - Keep it under 40 000 characters.
 ${COMMON_RULES(lang)}`;
 }
@@ -169,6 +177,11 @@ function userContent(input: MotionShotInput) {
     `Shot length: ${input.durationSec.toFixed(2)} s. Words heard during this shot (seconds from its first frame): ${timingLine(input.words) || "(none – the voice-over is in another shot)"}`,
     `Brand: ${input.brand.name}; primary ${input.brand.colours.primary}, accent ${input.brand.colours.accent}, background ${input.brand.colours.background}, text ${input.brand.colours.text}.`,
     input.images.length ? `Pictures you may use (index: what you see below): ${input.images.map((_, i) => i).join(", ")}.` : "No pictures: a pure graphic.",
+    input.backdrop
+      ? input.backdrop.required
+        ? `Video clip behind the graphic, chosen by the editor (it must stay visible: ${input.engine === "remotion" ? 'background "video"' : "transparent stage, videoBackground true"}): ${input.backdrop.description}.`
+        : `Video clip available as background (use it when real footage serves the shot better than a drawn background): ${input.backdrop.description}.`
+      : "No video clip: draw the background.",
     input.instruction ? `The editor's directions (follow them unless they break the rules): ${input.instruction}` : "",
   ]
     .filter(Boolean)
@@ -181,6 +194,8 @@ function userContent(input: MotionShotInput) {
   blocks.push({ type: "text", text });
   return blocks;
 }
+
+const backdropOnly = (b: MotionShotInput["backdrop"]): EditorBackdrop | null => (b ? { key: b.key, clipDurationSec: b.clipDurationSec, trimStartSec: b.trimStartSec, credit: b.credit, assetId: b.assetId, thumbnailUrl: b.thumbnailUrl } : null);
 
 /** Design one motion shot. Throws `LlmOutputError` on a refusal / unusable output (HyperFrames is retried once with the problems named). */
 export async function designMotionShot(input: MotionShotInput, ctx: Omit<LlmContext, "purpose">): Promise<MotionShotResult> {
@@ -206,7 +221,11 @@ export async function designMotionShot(input: MotionShotInput, ctx: Omit<LlmCont
     if (!res.parsed_output) throw new LlmOutputError("Motion spec did not match the schema", res.stop_reason);
     const spec: MotionSpec = normaliseMotionSpec(res.parsed_output, input.durationSec);
     if (!spec.beats.length) throw new LlmOutputError("Motion spec has no beats", res.stop_reason);
-    return { visual: { kind: "motion", spec, images: input.images.map((i) => i.key), instruction: input.instruction }, model, costUsd, latencyMs: Date.now() - t0, attempts: 1 };
+    // The clip is kept only when the spec plays it (always when the editor chose it); a video background without a clip is a gradient.
+    if (input.backdrop?.required) spec.background = "video";
+    if (spec.background === "video" && !input.backdrop) spec.background = "gradient";
+    const backdrop = spec.background === "video" ? backdropOnly(input.backdrop) : null;
+    return { visual: { kind: "motion", spec, images: input.images.map((i) => i.key), backdrop, instruction: input.instruction }, model, costUsd, latencyMs: Date.now() - t0, attempts: 1 };
   }
 
   const system = hyperframesSystem(input.language, input.durationSec, motionArea(input.brand, input.scene.kind).y1 || OUTPUT.height - 600);
@@ -228,7 +247,8 @@ export async function designMotionShot(input: MotionShotInput, ctx: Omit<LlmCont
     const html = sanitiseHyperframesHtml(res.parsed_output.html);
     problems = checkHyperframesHtml(html);
     if (!problems.length) {
-      return { visual: { kind: "hyperframes", html, images: input.images.map((i) => i.key), summary: res.parsed_output.summary.slice(0, 400), instruction: input.instruction }, model, costUsd, latencyMs: Date.now() - t0, attempts: attempt };
+      const backdrop = input.backdrop && (input.backdrop.required || res.parsed_output.videoBackground) ? backdropOnly(input.backdrop) : null;
+      return { visual: { kind: "hyperframes", html, images: input.images.map((i) => i.key), backdrop, summary: res.parsed_output.summary.slice(0, 400), instruction: input.instruction }, model, costUsd, latencyMs: Date.now() - t0, attempts: attempt };
     }
   }
   throw new LlmOutputError(`HyperFrames composition unusable: ${problems.join("; ")}`, "invalid");

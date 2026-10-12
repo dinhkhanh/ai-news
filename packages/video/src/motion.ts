@@ -24,7 +24,8 @@ export type MotionMode = (typeof MOTION_MODES)[number];
 export const MOTION_ENGINES = ["remotion", "hyperframes"] as const;
 export type MotionEngine = (typeof MOTION_ENGINES)[number];
 
-export const MOTION_BACKGROUNDS = ["gradient", "grid", "dots", "rays", "image"] as const;
+/** `video` = the shot's backdrop clip (real footage, dimmed); falls back to `gradient` when the shot has none. */
+export const MOTION_BACKGROUNDS = ["gradient", "grid", "dots", "rays", "image", "video"] as const;
 export const MOTION_MOODS = ["brand", "dark", "light", "alert"] as const;
 export const MOTION_ELEMENTS = ["kicker", "title", "text", "stat", "bars", "list", "quote", "timeline", "compare", "icon", "image"] as const;
 export type MotionElementType = (typeof MOTION_ELEMENTS)[number];
@@ -73,6 +74,7 @@ export type MotionSpec = z.infer<typeof motionSpecSchema>;
 export const hyperframesOutputSchema = z.object({
   html: z.string().describe("The HyperFrames composition: one root element with data-composition-id, a <style> and an inline <script> registering a paused GSAP timeline"),
   summary: z.string().describe("One sentence in the video's language describing the shot for the editor"),
+  videoBackground: z.boolean().describe("True when the composition leaves the stage background transparent so the provided video clip plays behind it; false when no clip is provided or you painted your own background"),
 });
 export type HyperframesOutput = z.infer<typeof hyperframesOutputSchema>;
 
@@ -146,6 +148,8 @@ export type HyperframesDocumentInput = {
   fontFamily: string;
   /** Lowest y (px) the composition may draw text at: the captions start below it. */
   safeBottom: number;
+  /** A backdrop clip plays under the iframe: the page's own background stays transparent. */
+  transparent?: boolean;
 };
 
 const escapeAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -179,7 +183,7 @@ export function hyperframesDocument(input: HyperframesDocumentInput): string {
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;700;800;900&family=Inter:wght@500;700;800;900&display=block&subset=vietnamese">
 <style>
 :root{--brand-primary:${c.primary};--brand-accent:${c.accent};--brand-bg:${c.background};--brand-text:${c.text};--brand-highlight:${c.highlight};--font:${input.fontFamily},'Be Vietnam Pro',sans-serif;--safe-bottom:${input.safeBottom}px}
-html,body{margin:0;padding:0;width:1080px;height:1920px;overflow:hidden;background:var(--brand-bg);color:var(--brand-text);font-family:var(--font)}
+html,body{margin:0;padding:0;width:1080px;height:1920px;overflow:hidden;background:${input.transparent ? "transparent" : "var(--brand-bg)"};color:var(--brand-text);font-family:var(--font)}
 *{box-sizing:border-box}
 </style>
 <script src="${HYPERFRAMES_GSAP_URL}"></script>

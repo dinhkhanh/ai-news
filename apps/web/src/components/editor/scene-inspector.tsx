@@ -40,7 +40,7 @@ type Props = {
   political: boolean;
   onChange: (scene: EditorScene) => void;
   onRemove: () => void;
-  onRegenerate: (what: "voice" | "broll" | "motion", payload: { voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null }) => void;
+  onRegenerate: (what: "voice" | "broll" | "motion", payload: { voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { key: string; trimStartSec: number } | null }) => void;
   /** The project's motion engine, preselected in the motion panel. */
   motionEngine: MotionEngine;
   onSeek: () => void;
@@ -428,6 +428,7 @@ export function SceneInspector({ projectId, scene, index, total, options, overla
         ) : null}
 
         <MotionPanel
+          key={`${scene.id}-${active}`}
           scene={scene}
           shot={shot}
           active={active}

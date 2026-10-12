@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkHyperframesHtml, formatMotionNumber, hyperframesDocument, normaliseMotionSpec, sanitiseHyperframesHtml, type MotionSpec } from "@ai-news/video/motion";
 import { brandSchema, motionArea, OUTPUT, SAFE_ZONES } from "@ai-news/video/schema";
-import { buildFromDoc, docKeys, editorDocSchema, shotsMissing, visualKey, type EditorScene } from "./editor";
+import { backdropCandidates, backdropOf, buildFromDoc, docFromTimeline, docKeys, editorDocSchema, shotsMissing, visualKey, type EditorScene } from "./editor";
 import { autoMotionCap, motionScenes, shotWords, timingLine } from "./motion-plan";
 
 const scenes = [
@@ -101,6 +101,13 @@ describe("HyperFrames composition", () => {
     expect(doc).toContain('src="https://r2.example/a.jpg?x=1&amp;y=&quot;2&quot;"');
     expect(doc).toContain("hf-seeked");
     expect(doc).toContain("gsap@3.13.0");
+    expect(doc).toContain("background:var(--brand-bg)");
+  });
+
+  it("leaves the page transparent when a backdrop clip plays under it", () => {
+    const doc = hyperframesDocument({ html: good, images: [], colours: { primary: "#111", accent: "#f59e0b", background: "#000", text: "#fff", highlight: "#fbbf24" }, fontFamily: "'Inter'", safeBottom: 1300, transparent: true });
+    expect(doc).toContain("background:transparent");
+    expect(doc).not.toContain("background:var(--brand-bg)");
   });
 });
 
@@ -130,7 +137,7 @@ describe("motion shots in the editor document", () => {
     newsTerms: [],
     durationSec: 12,
     voice: { key: "media/o/p/vo/b-s1.wav", durationMs: 12000, words: [] },
-    visual: { kind: "motion", spec: spec([{ at: 0, align: "center", elements: [el] }]), images: ["media/o/p/aroll/b-0.jpg"], instruction: null },
+    visual: { kind: "motion", spec: spec([{ at: 0, align: "center", elements: [el] }]), images: ["media/o/p/aroll/b-0.jpg"], backdrop: null, instruction: null },
     shots: [],
     holdMs: 0,
     overlay: true,
@@ -150,5 +157,30 @@ describe("motion shots in the editor document", () => {
     expect(shot.visual.kind).toBe("motion");
     expect(shot.credit).toBeNull();
     expect(shot.durationFrames).toBe(timeline.scenes[0].durationFrames);
+  });
+
+  const clip = { kind: "video" as const, key: "media/o/p/broll/b-s1-pexels-1.mp4", clipDurationSec: 8, trimStartSec: 0, credit: "Video: Ann / Pexels", assetId: null, thumbnailUrl: null };
+  const backdrop = backdropOf(clip);
+  const overVideo = editorDocSchema.parse({ ...doc, scenes: [{ ...motionScene, visual: { ...motionScene.visual, spec: { ...spec([{ at: 0, align: "center", elements: [el] }]), background: "video" }, backdrop } }] });
+
+  it("offers the scene's clips and current backdrops once each as backdrops", () => {
+    expect(backdropCandidates({ visual: clip, shots: [{ ...clip, trimStartSec: 5 }, clip, { kind: "solid" }] })).toHaveLength(2);
+    expect(backdropCandidates(overVideo.scenes[0])).toEqual([backdrop]);
+    expect(backdropCandidates(doc.scenes[0])).toEqual([]);
+  });
+
+  it("plays the backdrop clip, lists its key and credits it on the graphic's shot", () => {
+    expect(docKeys(overVideo)).toContain(clip.key);
+    const { timeline } = buildFromDoc(overVideo, null);
+    const shot = timeline.scenes[0].shots[0];
+    expect(shot.credit).toBe("Video: Ann / Pexels");
+    expect(shot.visual.kind === "motion" && shot.visual.backdrop).toEqual({ src: clip.key, trimStartSec: 0, clipDurationSec: 8 });
+  });
+
+  it("keeps the backdrop when a document is rebuilt from its timeline", () => {
+    const { timeline } = buildFromDoc(overVideo, null);
+    const back = docFromTimeline(timeline, {});
+    const v = back.scenes[0].visual;
+    expect(v.kind === "motion" && v.backdrop).toMatchObject({ key: clip.key, clipDurationSec: 8, credit: "Video: Ann / Pexels" });
   });
 });

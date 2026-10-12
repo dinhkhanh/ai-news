@@ -15,10 +15,13 @@ export type SceneVisualInput =
   | { kind: "video"; key: string; clipDurationSec: number; trimStartSec?: number; credit: string | null }
   /** `sketch`: the photo turns into a drawing of itself during the shot (composition 0.16.0). */
   | { kind: "image"; key: string; kenBurns?: boolean; focus?: Focus | null; sketch?: Sketch | null; credit: string | null }
-  /** Motion graphics (`@ai-news/video/motion`): `images` are R2 keys. */
-  | { kind: "motion"; spec: MotionSpec; images: string[]; credit?: null }
-  | { kind: "hyperframes"; html: string; images: string[]; credit?: null }
+  /** Motion graphics (`@ai-news/video/motion`): `images` and the backdrop clip are R2 keys; `credit` = the backdrop's. */
+  | { kind: "motion"; spec: MotionSpec; images: string[]; backdrop?: BackdropInput | null; credit?: string | null }
+  | { kind: "hyperframes"; html: string; images: string[]; backdrop?: BackdropInput | null; credit?: string | null }
   | null;
+
+/** Footage behind a motion graphic (composition 0.17.0). */
+export type BackdropInput = { key: string; clipDurationSec: number; trimStartSec?: number };
 
 /** Shots a scene of this length needs so no picture stays longer than MAX_SHOT_SEC. */
 export function shotsNeeded(durationMs: number) {
@@ -67,8 +70,9 @@ export const TAIL_MS = 700;
 
 function toVisual(v: NonNullable<SceneVisualInput>): Visual {
   if (v.kind === "video") return { kind: "video", src: v.key, trimStartSec: Math.max(0, v.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, v.clipDurationSec), fit: "cover", muted: true };
-  if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images };
-  if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images };
+  const backdrop = (b: BackdropInput | null | undefined) => (b ? { src: b.key, trimStartSec: Math.max(0, b.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, b.clipDurationSec) } : null);
+  if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images, backdrop: backdrop(v.backdrop) };
+  if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images, backdrop: backdrop(v.backdrop) };
   return { kind: "image", src: v.key, kenBurns: v.kenBurns ?? true, focus: v.focus ?? null, sketch: v.sketch ?? null };
 }
 

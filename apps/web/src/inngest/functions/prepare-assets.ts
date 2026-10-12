@@ -162,10 +162,12 @@ export const prepareAssetsFn = inngest.createFunction(
     /* ---- motion graphics: Claude Opus 5.5 designs the chosen scenes against their word timings; such a scene takes no
      * pictures (`need` 0 below). A design that fails leaves its scene to the picture tiers, as if it had not been chosen. ---- */
     const motionPlan = await step.run("motion-plan", async () => {
-      if (input.motionMode === "off") return { sceneIds: [] as string[], reasons: {} as Record<string, string>, costUsd: 0, error: null as string | null };
+      if (input.motionMode === "off") return { sceneIds: [] as string[], reasons: {} as Record<string, string>, costUsd: 0, error: null as string | null, backdrops: false };
       await reportProgress(pctx, { label: input.motionMode === "all" ? `Đồ hoạ chuyển động cho cả ${input.scenes.length} cảnh` : "Claude chọn cảnh làm đồ hoạ chuyển động", pct: 29 });
       const plan = input.motionMode === "auto" ? await planMotionScenes({ language: input.language, title: input.title, scenes: input.scenes }, pctx) : null;
-      return { sceneIds: motionScenes(input.motionMode, input.scenes, plan ? plan.sceneIds : null), reasons: plan?.reasons ?? {}, costUsd: plan?.costUsd ?? 0, error: plan?.error ?? null };
+      // Footage behind a graphic comes from free stock (one clip per scene, by its B-roll terms): not for a political story.
+      const p = tierAllowed("stock", input.political) && !skipStock ? await stockProvidersAvailable() : { pexels: false, pixabay: false };
+      return { sceneIds: motionScenes(input.motionMode, input.scenes, plan ? plan.sceneIds : null), reasons: plan?.reasons ?? {}, costUsd: plan?.costUsd ?? 0, error: plan?.error ?? null, backdrops: p.pexels || p.pixabay };
     });
     const motionTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })) });
     const motionResults = await Promise.all(
@@ -177,13 +179,30 @@ export const prepareAssetsFn = inngest.createFunction(
           const durationSec = t.durationFrames / EDITOR_FPS;
           // The graphic is one shot covering the whole scene; the first scene's voice starts after the lead-in.
           const words = shotWords(voices.find((v) => v.sceneId === id)?.words ?? [], i === 0 ? LEAD_MS / 1000 : 0, durationSec);
+          // A stock clip Claude may play behind the graphic (it decides: a chart reads better on a drawn background).
+          let clip: ChosenAsset | null = null;
+          let clipCostUsd = 0;
+          if (motionPlan.backdrops && sc.brollTerms.length) {
+            try {
+              const found = await fetchSceneBroll(sc, { wantSec: durationSec, buildId: input.buildId, keep: 1 }, pctx);
+              clip = found.selected;
+              clipCostUsd = found.rankCostUsd;
+            } catch (e) {
+              console.warn("[assets] motion backdrop search failed", id, e);
+            }
+          }
+          const backdrop = clip
+            ? { key: clip.key, clipDurationSec: clip.durationSec ?? SHOT_SEC, trimStartSec: 0, credit: clip.credit, assetId: clip.assetId, thumbnailUrl: clip.thumbnailUrl, description: `${(clip.durationSec ?? SHOT_SEC).toFixed(0)} s stock clip found for “${sc.brollTerms[0]}”`, required: false }
+            : null;
           try {
-            const r = await designMotionShot({ engine: input.motionEngine, language: input.language, title: input.title, sourceName: input.source.name, brand: brand.brand, scene: sc, words, durationSec, part: null, images: [], instruction: null }, pctx);
+            const r = await designMotionShot({ engine: input.motionEngine, language: input.language, title: input.title, sourceName: input.source.name, brand: brand.brand, scene: sc, words, durationSec, part: null, images: [], backdrop, instruction: null }, pctx);
             await tickProgress(pctx, { label: `Đồ hoạ chuyển động (${input.motionEngine === "hyperframes" ? "HyperFrames" : "Remotion"})`, total: motionPlan.sceneIds.length, from: 29, to: 30 });
-            return { sceneId: id, visual: r.visual as EditorScene["visual"] | null, model: r.model, attempts: r.attempts, costUsd: r.costUsd, error: null as string | null };
+            const v = r.visual as EditorScene["visual"];
+            const used = (v.kind === "motion" || v.kind === "hyperframes") && v.backdrop ? v.backdrop.key : null;
+            return { sceneId: id, visual: v as EditorScene["visual"] | null, model: r.model, attempts: r.attempts, costUsd: r.costUsd + clipCostUsd, backdrop: used, error: null as string | null };
           } catch (e) {
             console.warn("[assets] motion graphic failed, the scene keeps pictures", id, e);
-            return { sceneId: id, visual: null, model: null, attempts: 0, costUsd: 0, error: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
+            return { sceneId: id, visual: null, model: null, attempts: 0, costUsd: clipCostUsd, backdrop: null as string | null, error: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
           }
         }),
       ),
@@ -574,7 +593,7 @@ export const prepareAssetsFn = inngest.createFunction(
           planned: motionPlan.sceneIds,
           reasons: motionPlan.reasons,
           planError: motionPlan.error,
-          scenes: motionResults.map((r) => ({ sceneId: r.sceneId, ok: Boolean(r.visual), model: r.model, attempts: r.attempts, error: r.error, costUsd: r.costUsd })),
+          scenes: motionResults.map((r) => ({ sceneId: r.sceneId, ok: Boolean(r.visual), model: r.model, attempts: r.attempts, backdrop: r.backdrop, error: r.error, costUsd: r.costUsd })),
           costUsd: motionCostUsd,
         },
         mix: { mixKey: mix.mixKey, voiceKey: mix.voiceKey, integratedLufs: mix.integratedLufs, signature: audioSignature(doc), reused: false },
