@@ -40,10 +40,10 @@ export function currentAdminItem(pathname: string) {
 }
 
 /** Admin sections: the icon rail from `sm` up, a horizontally scrolling chip row under the top bar on phones. */
-export function AdminNav({ variant }: { variant: "rail" | "strip" }) {
+export function AdminNav({ variant, expanded = false }: { variant: "rail" | "strip"; expanded?: boolean }) {
   const pathname = usePathname();
   if (variant === "rail") {
-    return <NavRail label="Admin" homeHref="/app" groups={ADMIN_NAV_GROUPS} isActive={(item) => isActive(pathname, item.href)} />;
+    return <NavRail label="Admin" homeHref="/app" groups={ADMIN_NAV_GROUPS} isActive={(item) => isActive(pathname, item.href)} defaultExpanded={expanded} />;
   }
   return (
     <nav aria-label="Admin" className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2 scrollbar-none sm:hidden">

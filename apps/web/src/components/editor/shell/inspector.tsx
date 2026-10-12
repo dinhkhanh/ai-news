@@ -1,5 +1,5 @@
 "use client";
-import { ChevronDown, ChevronUp, Crosshair, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Crosshair, PanelRightClose, PanelRightOpen, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { sceneVoiceMs } from "@/lib/media/editor";
@@ -59,6 +59,9 @@ export function Inspector() {
               <Trash2 />
             </Button>
           ) : null}
+          <Button variant="ghost" size="icon-xs" className="hidden lg:inline-flex" onClick={() => ctx.ui.setInspectorOpen(false)} aria-expanded aria-controls="editor-inspector" aria-label="Thu gọn bảng chi tiết (⌥⌘B)" title="Thu gọn bảng chi tiết (⌥⌘B)">
+            <PanelRightClose />
+          </Button>
         </span>
       </div>
       <div role="tablist" aria-label="Phần" className="flex gap-0.5 overflow-x-auto border-b px-2 scrollbar-none">
@@ -79,5 +82,22 @@ export function Inspector() {
         {Body ? <Body key={`${active.id}:${scene.id}`} /> : null}
       </div>
     </>
+  );
+}
+
+/** Desktop, inspector collapsed: a slim strip that names the selected scene and reopens the inspector. */
+export function InspectorStrip({ className }: { className?: string }) {
+  const ctx = useEditor();
+  return (
+    <div className={cn("flex-col items-center gap-2 border-l bg-card py-2", className)}>
+      <Button variant="ghost" size="icon-sm" onClick={() => ctx.ui.setInspectorOpen(true)} aria-expanded={false} aria-controls="editor-inspector" aria-label="Mở bảng chi tiết (⌥⌘B)" title="Mở bảng chi tiết (⌥⌘B)">
+        <PanelRightOpen />
+      </Button>
+      {ctx.selectedScene ? (
+        <button type="button" onClick={() => ctx.ui.setInspectorOpen(true)} className="rounded-md px-1 py-2 font-mono text-xs text-muted-foreground [writing-mode:vertical-rl] hover:bg-muted hover:text-foreground" title="Mở bảng chi tiết">
+          {ctx.selectedScene.id} · chi tiết
+        </button>
+      ) : null}
+    </div>
   );
 }

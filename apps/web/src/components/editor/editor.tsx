@@ -44,14 +44,15 @@ function resolveForPlayer(t: Timeline, urls: Record<string, string>, logoUrl: st
 
 /** Which panel / inspector tab the editor opened with last time (per browser; a convenience only). */
 const PREFS_KEY = "ai-news.editor.prefs";
-function readPrefs(): { panel?: string; tab?: string; overlays?: Record<string, boolean> } {
+type Prefs = { panel: string; tab: string; overlays: Record<string, boolean>; panelOpen: boolean; inspectorOpen: boolean };
+function readPrefs(): Partial<Prefs> {
   try {
     return JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? "{}");
   } catch {
     return {};
   }
 }
-function writePrefs(p: { panel: string; tab: string; overlays: Record<string, boolean> }) {
+function writePrefs(p: Prefs) {
   try {
     window.localStorage.setItem(PREFS_KEY, JSON.stringify(p));
   } catch {
@@ -94,7 +95,10 @@ export function Editor(props: EditorProps) {
   });
 
   const { active, contributions } = useMemo(() => collect(BUILTIN_PLUGINS, disabled), [disabled]);
-  useEffect(() => writePrefs({ panel, tab, overlays }), [panel, tab, overlays]);
+  // Desktop: the panel beside the rail and the inspector can each be collapsed to give the preview room.
+  const [panelOpen, setPanelOpen] = useState(() => readPrefs().panelOpen ?? true);
+  const [inspectorOpen, setInspectorOpen] = useState(() => readPrefs().inspectorOpen ?? true);
+  useEffect(() => writePrefs({ panel, tab, overlays, panelOpen, inspectorOpen }), [panel, tab, overlays, panelOpen, inspectorOpen]);
 
   const savedJson = useMemo(() => JSON.stringify(props.doc), [props.doc]);
   const dirty = useMemo(() => JSON.stringify(doc) !== savedJson, [doc, savedJson]);
@@ -348,6 +352,7 @@ export function Editor(props: EditorProps) {
       const goTo = (sceneId: string, tabId: string, shot = 0) => {
         select({ sceneId, shot });
         setTabState(tabId);
+        setInspectorOpen(true);
         player.seekScene(sceneId);
       };
       if (fix.kind === "open") return goTo(fix.sceneId, fix.tab, fix.shot ?? 0);
@@ -396,9 +401,20 @@ export function Editor(props: EditorProps) {
     time,
     ui: {
       panel,
-      setPanel: setPanelState,
+      // Opening a panel (rail, a command, a fix) also shows it when the panel column was collapsed.
+      setPanel: (id) => {
+        setPanelState(id);
+        setPanelOpen(true);
+      },
+      panelOpen,
+      setPanelOpen,
+      inspectorOpen,
+      setInspectorOpen,
       tab,
-      setTab: setTabState,
+      setTab: (id) => {
+        setTabState(id);
+        setInspectorOpen(true);
+      },
       mode,
       setMode,
       overlays,

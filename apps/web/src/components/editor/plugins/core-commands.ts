@@ -15,6 +15,8 @@ export const coreCommands = definePlugin({
     { id: "core.redo", title: (c) => (c.history.redoLabel ? `Làm lại: ${c.history.redoLabel}` : "Làm lại"), group: "Tệp", keys: "⇧⌘Z", shortcut: { match: (e) => mod(e) && ((e.shiftKey && e.key.toLowerCase() === "z") || e.key.toLowerCase() === "y") }, when: (c) => c.history.canRedo, run: (c) => c.history.redo() },
     { id: "core.reset", title: () => "Huỷ mọi thay đổi chưa lưu", group: "Tệp", when: (c) => c.dirty && !c.readOnly, run: (c) => c.reset() },
     { id: "core.play", title: () => "Phát / tạm dừng", group: "Cả video", keys: "Space", shortcut: { match: (e) => e.key === " " && !mod(e) && !(e.target instanceof HTMLButtonElement) }, run: (c) => c.player.toggle() },
+    { id: "core.toggle-panel", title: (c) => (c.ui.panelOpen ? "Thu gọn bảng bên trái" : "Mở bảng bên trái"), group: "Đi tới", keys: "⌘B", shortcut: { match: (e) => mod(e) && !e.altKey && !e.shiftKey && e.code === "KeyB", global: true }, when: (c) => c.ui.mode === "edit", run: (c) => c.ui.setPanelOpen(!c.ui.panelOpen) },
+    { id: "core.toggle-inspector", title: (c) => (c.ui.inspectorOpen ? "Thu gọn bảng chi tiết" : "Mở bảng chi tiết"), group: "Đi tới", keys: "⌥⌘B", shortcut: { match: (e) => mod(e) && e.altKey && e.code === "KeyB", global: true }, when: (c) => c.ui.mode === "edit", run: (c) => c.ui.setInspectorOpen(!c.ui.inspectorOpen) },
     { id: "core.deliver", title: (c) => (c.ui.mode === "edit" ? "Xuất & duyệt" : "Về trình dựng"), group: "Tệp", keys: "⌘E", shortcut: { match: (e) => mod(e) && e.key.toLowerCase() === "e", global: true }, run: (c) => c.ui.setMode(c.ui.mode === "edit" ? "deliver" : "edit") },
   ],
 });
