@@ -11,6 +11,7 @@ import { formatUsd } from "@/lib/comic/models";
 import { dailyLimit, usedToday } from "@/lib/quota";
 import { timeAgo } from "@/lib/time";
 import { canWrite } from "@/lib/workspace";
+import { ComicTabs } from "./comic-tabs";
 import { requireComicsWorkspace } from "./guard";
 import { COMIC_STATE_LABEL } from "./labels";
 
@@ -47,6 +48,7 @@ export default async function ComicsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-5 sm:space-y-6">
       <AutoRefresh active={rows.some((r) => r.busyStep)} everyMs={6000} />
+      <ComicTabs active="comics" />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight">Truyện tranh</h1>

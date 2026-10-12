@@ -59,9 +59,10 @@ export async function approveScript(ctx: Ctx, comicId: string) {
   return { newCharacters: links.length };
 }
 
-/** Presigned URLs for every picture of a document (3 h). */
-export async function presignDoc(doc: ComicDoc, expiresIn = 3 * 3600) {
-  const keys = docImageKeys(doc);
+/** Presigned URLs for every picture of a document (3 h); with `variants`, the earlier drawings too (page editor). */
+export async function presignDoc(doc: ComicDoc, opts: { expiresIn?: number; variants?: boolean } = {}) {
+  const expiresIn = opts.expiresIn ?? 3 * 3600;
+  const keys = docImageKeys(doc, { variants: opts.variants });
   const urls = await Promise.all(keys.map((k) => presignGet(k, expiresIn)));
   return Object.fromEntries(keys.map((k, i) => [k, urls[i]]));
 }

@@ -1,6 +1,6 @@
 # Comic studio: design
 
-Status: **accepted** 2026-10-12 (decisions in §13). M1 in progress.
+Status: **accepted** 2026-10-12 (decisions in §13). M1 and M2 built (§11.2, §11.3); M3 next.
 
 A standalone feature: a member pastes a story (plain text), picks or defines a style, a cast and the AI models,
 and the app produces a short comic, 5–10 pages by default or as many as asked. It shares the app's infrastructure
@@ -382,7 +382,51 @@ approval, render, QA, multi-channel logos, publishing) is reused unchanged and t
 - To switch it on: apply migration 0031, deploy `packages/video` 0.18.0 (composition `ComicPage`, needed by the
   export), make sure the `google_veo` integration is on, then turn on flag `comics` in /admin/integrations.
 - Left for M2: style / character library pages (`/app/comics/styles`, `/app/comics/characters`), "Vẽ thử", uploading
-  one's own sheet, picking among a panel's variants, crop / pan, moving balloons by hand, the vision quality gate.
+  one's own sheet, picking among a panel's variants, crop / pan, moving balloons by hand. The vision quality gate moved
+  to M3.
+
+### 11.3 M2 as built (2026-10-12)
+
+- **Document** (`packages/video` **0.19.0**, `ComicPageView` changed): a panel may carry `crop` `{ x, y, zoom }`
+  (`panelCropSchema`, none = centred cover). The picture still covers its frame; `x` / `y` pick what stays in view and
+  `zoom` (1–4, the editor offers 1–3) enlarges it around that point (`object-position` + `scale` with the same origin).
+  `pictureToPage` maps a point of the picture to the page through the crop, so `facesOnPage` (and therefore automatic
+  balloons and tails) follow the framing.
+- **Pure edits** (`lib/comic/doc.ts`, tested): `selectVariant`, `removeVariant` (never the picture shown), `setPanelCrop`
+  (clamped, a near-centred crop is stored as none, re-letters), `placeBalloon` (manual, kept on the page, at least 2.5 ×
+  1.6 font sizes, no tail for caption / sfx, re-letters the automatic balloons around it), `editBalloon` (text, kind,
+  speaker, font size: an automatic balloon is re-lettered, a manual one keeps its centre, is resized to its text and its
+  tail re-aimed when the speaker changes), `resetBalloon`, `addBalloon`, `deleteBalloon`, `setBalloonTexts`,
+  `balloonOverflows`. `lib/comic/editor-ops.ts` is the one zod union of editor operations (`place`, `balloon`,
+  `resetBalloon`, `addBalloon`, `deleteBalloon`, `variant`, `removeVariant`, `crop`, `layout`) and `applyEditorOp`, used
+  by the browser for the optimistic copy and by the server inside `updateDoc` (under the row lock), so both compute the
+  same document. Each op has its activity type (`OP_ACTIVITY`).
+- **Page editor** (`[id]/page-editor.tsx`, tab Trang): the page with an overlay; click a panel or a balloon to inspect
+  it. Balloons drag to move, a corner handle resizes, a dot moves the tail; arrow keys nudge (Shift = more). Edits apply
+  locally at once and are saved one after another through `applyEdit` (`editor-actions.ts`; sliders and text are
+  debounced 500 ms); every save is a new version. The page refreshes from the server only when nothing is pending.
+  Panel inspector: redraw with an instruction, optionally "giữ bố cục" (the current picture goes first among the
+  reference images, `RefCandidates.base`, event field `keepComposition`); the variants (pick, remove); crop sliders;
+  the lettering list; a balloon that overflows offers "Rút gọn lời thoại" (`lib/comic/shorten.ts`: the comic's script
+  model, effort low, one structured call for the overflowing lines with a word budget of 60 %, cost recorded,
+  `comic.lines_shortened`); add a line; "Dùng hình này làm mẫu phong cách" (`addStyleSample`, the comic's own
+  workspace style only, at most 4 samples, the comic's style snapshot updated too). The page's layout template is a select.
+- **Libraries** (`/app/comics/styles`, `/app/comics/characters`, tabs `comic-tabs.tsx`; `library-actions.ts`,
+  `lib/comic/library.ts`): workspace styles (create, edit, duplicate any preset or style, delete when no comic uses it,
+  because `comic_images` cascade from styles), "Vẽ thử" (one sample of `stylePreviewPrompt` in the picked model, drawn
+  inside the request, `maxDuration` 120; the latest three show on the style card and in the new-comic picker),
+  characters (create, edit, delete, draw a sheet in any style with an instruction, accept a draft sheet). Reference
+  images for a style or a character (≤ `MAX_REFS` = 4) and one's own sheet ("Tải bản mẫu của bạn", also on a comic's
+  Nhân vật tab) go browser → presigned PUT → `library/comics/<org>/uploads/` → `checkUpload` (this workspace's prefix,
+  PNG / JPEG / WebP by content, ≤ 10 MB, short side ≥ 256 px; a failing file is deleted). An uploaded sheet is a
+  `comic_images` row of kind `sheet`, model `upload`, accepted at once.
+- To switch it on after M1: deploy `packages/video` **0.19.0** (the page renderer changed, and the export must match the
+  reader); no migration. The bucket CORS (`infra/r2/cors.json`) must allow PUT from the app's origin, as for the video
+  editor's uploads.
+- Not done / later: undo in the page editor and a version list to restore from (every edit is already an immutable
+  version in `comic_versions`, so both are UI only), rotating SFX, the vision
+  quality gate (M3). Not tested against the live services here: Claude (shorten), Vertex (Vẽ thử, sheets, redraw with
+  the current picture), R2 uploads, the Lambda export with crops.
 
 ---
 

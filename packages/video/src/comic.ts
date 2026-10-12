@@ -84,6 +84,14 @@ export const panelImageSchema = z.object({
 });
 export type PanelImage = z.infer<typeof panelImageSchema>;
 
+/**
+ * Framing of the picture inside its panel: the picture covers the frame (as CSS `object-fit: cover`), `x` / `y`
+ * (0..1) say which part stays in view when it is cropped, and `zoom` (≥ 1) enlarges it around that point.
+ */
+export const panelCropSchema = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), zoom: z.number().min(1).max(4) });
+export type PanelCrop = z.infer<typeof panelCropSchema>;
+export const DEFAULT_CROP: PanelCrop = { x: 0.5, y: 0.5, zoom: 1 };
+
 export const panelSchema = z.object({
   id: z.string(),
   rect,
@@ -91,6 +99,8 @@ export const panelSchema = z.object({
   /** The picture shown; one of `variants`. */
   image: panelImageSchema.nullable(),
   variants: z.array(panelImageSchema),
+  /** Absent = centred, no zoom. */
+  crop: panelCropSchema.optional(),
   /** Last drawing error, cleared by the next successful drawing. */
   error: z.string().nullable(),
   lettering: z.array(balloonSchema),
@@ -153,6 +163,22 @@ export function pageGeometry(format: { width: number }) {
   const gutter = Math.round(format.width * 0.018);
   const border = Math.max(3, Math.round(format.width * 0.004));
   return { margin, gutter, border };
+}
+
+/**
+ * Where a point of the picture (normalised 0..1) lands on the page, for a picture drawn into `frame` with `crop`.
+ * Mirrors the renderer: cover fit, `object-position` = crop x/y, then `scale(zoom)` around that same point.
+ */
+export function pictureToPage(frame: Rect, img: { width: number; height: number }, crop: PanelCrop | undefined, p: { x: number; y: number }) {
+  const c = crop ?? DEFAULT_CROP;
+  const s = Math.max(frame.w / img.width, frame.h / img.height);
+  const ox = (img.width * s - frame.w) * c.x;
+  const oy = (img.height * s - frame.h) * c.y;
+  const lx = p.x * img.width * s - ox;
+  const ly = p.y * img.height * s - oy;
+  const cx = frame.w * c.x;
+  const cy = frame.h * c.y;
+  return { x: frame.x + cx + (lx - cx) * c.zoom, y: frame.y + cy + (ly - cy) * c.zoom };
 }
 
 /** Line height of balloon text, as a multiple of the font size. */

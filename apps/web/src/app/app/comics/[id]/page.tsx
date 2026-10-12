@@ -63,7 +63,7 @@ export default async function ComicPage({ params, searchParams }: { params: Prom
   const toDraw = doc ? panelsToDraw(doc).length : 0;
   const estimate = { panels: toDraw, sheets: missingSheets, usd: estimateDrawUsd(comic.imageModel, toDraw + missingSheets) };
 
-  const srcs = doc && (tab === "pages" || tab === "read") ? await presignDoc(doc) : {};
+  const srcs = doc && (tab === "pages" || tab === "read") ? await presignDoc(doc, { variants: tab === "pages" }) : {};
   const exports =
     tab === "export"
       ? await withOrgContext(ws, (tx) => tx.select().from(schema.comicExports).where(eq(schema.comicExports.comicId, comic.id)).orderBy(desc(schema.comicExports.createdAt)).limit(10))
@@ -138,6 +138,7 @@ export default async function ComicPage({ params, searchParams }: { params: Prom
       ) : tab === "cast" ? (
         <CastTab
           comicId={comic.id}
+          styleId={comic.styleId}
           doc={doc}
           writer={writer}
           busy={running}
@@ -148,7 +149,7 @@ export default async function ComicPage({ params, searchParams }: { params: Prom
           })}
         />
       ) : tab === "pages" ? (
-        <PagesTab comicId={comic.id} doc={doc} srcs={srcs} families={comicFamilies} writer={writer} busy={running} approved={comic.state !== "created" && comic.state !== "adapted"} />
+        <PagesTab comicId={comic.id} versionId={version!.id} doc={doc} srcs={srcs} families={comicFamilies} writer={writer} busy={running} approved={comic.state !== "created" && comic.state !== "adapted"} />
       ) : tab === "read" ? (
         <ReadTab doc={doc} srcs={srcs} families={comicFamilies} />
       ) : (

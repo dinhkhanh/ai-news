@@ -1,4 +1,4 @@
-import { BALLOON_LINE_HEIGHT, BALLOON_PADDING, pageGeometry, type Balloon, type ComicFont, type LetteringKind, type Panel, type ReadingDirection, type Rect } from "@ai-news/video/comic";
+import { BALLOON_LINE_HEIGHT, BALLOON_PADDING, pageGeometry, pictureToPage, type Balloon, type ComicFont, type LetteringKind, type Panel, type ReadingDirection, type Rect } from "@ai-news/video/comic";
 
 /**
  * Automatic lettering (docs/COMIC.md §9). Pure and tested. Balloons are data drawn by the page renderer, never part
@@ -67,15 +67,15 @@ export function segmentHits(a: { x: number; y: number }, b: { x: number; y: numb
 }
 const centre = (r: Rect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
 
-/** Face boxes of the panel's picture in page px, following the cover fit the renderer uses. */
+/** Face boxes of the panel's picture in page px, following the renderer's cover fit and the panel's crop. */
 export function facesOnPage(panel: Panel): Rect[] {
   const img = panel.image;
   if (!img?.faces?.length || !img.width || !img.height) return [];
-  const { x, y, w, h } = panel.rect;
-  const s = Math.max(w / img.width, h / img.height);
-  const ox = (img.width * s - w) / 2;
-  const oy = (img.height * s - h) / 2;
-  return img.faces.map((f) => ({ x: x + f.x * img.width * s - ox, y: y + f.y * img.height * s - oy, w: f.w * img.width * s, h: f.h * img.height * s }));
+  return img.faces.map((f) => {
+    const a = pictureToPage(panel.rect, img, panel.crop, { x: f.x, y: f.y });
+    const b = pictureToPage(panel.rect, img, panel.crop, { x: f.x + f.w, y: f.y + f.h });
+    return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
+  });
 }
 
 /** Where a speaker is in the panel: their face when the faces can be matched to the script's positions, else a point on their side. */

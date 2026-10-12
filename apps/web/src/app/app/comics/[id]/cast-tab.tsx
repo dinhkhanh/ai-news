@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { acceptSheet, castAction, drawSheets } from "../actions";
+import { SheetUpload } from "../library-upload";
 
 type SheetInfo = { ref: string; sheet: { id: string; status: string; url: string } | null };
 
@@ -14,7 +15,7 @@ type SheetInfo = { ref: string; sheet: { id: string; status: string; url: string
  * "Nhân vật" (docs/COMIC.md §2.4, §6): one reference sheet per character in the comic's style. Accepting a sheet makes
  * it the character's reference in that style for every later comic; drawing panels uses the latest draft otherwise.
  */
-export function CastTab({ comicId, doc, writer, busy, approved, sheets }: { comicId: string; doc: ComicDoc; writer: boolean; busy: boolean; approved: boolean; sheets: SheetInfo[] }) {
+export function CastTab({ comicId, styleId, doc, writer, busy, approved, sheets }: { comicId: string; styleId: string | null; doc: ComicDoc; writer: boolean; busy: boolean; approved: boolean; sheets: SheetInfo[] }) {
   const locked = !writer || busy;
   const missing = sheets.filter((s) => !s.sheet).length;
   return (
@@ -91,6 +92,7 @@ export function CastTab({ comicId, doc, writer, busy, approved, sheets }: { comi
                         </Button>
                       </ActionForm>
                     ) : null}
+                    {styleId ? <SheetUpload characterId={c.characterId} styleId={styleId} disabled={locked} /> : null}
                     <ActionForm action={drawSheets} className="flex min-w-0 flex-1 items-end gap-2">
                       <input type="hidden" name="comicId" value={comicId} />
                       <input type="hidden" name="ref" value={c.ref} />

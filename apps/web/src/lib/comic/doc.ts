@@ -1,6 +1,8 @@
 import {
   COMIC_DOC_VERSION,
   type Balloon,
+  type PanelCrop,
+  type Rect,
   type CastMember,
   type ComicDoc,
   type ComicFont,
@@ -14,7 +16,7 @@ import {
   type ReadingDirection,
 } from "@ai-news/video/comic";
 import { layoutPage } from "./layout";
-import { fontSizeFor, letterPanel } from "./lettering";
+import { balloonBox, fontSizeFor, letterPanel, speakerPoint, tailTip } from "./lettering";
 import type { ComicScript } from "./script";
 
 /**
@@ -203,6 +205,141 @@ export function editCast(doc: ComicDoc, ref: string, edit: Partial<Pick<CastMemb
   return { ...doc, cast: doc.cast.map((c) => (c.ref === ref ? { ...c, ...Object.fromEntries(Object.entries(edit).map(([k, v]) => [k, String(v ?? "").trim()])) } : c)) };
 }
 
+/* ------------------------------------------------------------------ page editor (docs/COMIC.md §2.6, M2) */
+
+const letterOpts = (doc: ComicDoc) => ({ pageWidth: doc.format.width, font: doc.font, direction: doc.readingDirection });
+/** Re-letters one panel after a change (automatic balloons move around the manual ones and the faces). */
+const reletter = (doc: ComicDoc, panelId: string, fn: (k: Panel) => Panel) => mapPanel(doc, panelId, (k) => letterPanel(fn(k), letterOpts(doc)));
+const TAILLESS: LetteringKind[] = ["caption", "sfx"];
+
+/** Shows another of the panel's pictures (an earlier drawing). */
+export function selectVariant(doc: ComicDoc, panelId: string, imageId: string): ComicDoc {
+  const v = findPanel(doc, panelId)?.panel.variants.find((x) => x.id === imageId);
+  return v ? reletter(doc, panelId, (k) => ({ ...k, image: v })) : doc;
+}
+
+/** Drops a picture from the panel's variants (never the one shown). */
+export function removeVariant(doc: ComicDoc, panelId: string, imageId: string): ComicDoc {
+  return mapPanel(doc, panelId, (k) => (k.image?.id === imageId ? k : { ...k, variants: k.variants.filter((v) => v.id !== imageId) }));
+}
+
+/** Framing of the picture inside its panel; null = centred, no zoom. Faces move, so the balloons are placed again. */
+export function setPanelCrop(doc: ComicDoc, panelId: string, crop: PanelCrop | null): ComicDoc {
+  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(n) ? n : lo));
+  return reletter(doc, panelId, (k) => {
+    const next = { ...k };
+    if (!crop || (crop.zoom <= 1 && Math.abs(crop.x - 0.5) < 0.005 && Math.abs(crop.y - 0.5) < 0.005)) delete next.crop;
+    else next.crop = { x: clamp(crop.x, 0, 1), y: clamp(crop.y, 0, 1), zoom: clamp(crop.zoom, 1, 4) };
+    return next;
+  });
+}
+
+/** Whether a balloon's text fits its box at its size (hand-placed balloons keep the box they were given). */
+export function balloonOverflows(b: Pick<Balloon, "text" | "kind" | "fontSize">, rect: Rect, font: ComicFont) {
+  const fit = balloonBox(b.text, b.kind, b.fontSize, rect.w, font);
+  return fit.h > rect.h + 1 || fit.w > rect.w + 1;
+}
+
+const withOverflow = (b: Balloon, font: ComicFont): Balloon => {
+  const out = { ...b };
+  delete out.overflow;
+  return b.rect && balloonOverflows(b, b.rect, font) ? { ...out, overflow: true } : out;
+};
+
+/** Keeps a box on the page and at least two lines tall. */
+function clampRect(r: Rect, doc: ComicDoc, pageHeight: number, fontSize: number): Rect {
+  const w = Math.round(Math.min(doc.format.width, Math.max(fontSize * 2.5, r.w)));
+  const h = Math.round(Math.min(pageHeight, Math.max(fontSize * 1.6, r.h)));
+  return { x: Math.round(Math.min(doc.format.width - w, Math.max(0, r.x))), y: Math.round(Math.min(pageHeight - h, Math.max(0, r.y))), w, h };
+}
+
+/**
+ * A balloon moved, resized or re-aimed by hand: it becomes `manual` (never placed automatically again) and the other
+ * balloons of the panel are placed around it. Balloons may cross the panel's border, not the page's.
+ */
+export function placeBalloon(doc: ComicDoc, panelId: string, balloonId: string, place: { rect: Rect; tail: { x: number; y: number } | null }): ComicDoc {
+  const hit = findPanel(doc, panelId);
+  if (!hit) return doc;
+  const height = hit.page.height;
+  return reletter(doc, panelId, (k) => ({
+    ...k,
+    lettering: k.lettering.map((b) => {
+      if (b.id !== balloonId) return b;
+      const rect = clampRect(place.rect, doc, height, b.fontSize);
+      const tail = TAILLESS.includes(b.kind) || !place.tail ? null : { x: Math.round(Math.min(doc.format.width, Math.max(0, place.tail.x))), y: Math.round(Math.min(height, Math.max(0, place.tail.y))) };
+      return withOverflow({ ...b, rect, tail, manual: true }, doc.font);
+    }),
+  }));
+}
+
+export type BalloonEdit = { text?: string; kind?: LetteringKind; speaker?: string | null; fontSize?: number };
+
+/**
+ * Text, kind, speaker or size of one balloon. An automatic balloon is simply placed again; a hand-placed one keeps
+ * its place: a new size grows or shrinks its box around its centre, a new speaker re-aims its tail.
+ */
+export function editBalloon(doc: ComicDoc, panelId: string, balloonId: string, edit: BalloonEdit): ComicDoc {
+  return reletter(doc, panelId, (k) => ({
+    ...k,
+    lettering: k.lettering.map((b) => {
+      if (b.id !== balloonId) return b;
+      const kind = edit.kind ?? b.kind;
+      const next: Balloon = {
+        ...b,
+        kind,
+        text: edit.text !== undefined ? edit.text.replace(/[ \t]+/g, " ").trim() : b.text,
+        speaker: TAILLESS.includes(kind) ? null : edit.speaker !== undefined ? edit.speaker : b.speaker,
+      };
+      const sized = edit.fontSize !== undefined && Math.round(edit.fontSize) !== b.fontSize;
+      if (!b.manual && !sized) return next;
+      // From here on the balloon is (or becomes) hand-placed.
+      next.manual = true;
+      if (sized) next.fontSize = Math.round(Math.min(doc.format.width * 0.08, Math.max(doc.format.width * 0.012, edit.fontSize!)));
+      let rect = b.rect ?? { x: k.rect.x + k.rect.w * 0.1, y: k.rect.y + k.rect.h * 0.08, w: k.rect.w * 0.5, h: k.rect.h * 0.2 };
+      if (sized || edit.text !== undefined || edit.kind) {
+        const box = balloonBox(next.text, kind, next.fontSize, Math.max(rect.w, k.rect.w * 0.66), doc.font);
+        const cx = rect.x + rect.w / 2;
+        const cy = rect.y + rect.h / 2;
+        rect = { x: cx - box.w / 2, y: cy - box.h / 2, w: box.w, h: box.h };
+      }
+      const hit = findPanel(doc, panelId)!;
+      next.rect = clampRect(rect, doc, hit.page.height, next.fontSize);
+      if (TAILLESS.includes(kind)) next.tail = null;
+      else if (!next.tail || next.speaker !== b.speaker) {
+        const target = speakerPoint(k, next.speaker);
+        next.tail = target ? tailTip(next.rect, target, k.rect, next.fontSize) : null;
+      }
+      return withOverflow(next, doc.font);
+    }),
+  }));
+}
+
+/** Gives a hand-placed balloon back to the automatic lettering. */
+export const resetBalloon = (doc: ComicDoc, panelId: string, balloonId: string): ComicDoc =>
+  reletter(doc, panelId, (k) => ({ ...k, lettering: k.lettering.map((b) => (b.id === balloonId ? { ...b, manual: false, fontSize: fontSizeFor(b.kind, doc.format.width) } : b)) }));
+
+export function addBalloon(doc: ComicDoc, panelId: string, line: { kind: LetteringKind; speaker: string | null; text: string }, id: (p: string) => string = newId): ComicDoc {
+  const text = line.text.replace(/\s+/g, " ").trim();
+  if (!text) return doc;
+  const [b] = balloonsFor([{ kind: line.kind, speaker: TAILLESS.includes(line.kind) ? null : line.speaker, text }], doc.format.width, id);
+  return reletter(doc, panelId, (k) => ({ ...k, lettering: [...k.lettering, b] }));
+}
+
+export const deleteBalloon = (doc: ComicDoc, panelId: string, balloonId: string): ComicDoc => reletter(doc, panelId, (k) => ({ ...k, lettering: k.lettering.filter((b) => b.id !== balloonId) }));
+
+/** New texts for some balloons (the shortened lines); every other field stays. */
+export function setBalloonTexts(doc: ComicDoc, panelId: string, texts: Record<string, string>): ComicDoc {
+  return reletter(doc, panelId, (k) => ({
+    ...k,
+    lettering: k.lettering.map((b) => {
+      const t = texts[b.id]?.replace(/\s+/g, " ").trim();
+      if (!t) return b;
+      const next = { ...b, text: t };
+      return b.manual ? withOverflow(next, doc.font) : next;
+    }),
+  }));
+}
+
 /** Numbers shown before drawing (the estimate) and on the list. */
 export function docStats(doc: ComicDoc) {
   const panels = allPanels(doc);
@@ -217,4 +354,5 @@ export function docStats(doc: ComicDoc) {
 }
 
 /** Every R2 key the document's pictures use (presign them before showing a page). */
-export const docImageKeys = (doc: ComicDoc) => [...new Set(allPanels(doc).flatMap((k) => (k.image ? [k.image.key] : [])))];
+export const docImageKeys = (doc: ComicDoc, opts: { variants?: boolean } = {}) =>
+  [...new Set(allPanels(doc).flatMap((k) => [...(k.image ? [k.image.key] : []), ...(opts.variants ? k.variants.map((v) => v.key) : [])]))];

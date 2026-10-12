@@ -151,20 +151,41 @@ export function stylePreviewPrompt(style: ComicStyle) {
   ].join("\n");
 }
 
-export type RefCandidates = { sheets: string[]; setting: string | null; style: string[]; previous: string | null };
+/**
+ * Reference images of a panel. `base` is the panel's current picture when it is redrawn "keeping the composition":
+ * it goes first and the prompt asks for the same framing with only the requested change.
+ */
+export type RefCandidates = { base?: string | null; sheets: string[]; setting: string | null; style: string[]; previous: string | null };
 
 /**
  * Which reference images go with a panel, most important first, cut to the model's limit: the sheets of the
  * characters in it, then the first picture of its setting, then the style's samples, then the previous panel.
  */
 export function pickRefs(c: RefCandidates, maxRefs: number): string[] {
-  const ordered = [...c.sheets, ...(c.setting ? [c.setting] : []), ...c.style, ...(c.previous ? [c.previous] : [])];
+  const ordered = [...(c.base ? [c.base] : []), ...c.sheets, ...(c.setting ? [c.setting] : []), ...c.style, ...(c.previous ? [c.previous] : [])];
   return [...new Set(ordered)].slice(0, Math.max(0, maxRefs));
 }
 
 /** Says in the prompt what each reference image is, in the order they are sent. */
 export function refsNote(c: RefCandidates, picked: string[]) {
   if (!picked.length) return null;
-  const label = (k: string) => (c.sheets.includes(k) ? "a character reference sheet" : k === c.setting ? "an earlier panel of the same place (keep the place, light and props consistent)" : c.style.includes(k) ? "a style sample (match its technique, not its content)" : "the previous panel (keep continuity)");
+  const label = (k: string) => (k === c.base ? "the current drawing of this panel (keep its composition, camera, poses and colours; change only what the direction asks)" : c.sheets.includes(k) ? "a character reference sheet" : k === c.setting ? "an earlier panel of the same place (keep the place, light and props consistent)" : c.style.includes(k) ? "a style sample (match its technique, not its content)" : "the previous panel (keep continuity)");
   return `Reference images, in order: ${picked.map((k, i) => `${i + 1}) ${label(k)}`).join("; ")}.`;
+}
+
+const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
+
+/** "Rút gọn lời thoại": the panel, who speaks, and the lines to shorten with a word budget each. */
+export function shortenUser(doc: ComicDoc, panel: Panel, ids: string[]) {
+  const name = (ref: string | null) => (ref ? (doc.cast.find((c) => c.ref === ref)?.name ?? ref) : null);
+  const lines = panel.lettering.filter((b) => ids.includes(b.id));
+  return [
+    `Comic: "${doc.title}". Language of the lines: ${doc.language === "vi" ? "Vietnamese, with correct diacritics" : "English"}.`,
+    `What the panel shows: ${panel.script.description}`,
+    "All lines of the panel, in reading order:",
+    ...panel.lettering.map((b) => `- [${b.id}] ${b.kind}${name(b.speaker) ? ` (${name(b.speaker)})` : ""}: ${b.text}`),
+    "",
+    "Shorten these lines so they fit their balloons:",
+    ...lines.map((b) => `- [${b.id}] at most ${Math.max(2, Math.floor(words(b.text) * 0.6))} words`),
+  ].join("\n");
 }

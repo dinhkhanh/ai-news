@@ -1,11 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { comicDocSchema, type Panel, type Rect } from "@ai-news/video/comic";
+import { comicDocSchema, pictureToPage, type Panel, type Rect } from "@ai-news/video/comic";
 import { tailGeometry } from "@ai-news/video/comic-view";
-import { addPanel, applyPanelImage, buildDoc, deletePanel, docImageKeys, docStats, dropCast, editPanel, mergeCast, panelsToDraw, replacePage, type DocOptions } from "./doc";
+import {
+  addBalloon,
+  addPanel,
+  applyPanelImage,
+  buildDoc,
+  deleteBalloon,
+  deletePanel,
+  docImageKeys,
+  docStats,
+  dropCast,
+  editBalloon,
+  editPanel,
+  mergeCast,
+  panelsToDraw,
+  placeBalloon,
+  removeVariant,
+  replacePage,
+  resetBalloon,
+  selectVariant,
+  setBalloonTexts,
+  setPanelCrop,
+  type DocOptions,
+} from "./doc";
 import { formatOf, layoutPage, rowsFor, snapAspect } from "./layout";
 import { balloonBox, baseFontSize, facesOnPage, letterPanel, MIN_FONT_SCALE, segmentHits, speakerPoint, wrapWords } from "./lettering";
 import { estimateAdaptUsd, estimateDrawUsd, IMAGE_MODELS, imageModel, textModel } from "./models";
-import { adaptUser, panelPrompt, pickRefs, refsNote, sheetPrompt, type ComicStyle } from "./prompts";
+import { adaptUser, panelPrompt, pickRefs, refsNote, sheetPrompt, shortenUser, type ComicStyle } from "./prompts";
 import { normaliseComicScript, slug, type ComicScript } from "./script";
 
 const ids = () => {
@@ -266,6 +288,82 @@ describe("document", () => {
   });
 });
 
+describe("page editor", () => {
+  const base = buildDoc(normaliseComicScript(script, ["char-lan"]), opts, ids());
+  const k = base.pages[0].panels[3];
+  const img = (id: string) => ({ id, key: `media/o/comics/c/panels/${id}.png`, width: 1000, height: 1000, faces: [{ x: 0.6, y: 0.2, w: 0.2, h: 0.2 }] });
+  const doc = applyPanelImage(applyPanelImage(base, k.id, img("v1")), k.id, img("v2"));
+  const panel = (d: typeof doc) => d.pages[0].panels[3];
+
+  it("switches between a panel's drawings and never drops the one shown", () => {
+    expect(panel(doc).image?.id).toBe("v2");
+    const d2 = selectVariant(doc, k.id, "v1");
+    expect(panel(d2).image?.id).toBe("v1");
+    expect(selectVariant(doc, k.id, "nope")).toBe(doc);
+    expect(panel(removeVariant(d2, k.id, "v1")).variants).toHaveLength(2);
+    expect(panel(removeVariant(d2, k.id, "v2")).variants.map((v) => v.id)).toEqual(["v1"]);
+    expect(docImageKeys(d2)).toEqual([img("v1").key]);
+    expect(docImageKeys(d2, { variants: true }).sort()).toEqual([img("v1").key, img("v2").key]);
+  });
+
+  it("crops the picture: faces follow the zoom, the default framing is stored as none", () => {
+    const frame = panel(doc).rect;
+    expect(pictureToPage(frame, { width: 1000, height: 1000 }, undefined, { x: 0.5, y: 0.5 })).toEqual({ x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 });
+    const zoomed = setPanelCrop(doc, k.id, { x: 0.7, y: 0.3, zoom: 2 });
+    expect(panel(zoomed).crop).toEqual({ x: 0.7, y: 0.3, zoom: 2 });
+    const before = facesOnPage(panel(doc))[0];
+    const after = facesOnPage(panel(zoomed))[0];
+    expect(after.w).toBeCloseTo(before.w * 2, 0);
+    expect(panel(setPanelCrop(zoomed, k.id, { x: 0.5, y: 0.5, zoom: 1 })).crop).toBeUndefined();
+    expect(panel(setPanelCrop(doc, k.id, { x: 3, y: -1, zoom: 9 })).crop).toEqual({ x: 1, y: 0, zoom: 4 });
+    expect(comicDocSchema.safeParse(zoomed).success).toBe(true);
+  });
+
+  it("keeps a moved balloon where it was put, on the page, and places the others around it", () => {
+    const d1 = addBalloon(doc, k.id, { kind: "speech", speaker: "char-lan", text: "Đẹp quá!" }, ids());
+    const [b1, b2] = panel(d1).lettering;
+    const target = { x: panel(d1).rect.x + 20, y: panel(d1).rect.y + 20, w: 300, h: 140 };
+    const moved = placeBalloon(d1, k.id, b1.id, { rect: target, tail: { x: -50, y: target.y + 400 } });
+    const m1 = panel(moved).lettering.find((b) => b.id === b1.id)!;
+    expect(m1).toMatchObject({ manual: true, rect: target, tail: { x: 0, y: target.y + 400 } });
+    const other = panel(moved).lettering.find((b) => b.id === b2.id)!;
+    expect(intersects(other.rect!, m1.rect!)).toBe(false);
+    const off = placeBalloon(d1, k.id, b1.id, { rect: { x: 5000, y: -40, w: 300, h: 140 }, tail: null });
+    const r = panel(off).lettering[0].rect!;
+    expect(inside(r, { x: 0, y: 0, w: a4.width, h: a4.height })).toBe(true);
+    // Squeezed too small for its text: flagged.
+    const tight = placeBalloon(d1, k.id, b1.id, { rect: { ...target, w: 120, h: 50 }, tail: null });
+    expect(panel(tight).lettering[0].overflow).toBe(true);
+    const back = resetBalloon(moved, k.id, b1.id);
+    expect(panel(back).lettering[0].manual).toBe(false);
+  });
+
+  it("edits a balloon's text, kind, speaker and size", () => {
+    const b = panel(doc).lettering[0];
+    const auto = editBalloon(doc, k.id, b.id, { text: "  Ừ   đúng rồi ", kind: "shout" });
+    expect(panel(auto).lettering[0]).toMatchObject({ text: "Ừ đúng rồi", kind: "shout", manual: false });
+    const caption = editBalloon(doc, k.id, b.id, { kind: "caption" });
+    expect(panel(caption).lettering[0]).toMatchObject({ speaker: null, tail: null });
+    const bigger = editBalloon(doc, k.id, b.id, { fontSize: b.fontSize * 1.5 });
+    const big = panel(bigger).lettering[0];
+    expect(big.manual).toBe(true);
+    expect(big.fontSize).toBe(Math.round(b.fontSize * 1.5));
+    expect(big.rect!.w * big.rect!.h).toBeGreaterThan(b.rect!.w * b.rect!.h);
+    const respeak = editBalloon(bigger, k.id, b.id, { speaker: "char-lan" });
+    expect(panel(respeak).lettering[0].tail).not.toEqual(big.tail);
+    expect(panel(deleteBalloon(doc, k.id, b.id)).lettering).toHaveLength(0);
+    expect(panel(setBalloonTexts(doc, k.id, { [b.id]: " Ngắn thôi ", other: "x" })).lettering[0].text).toBe("Ngắn thôi");
+  });
+
+  it("asks for shorter lines with a word budget", () => {
+    const b = panel(doc).lettering[0];
+    const u = shortenUser(doc, panel(doc), [b.id]);
+    expect(u).toContain(`[${b.id}] speech (Bà nội)`);
+    expect(u).toMatch(/at most \d+ words/);
+    expect(u).toContain("Vietnamese");
+  });
+});
+
 describe("prompts", () => {
   const style: ComicStyle = { id: null, name: "Webtoon", prompt: "clean digital line art, soft cel shading", negative: "photorealism", colourMode: "colour", storytellingNotes: "", referenceKeys: [] };
   const doc = buildDoc(normaliseComicScript(script, ["char-lan"]), opts, ids());
@@ -276,6 +374,8 @@ describe("prompts", () => {
     expect(pickRefs({ ...c, previous: "s1" }, 10)).toEqual(["s1", "s2", "set", "st1"]);
     expect(refsNote(c, ["s1", "prev"])).toContain("2) the previous panel");
     expect(refsNote(c, [])).toBeNull();
+    expect(pickRefs({ ...c, base: "cur" }, 2)).toEqual(["cur", "s1"]);
+    expect(refsNote({ ...c, base: "cur" }, ["cur"])).toContain("keep its composition");
   });
 
   it("builds the same character block in every panel, and never asks for text in the picture", () => {

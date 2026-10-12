@@ -115,7 +115,7 @@ export const comicDrawFn = inngest.createFunction(
     onFailure: ({ event }) => failComic(event.data.event.data, event.data.error?.message ?? "drawing failed", "comic.draw_failed"),
   },
   async ({ event, step }) => {
-    const { comicId, organizationId, requestedBy, panelIds, instruction } = event.data;
+    const { comicId, organizationId, requestedBy, panelIds, instruction, keepComposition } = event.data;
     const ctx = { userId: requestedBy, organizationId };
 
     const plan = await step.run("plan", async () => {
@@ -155,7 +155,7 @@ export const comicDrawFn = inngest.createFunction(
             const loaded = await loadComic(ctx, comicId);
             const hit = loaded?.version ? findPanel(loaded.version.doc, panelId) : null;
             if (!loaded?.version || !hit) return { panelId, ok: false, error: "panel removed" };
-            const req = panelRequest(loaded.version.doc, hit.panel, styleOf(loaded.comic), sheetKeys, loaded.comic.imageModel, instruction);
+            const req = panelRequest(loaded.version.doc, hit.panel, styleOf(loaded.comic), sheetKeys, loaded.comic.imageModel, instruction, Boolean(keepComposition && panelIds?.length));
             try {
               const img = await drawComicImage(ctx, { kind: "panel", modelId: loaded.comic.imageModel, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId: plan.projectId, comicId, panelId, styleId: loaded.comic.styleId, instruction });
               await updateDoc(ctx, comicId, "draw", (doc) => (findPanel(doc, panelId) ? { doc: applyPanelImage(doc, panelId, { id: img.id, key: img.key, width: img.width, height: img.height, faces: img.faces }), changes: { drewPanel: panelId } } : null));
@@ -180,7 +180,7 @@ export const comicDrawFn = inngest.createFunction(
       const failed = outcomes.filter((o) => !o.ok && o.error !== "panel removed");
       const notes = [failed.length ? `${failed.length} khung vẽ lỗi (bấm “Vẽ lại” ở khung đó)` : "", plan.cut ? `${plan.cut} khung chưa vẽ vì hết hạn mức hôm nay` : ""].filter(Boolean).join(" · ");
       await clearBusy(ctx, comicId, notes || null, stats && stats.drawn === stats.panels ? "drawn" : undefined);
-      await logActivity({ actorId: requestedBy, organizationId, type: panelIds?.length ? "comic.panel_redrawn" : "comic.panels_drawn", payload: { comicId, drawn: outcomes.length - failed.length, failed: failed.length, cut: plan.cut, sheets: plan.sheets.length, instruction: instruction ?? null } });
+      await logActivity({ actorId: requestedBy, organizationId, type: panelIds?.length ? "comic.panel_redrawn" : "comic.panels_drawn", payload: { comicId, drawn: outcomes.length - failed.length, failed: failed.length, cut: plan.cut, sheets: plan.sheets.length, instruction: instruction ?? null, keepComposition: Boolean(keepComposition) } });
       return { drawn: outcomes.length - failed.length, failed: failed.length, cut: plan.cut };
     });
   },

@@ -173,6 +173,8 @@ export const comicDrawRequested = eventType("comic/draw.requested", {
     requestedBy: z.string(),
     panelIds: z.array(z.string()).max(400).optional(),
     instruction: z.string().max(1000).optional(),
+    /** Redraw from the current picture: same composition, only the instruction changes it. */
+    keepComposition: z.boolean().optional(),
   }),
 });
 

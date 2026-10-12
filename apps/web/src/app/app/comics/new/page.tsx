@@ -10,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { PAGE_FORMATS } from "@/lib/comic/layout";
+import { latestSamples } from "@/lib/comic/library";
 import { estimateAdaptUsd, estimateDrawUsd, formatUsd, IMAGE_MODELS, TEXT_MODELS } from "@/lib/comic/models";
 import { STORY_LIMITS } from "@/lib/comic/script";
+import { presignGet } from "@/lib/r2";
 import { canWrite } from "@/lib/workspace";
 import { createComic } from "../actions";
 import { requireComicsWorkspace } from "../guard";
@@ -32,6 +34,8 @@ export default async function NewComicPage() {
     ]),
   );
   const writer = canWrite(ws);
+  const samples = await latestSamples(ws, styles.map((s) => s.id), 1);
+  const sampleUrls = new Map(await Promise.all([...samples.entries()].map(async ([id, list]) => [id, await presignGet(list[0].key, 3600)] as const)));
   // A typical comic: ~7 pages × 4–5 panels, plus 2–3 character sheets.
   const typical = { adapt: estimateAdaptUsd(TEXT_MODELS[0].id, 12_000, 7), flash: estimateDrawUsd(IMAGE_MODELS[0].id, 33), pro: estimateDrawUsd(IMAGE_MODELS[1].id, 33) };
 
@@ -148,7 +152,12 @@ export default async function NewComicPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Phong cách</CardTitle>
-                <CardDescription>Bản mẫu nhân vật được vẽ theo phong cách này và dùng lại ở những truyện sau.</CardDescription>
+                <CardDescription>
+                  Bản mẫu nhân vật được vẽ theo phong cách này và dùng lại ở những truyện sau.{" "}
+                  <Link href="/app/comics/styles" className="underline underline-offset-2 hover:text-foreground">
+                    Xem, vẽ thử, tạo phong cách
+                  </Link>
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <fieldset className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -156,7 +165,12 @@ export default async function NewComicPage() {
                   {styles.map((s, i) => (
                     <label key={s.id} className="flex cursor-pointer flex-col gap-2 rounded-lg border bg-card p-2 has-checked:border-primary has-checked:ring-3 has-checked:ring-primary/20 has-focus-visible:ring-3 has-focus-visible:ring-ring/40">
                       <input type="radio" name="styleId" value={s.id} defaultChecked={i === 1 || styles.length === 1} className="sr-only" />
-                      <span aria-hidden className="block h-14 rounded-md" style={{ background: s.swatch }} />
+                      {sampleUrls.get(s.id) ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- presigned R2 URL
+                        <img src={sampleUrls.get(s.id)} alt="" className="block h-14 w-full rounded-md object-cover" />
+                      ) : (
+                        <span aria-hidden className="block h-14 rounded-md" style={{ background: s.swatch }} />
+                      )}
                       <span className="text-xs leading-tight font-medium">
                         {s.name}
                         <span className="block font-normal text-muted-foreground">
@@ -175,7 +189,10 @@ export default async function NewComicPage() {
               <CardHeader>
                 <CardTitle>Nhân vật</CardTitle>
                 <CardDescription>
-                  {characters.length ? "Chọn nhân vật đã có. Nhân vật mới trong truyện được đề xuất ở bước kịch bản và lưu vào thư viện khi duyệt." : "Chưa có nhân vật nào trong thư viện: Claude lập danh sách nhân vật từ truyện, bạn duyệt ở bước kịch bản."}
+                  {characters.length ? "Chọn nhân vật đã có. Nhân vật mới trong truyện được đề xuất ở bước kịch bản và lưu vào thư viện khi duyệt." : "Chưa có nhân vật nào trong thư viện: Claude lập danh sách nhân vật từ truyện, bạn duyệt ở bước kịch bản."}{" "}
+                  <Link href="/app/comics/characters" className="underline underline-offset-2 hover:text-foreground">
+                    Thư viện nhân vật
+                  </Link>
                 </CardDescription>
               </CardHeader>
               {characters.length ? (

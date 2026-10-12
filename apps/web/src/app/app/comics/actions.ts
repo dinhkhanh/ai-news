@@ -10,6 +10,7 @@ import { comicAdaptRequested, comicCastRequested, comicDrawRequested, comicExpor
 import { run, str, type ActionState } from "@/lib/admin";
 import { addPanel, deletePage, deletePanel, dropCast, editCast, editPanel, mergeCast, setPageLayout } from "@/lib/comic/doc";
 import { approveScript } from "@/lib/comic/flow";
+import { acceptSheetImage } from "@/lib/comic/library";
 import { pageFormat } from "@/lib/comic/layout";
 import { DEFAULT_IMAGE_MODEL, DEFAULT_TEXT_MODEL, isImageModel, isTextModel } from "@/lib/comic/models";
 import type { ComicStyle } from "@/lib/comic/prompts";
@@ -240,9 +241,11 @@ export async function drawPanels(_: ActionState, fd: FormData) {
     if (!access.ok) throw new Error(access.reason);
     const panelId = str(fd, "panelId");
     const instruction = str(fd, "instruction").slice(0, 1000) || undefined;
+    const keepComposition = fd.get("keep") === "on";
+    if (keepComposition && !instruction) throw new Error("Giữ bố cục cần một chỉ dẫn: điều gì cần đổi?");
     await claimBusy(ws, comicId, "draw", panelId ? "Đang vẽ lại khung…" : undefined);
-    await inngest.send(comicDrawRequested.create({ comicId, organizationId: ws.organizationId, requestedBy: ws.userId, ...(panelId ? { panelIds: [panelId], instruction } : {}) }));
-    await log("comic.draw_requested", { comicId, panelId: panelId || null, instruction: instruction ?? null });
+    await inngest.send(comicDrawRequested.create({ comicId, organizationId: ws.organizationId, requestedBy: ws.userId, ...(panelId ? { panelIds: [panelId], instruction, keepComposition } : {}) }));
+    await log("comic.draw_requested", { comicId, panelId: panelId || null, instruction: instruction ?? null, keepComposition });
     return panelId ? "Đang vẽ lại khung…" : "Đang vẽ các khung còn thiếu…";
   });
 }
@@ -264,15 +267,7 @@ export async function drawSheets(_: ActionState, fd: FormData) {
 export async function acceptSheet(_: ActionState, fd: FormData) {
   return onComic(fd, async ({ ws, log }, comicId) => {
     const imageId = str(fd, "imageId");
-    await withOrgContext(ws, async (tx) => {
-      const img = await tx.query.comicImages.findFirst({ where: and(eq(schema.comicImages.id, imageId), eq(schema.comicImages.organizationId, ws.organizationId), eq(schema.comicImages.kind, "sheet")) });
-      if (!img?.characterId) throw new Error("Không tìm thấy bản mẫu");
-      await tx
-        .update(schema.comicImages)
-        .set({ status: "draft" })
-        .where(and(eq(schema.comicImages.kind, "sheet"), eq(schema.comicImages.characterId, img.characterId), img.styleId ? eq(schema.comicImages.styleId, img.styleId) : isNull(schema.comicImages.styleId), eq(schema.comicImages.status, "accepted")));
-      await tx.update(schema.comicImages).set({ status: "accepted" }).where(eq(schema.comicImages.id, imageId));
-    });
+    await acceptSheetImage(ws, imageId);
     await log("comic.sheet_accepted", { comicId, imageId });
     return "Đã duyệt bản mẫu";
   });

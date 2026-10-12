@@ -1,5 +1,5 @@
 import type { ComponentType, CSSProperties } from "react";
-import { BALLOON_LINE_HEIGHT, COMIC_FONTS, pageGeometry, type Balloon, type ComicDoc, type ComicPage, type Panel } from "./comic";
+import { BALLOON_LINE_HEIGHT, COMIC_FONTS, DEFAULT_CROP, pageGeometry, type Balloon, type ComicDoc, type ComicPage, type Panel } from "./comic";
 
 /**
  * One comic page (docs/COMIC.md §3, §9). The same component draws the page in the app (reader, editor) and in a
@@ -42,9 +42,17 @@ function PanelBox({ panel, width, height, srcs, placeholders, ImageComponent }: 
     background: src || !placeholders ? "#FFFFFF" : "repeating-linear-gradient(45deg, #F1F1F3 0 2px, #FAFAFA 2px 14px)",
   };
   const Tag = ImageComponent;
+  const crop = panel.crop ?? DEFAULT_CROP;
+  const at = `${(crop.x * 100).toFixed(2)}% ${(crop.y * 100).toFixed(2)}%`;
   return (
     <div style={style}>
-      {src ? <Tag src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /> : null}
+      {src ? (
+        <Tag
+          src={src}
+          alt=""
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: at, transform: crop.zoom !== 1 ? `scale(${crop.zoom})` : undefined, transformOrigin: at, display: "block" }}
+        />
+      ) : null}
       {!src && placeholders ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: cqw(14, width), boxSizing: "border-box" }}>
           <span style={{ fontFamily: "'Be Vietnam Pro', system-ui, sans-serif", fontSize: cqw(15, width), lineHeight: 1.35, color: panel.error ? "#B91C1C" : "#52525B" }}>

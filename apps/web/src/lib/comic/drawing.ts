@@ -13,7 +13,7 @@ export type PanelRequest = { prompt: string; refKeys: string[]; aspect: string }
  * The prompt and reference images of a panel: the sheets of the characters in it, the first drawn panel of the same
  * setting, the style's samples and the previous drawn panel of the page, cut to the model's limit.
  */
-export function panelRequest(doc: ComicDoc, panel: Panel, style: ComicStyle, sheetKeyByRef: Map<string, string>, modelId: string, instruction?: string | null): PanelRequest {
+export function panelRequest(doc: ComicDoc, panel: Panel, style: ComicStyle, sheetKeyByRef: Map<string, string>, modelId: string, instruction?: string | null, keepComposition = false): PanelRequest {
   const model = imageModel(modelId);
   const aspect = snapAspect(panel.rect.w, panel.rect.h, model.aspectRatios);
   const hit = findPanel(doc, panel.id);
@@ -21,6 +21,7 @@ export function panelRequest(doc: ComicDoc, panel: Panel, style: ComicStyle, she
   const settingAnchor = panel.script.settingId ? all.find((k) => k.id !== panel.id && k.script.settingId === panel.script.settingId && k.image)?.image?.key ?? null : null;
   const previous = hit ? [...hit.page.panels.slice(0, hit.panelIndex)].reverse().find((k) => k.image)?.image?.key ?? null : null;
   const candidates = {
+    base: keepComposition ? (panel.image?.key ?? null) : null,
     sheets: panel.script.characters.flatMap((c) => (sheetKeyByRef.get(c.ref) ? [sheetKeyByRef.get(c.ref)!] : [])),
     setting: settingAnchor,
     style: style.referenceKeys,
