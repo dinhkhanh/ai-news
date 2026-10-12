@@ -152,6 +152,8 @@ export async function scriptDirect(_: ActionState, fd: FormData): Promise<Action
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
+    const kind = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { sourceKind: true } }));
+    if (kind?.sourceKind === "comic") throw new Error(COMIC_SCRIPT);
     const project = await claimDirectRun(ws, projectId, "script", "Chạy trực tiếp: viết kịch bản");
     after(() => runScriptDirect({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, durationSec: project.durationSec, tone: project.tone }));
     await log("script.direct", { durationSec: project.durationSec, tone: project.tone, queuedSince: project.busyProgress?.startedAt ?? null }, projectId);
@@ -160,12 +162,15 @@ export async function scriptDirect(_: ActionState, fd: FormData): Promise<Action
   });
 }
 
+const COMIC_SCRIPT = "A motion comic's script comes from its comic: edit the comic, then make the video again from its Xuất tab";
+
 /** Generate a (new version of the) script with the chosen preset. Enforces the daily script quota. */
 export async function requestScript(_: ActionState, fd: FormData): Promise<ActionState> {
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
-    await loadProject(ws, projectId);
+    const project = await loadProject(ws, projectId);
+    if (project.sourceKind === "comic") throw new Error(COMIC_SCRIPT);
     const article = await withOrgContext(ws, (tx) => tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), orderBy: desc(schema.articles.createdAt) }));
     if (!article?.confirmedAt) throw new Error("Confirm the article text first");
     const { durationSec, tone } = parsePreset(fd);
@@ -226,7 +231,7 @@ export async function requestAssets(_: ActionState, fd: FormData): Promise<Actio
     await inngest.send(projectAssetsRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, scriptId, skipStock }));
     await log("assets.requested", { scriptId: scriptId ?? script.id, skipStock, ...("brandKitId" in kitPatch ? { brandKitId: kitPatch.brandKitId } : {}), ...("voicePresetId" in voicePatch ? { voice: voice?.name ?? "default" } : {}), ...("motionMode" in motionPatch ? { motion: `${motionPatch.motionMode}/${motionPatch.motionEngine}` } : {}), ...("photoSketch" in sketchPatch ? { photoSketch } : {}) }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
-    return "Building voice-over, B-roll and timeline… this takes 2–4 minutes";
+    return project.sourceKind === "comic" ? "Building the motion comic: voices, panels and timeline…" : "Building voice-over, B-roll and timeline… this takes 2–4 minutes";
   });
 }
 

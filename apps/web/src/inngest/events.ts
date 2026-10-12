@@ -77,6 +77,20 @@ export const projectAssetsRequested = eventType("project/assets.requested", {
   }),
 });
 
+/**
+ * Motion comic build (docs/COMIC.md §11.1): `prepare-assets` forwards a `comic` project here. Voices per beat (the
+ * speaker's character voice or the narrator), the comic's own panels as the pictures, music, mix → timeline version.
+ */
+export const projectComicBuildRequested = eventType("project/comic-build.requested", {
+  schema: z.object({
+    projectId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    /** Script version to build from; default = latest. */
+    scriptId: z.string().optional(),
+  }),
+});
+
 /** Phase 3 step 9: Remotion Lambda render of a timeline version + media Lambda post-processing and QA. */
 export const projectRenderRequested = eventType("project/render.requested", {
   schema: z.object({
@@ -140,5 +154,52 @@ export const publicationRequested = eventType("publication/requested", {
 export const publicationCancelled = eventType("publication/cancelled", {
   schema: z.object({
     publicationId: z.string(),
+  }),
+});
+
+/** Comic studio (docs/COMIC.md §8): adapt the story into a script, or re-write one page (`pageId` + `instruction`). */
+export const comicAdaptRequested = eventType("comic/adapt.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    pageId: z.string().optional(),
+    instruction: z.string().max(1000).optional(),
+  }),
+});
+
+/** Comic studio: draw character sheets for the cast (missing ones, or `refs` again with an `instruction`). */
+export const comicCastRequested = eventType("comic/cast.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    refs: z.array(z.string()).max(40).optional(),
+    instruction: z.string().max(1000).optional(),
+  }),
+});
+
+/** Comic studio: draw panels (every panel without a picture, or `panelIds` again with an `instruction`), then letter them. */
+export const comicDrawRequested = eventType("comic/draw.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    panelIds: z.array(z.string()).max(400).optional(),
+    instruction: z.string().max(1000).optional(),
+    /** Redraw from the current picture: same composition, only the instruction changes it. */
+    keepComposition: z.boolean().optional(),
+  }),
+});
+
+/** Comic studio: render the current version's pages as PNG (Remotion `renderStillOnLambda`, composition `ComicPage`). */
+export const comicExportRequested = eventType("comic/export.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    exportId: z.string(),
+    /** Every export row of this request, one per kind (M3: png / pdf / webtoon / zip share one page render); default `[exportId]`. */
+    exportIds: z.array(z.string()).max(4).optional(),
   }),
 });

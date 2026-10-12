@@ -2,7 +2,7 @@ import { NonRetriableError } from "inngest";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { inngest } from "../client";
-import { projectAssetsRequested } from "../events";
+import { projectAssetsRequested, projectComicBuildRequested } from "../events";
 import { autoAfterAssets } from "../auto-pipeline";
 import { reportProgress, tickProgress } from "@/lib/progress";
 import { eventSuperseded } from "@/lib/project-state";
@@ -99,6 +99,8 @@ export const prepareAssetsFn = inngest.createFunction(
       const row = await withOrgContext(ctx, async (tx) => {
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         if (!project) throw new NonRetriableError("Project not found in this workspace");
+        // A motion comic has its own build (`prepare-comic.ts`): its pictures are the comic's panels.
+        if (project.sourceKind === "comic") return "comic" as const;
         // A backlog draining after a queue outage: a build requested twice is built once (`eventSuperseded`).
         const built = await tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, projectId), eq(schema.timelines.kind, "built")), orderBy: desc(schema.timelines.createdAt), columns: { createdAt: true } });
         if (eventSuperseded(event.ts, { latestResultAt: built?.createdAt })) return null;
@@ -113,6 +115,7 @@ export const prepareAssetsFn = inngest.createFunction(
         return { project, script, article, sourceVideo };
       });
       if (!row) return null;
+      if (row === "comic") return row;
       const originality = await flagEnabled("originality_guard");
       await reportProgress(pctx, { label: "Đọc kịch bản", pct: 2 });
       const s = row.script.scenesJson as unknown as StoredScript;
@@ -149,6 +152,10 @@ export const prepareAssetsFn = inngest.createFunction(
         scenes: s.scenes.map((sc) => ({ id: sc.id, kind: sc.kind, voiceover: sc.voiceover, onScreenText: sc.onScreenText, brollTerms: sc.brollTerms, newsTerms: sc.newsTerms ?? [], durationSec: sc.durationSec })),
       };
     });
+    if (input === "comic") {
+      await step.sendEvent("comic-build", projectComicBuildRequested.create({ projectId, organizationId, requestedBy, scriptId }));
+      return { projectId, forwarded: "comic" as const };
+    }
     if (!input) return { projectId, skipped: "superseded" as const };
     const media = (name: string) => r2Key.media(organizationId, projectId, name);
 

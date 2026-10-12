@@ -218,6 +218,20 @@
       "when": 1791802277001,
       "tag": "0030_topic_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791807151087,
+      "tag": "0031_comic_studio",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791811895719,
+      "tag": "0032_motion_comic",
+      "breakpoints": true
     }
   ]
 }

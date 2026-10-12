@@ -66,7 +66,9 @@ const RESEARCH_SYSTEM =
 /** Step 1: the research turn with the web tools, resumed on `pause_turn`. Returns the notes and every page found. */
 async function researchNotes(client: Anthropic, brief: string, ctx: Omit<LlmContext, "purpose">) {
   const tools: Anthropic.Beta.BetaToolUnion[] = [
-    { type: "web_search_20260209", name: "web_search", max_uses: MAX_SEARCHES, user_location: { type: "approximate", country: "VN", timezone: "Asia/Ho_Chi_Minh" } },
+    // No `country`: the search provider rejects "VN" (400 "Country code VN is not supported"). The timezone alone is a valid
+    // location, and the prompt already asks for Vietnamese queries.
+    { type: "web_search_20260209", name: "web_search", max_uses: MAX_SEARCHES, user_location: { type: "approximate", timezone: "Asia/Ho_Chi_Minh" } },
     { type: "web_fetch_20260209", name: "web_fetch", max_uses: MAX_FETCHES, max_content_tokens: 12_000 },
   ];
   const messages: Anthropic.Beta.BetaMessageParam[] = [

@@ -60,6 +60,12 @@ export type CheckInput = {
   platforms: Platform[];
   /** A logo is drawn (kit or channel): part of the face guard's zones. */
   hasLogo: boolean;
+  /**
+   * Motion comic (docs/COMIC.md §11.1): one panel carries several beats and a beat may hold it longer than 5 s, the
+   * pictures are our own drawings and the script comes from the comic, so the cadence, repeat and faithfulness checks
+   * stay quiet; a panel framed on the speaker rather than on every face is not reported either.
+   */
+  comic?: boolean;
 };
 
 export type Check = { id: string; label: string; run: (input: CheckInput) => Issue[] };
@@ -139,8 +145,8 @@ export function autoFrameShot(doc: EditorDoc, options: CheckOption[], sceneId: s
 const shotHold: Check = {
   id: "checks.shot-hold",
   label: "Nhịp hình ≤ 5 s",
-  run: ({ doc }) =>
-    doc.scenes.flatMap((s) => {
+  run: ({ doc, comic }) =>
+    (comic ? [] : doc.scenes).flatMap((s) => {
       const missing = shotsMissing(s);
       if (!missing) return [];
       const per = sceneVoiceMs(s) / 1000 / sceneShots(s).length;
@@ -151,8 +157,9 @@ const shotHold: Check = {
 const repeated: Check = {
   id: "checks.repeated-picture",
   label: "Hình không lặp",
-  run: ({ doc }) => {
+  run: ({ doc, comic }) => {
     const out: Issue[] = [];
+    if (comic) return out;
     const used = usedKeys(doc);
     for (const s of doc.scenes)
       sceneShots(s).forEach((v, i) => {
@@ -186,7 +193,8 @@ const VERDICT_LABEL = { supported: "có căn cứ", partial: "chỉ có căn c�
 const faithfulness: Check = {
   id: "checks.faithfulness",
   label: "Kiểm chứng với bài gốc",
-  run: ({ doc, verdicts }) => {
+  run: ({ doc, verdicts, comic }) => {
+    if (comic) return [];
     if (!verdicts) return [{ id: "faith:none", checkId: "checks.faithfulness", severity: "info", sceneId: null, title: "Kịch bản chưa được kiểm chứng", detail: "Người duyệt sẽ phải xác nhận bỏ qua kiểm chứng.", fix: null }];
     return doc.scenes.flatMap((s): Issue[] => {
       const v = verdicts[s.id];
@@ -200,7 +208,7 @@ const faithfulness: Check = {
 const faces: Check = {
   id: "checks.faces",
   label: "Khuôn mặt không bị cắt / che",
-  run: ({ doc, options, hasLogo }) => {
+  run: ({ doc, options, hasLogo, comic }) => {
     const out: Issue[] = [];
     for (const s of doc.scenes) {
       const zones = sceneZones(doc, s, hasLogo);
@@ -211,7 +219,7 @@ const faces: Check = {
         const f = frameStill(frame, zones);
         const here = shotName(s.id, i);
         if (!f.ok) out.push({ id: `faces:${here}`, checkId: "checks.faces", severity: "should", sceneId: s.id, title: `${here}: ${f.issues.map((x) => FRAMING_ISSUE_LABEL[x]).join(", ")}`, detail: "Khung 9:16 không giữ trọn khuôn mặt; đổi ảnh khác hoặc rút gọn chữ trên màn hình.", fix: { kind: "open", sceneId: s.id, tab: "shots", shot: i, label: "Đổi ảnh" } });
-        else if (f.faces && JSON.stringify(f.focus) !== JSON.stringify(v.focus))
+        else if (!comic && f.faces && JSON.stringify(f.focus) !== JSON.stringify(v.focus))
           out.push({ id: `faces:${here}`, checkId: "checks.faces", severity: "should", sceneId: s.id, title: `${here} chưa căn theo khuôn mặt`, detail: `${f.faces} khuôn mặt; khung hiện tại có thể cắt hoặc để chữ che mặt.`, fix: { kind: "auto-frame", sceneId: s.id, shot: i, label: "Căn khung tự động" } });
       });
     }

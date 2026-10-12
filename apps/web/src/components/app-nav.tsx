@@ -1,16 +1,18 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AudioLines, FolderKanban, Music, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
+import { AudioLines, BookOpen, FolderKanban, Music, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
 import { NavRail } from "@/components/nav-rail";
 import { cn } from "@/lib/utils";
 
 /** `short`: the label under the phone tab bar's icon, where seven tabs share the width. */
 type Item = { href: string; label: string; short?: string; icon: LucideIcon; exact?: boolean };
 
-export function appNavItems(admin: boolean): Item[] {
+/** `comics`: the comic studio's flag (docs/COMIC.md); its item only shows while the flag is on. */
+export function appNavItems(admin: boolean, comics = false): Item[] {
   return [
     { href: "/app", label: "Dự án", icon: FolderKanban },
+    ...(comics ? [{ href: "/app/comics", label: "Truyện tranh", short: "Truyện", icon: BookOpen }] : []),
     { href: "/app/publications", label: "Đã đăng", icon: Send },
     { href: "/app/channels", label: "Kênh", icon: Radio },
     { href: "/app/brand", label: "Bộ nhận diện", short: "Nhận diện", icon: Palette },
@@ -27,24 +29,34 @@ function isActive(pathname: string, item: Item) {
 
 /** The section an `/app` path belongs to (the top bar names it). */
 export function currentAppItem(pathname: string, admin: boolean) {
-  return appNavItems(admin).find((item) => isActive(pathname, item));
+  return appNavItems(admin, true).find((item) => isActive(pathname, item));
 }
 
 /** Icon rail (`sm` and up). The admin area is reached from the top bar's segmented control, so it has no tile here. */
-export function AppNav({ expanded = false }: { expanded?: boolean }) {
+export function AppNav({ expanded = false, comics = false }: { expanded?: boolean; comics?: boolean }) {
   const pathname = usePathname();
-  const [projects, publications, channels, brand, voices, sounds] = appNavItems(false);
-  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand, voices, sounds]]} isActive={(item) => isActive(pathname, item)} defaultExpanded={expanded} />;
+  const items = appNavItems(false, comics);
+  const at = (href: string) => items.find((i) => i.href === href)!;
+  const first = comics ? [at("/app"), at("/app/comics")] : [at("/app")];
+  return (
+    <NavRail
+      label="Chính"
+      homeHref="/app"
+      groups={[first, [at("/app/publications"), at("/app/channels")], [at("/app/brand"), at("/app/voices"), at("/app/sounds")]]}
+      isActive={(item) => isActive(pathname, item)}
+      defaultExpanded={expanded}
+    />
+  );
 }
 
 /**
  * Phone navigation: a fixed bottom tab bar (thumb reach), hidden on the editor
  * where the screen belongs to the timeline and its own toolbar.
  */
-export function MobileNav({ admin }: { admin: boolean }) {
+export function MobileNav({ admin, comics = false }: { admin: boolean; comics?: boolean }) {
   const pathname = usePathname();
   if (/^\/app\/projects\/[^/]+\/edit/.test(pathname)) return null;
-  const items = appNavItems(admin);
+  const items = appNavItems(admin, comics);
   return (
     <nav aria-label="Chính" className="fixed inset-x-0 bottom-0 z-40 border-t bg-sidebar/95 backdrop-blur supports-[backdrop-filter]:bg-sidebar/85 sm:hidden pb-safe">
       <ul className="flex items-stretch">

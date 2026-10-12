@@ -74,6 +74,8 @@ export type EditorProps = {
   sensitiveTopic: boolean;
   /** Political story: the editor offers no stock footage or AI stills for it (`visual-plan.ts`). */
   political: boolean;
+  /** Motion comic (`source_kind = 'comic'`): a panel held for several beats and longer than 5 s is the point, not a fault. */
+  comic: boolean;
   /** Engine the motion panel preselects (`projects.motion_engine`). */
   motionEngine: MotionEngine;
   version: VersionRow & { note: string | null; isLatest: boolean };

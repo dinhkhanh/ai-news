@@ -25,7 +25,7 @@ import { googleCredentials } from "./google";
  */
 export const AI_IMAGE_MODEL = "gemini-3.1-flash-image";
 export const AI_IMAGE_PROVIDER = "gemini_image";
-const USAGE_PROVIDER = "google_vertex";
+export const USAGE_PROVIDER = "google_vertex";
 /** 1120 output-image tokens at $60 / 1M (1K resolution) + a few hundred prompt tokens at $0.50 / 1M. */
 const IMAGE_OUTPUT_USD = 0.0672;
 const TEXT_INPUT_USD_PER_TOKEN = 0.5 / 1_000_000;
@@ -35,20 +35,21 @@ export const AI_CREDIT: Record<"vi" | "en", string> = { vi: "Ảnh minh hoạ AI
 
 export type AiAvailability = { enabled: boolean; reason: string | null; remaining: number; projectId: string | null };
 
-/** Whether this user may generate images now, and how many more today (Infinity when unmetered). */
-export async function aiImagesAvailable(userId: string): Promise<AiAvailability> {
-  const off = (reason: string): AiAvailability => ({ enabled: false, reason, remaining: 0, projectId: null });
-  if (!(await flagEnabled("ai_media"))) return off("cờ ai_media tắt");
+/**
+ * Whether Vertex image generation can be called at all: the `google_veo` integration is on, the service account
+ * and a project id are there, and the integration's monthly spend cap is not reached. Shared with the comic studio.
+ */
+export async function vertexImageAccess(): Promise<{ ok: true; projectId: string } | { ok: false; reason: string }> {
   const row = await db.query.integrations.findFirst({ where: eq(schema.integrations.provider, "google_veo") });
-  if (!row?.enabled) return off("tích hợp Google Vertex chưa bật");
+  if (!row?.enabled) return { ok: false, reason: "tích hợp Google Vertex chưa bật" };
   let creds: ReturnType<typeof googleCredentials>;
   try {
     creds = googleCredentials();
   } catch (e) {
-    return off((e as Error).message);
+    return { ok: false, reason: (e as Error).message };
   }
   const projectId = (row.vaultRef ? await readSecret(row.vaultRef) : null)?.trim() || creds.projectId || null;
-  if (!projectId) return off("thiếu Project ID (secret của tích hợp hoặc project_id trong SA JSON)");
+  if (!projectId) return { ok: false, reason: "thiếu Project ID (secret của tích hợp hoặc project_id trong SA JSON)" };
   if (row.spendCapMonthlyUsd) {
     const cap = Number(row.spendCapMonthlyUsd);
     const monthStart = new Date();
@@ -58,12 +59,21 @@ export async function aiImagesAvailable(userId: string): Promise<AiAvailability>
       .select({ usd: sum(schema.usageCosts.costUsd) })
       .from(schema.usageCosts)
       .where(and(eq(schema.usageCosts.provider, USAGE_PROVIDER), gte(schema.usageCosts.createdAt, monthStart)));
-    if (cap > 0 && Number(usd ?? 0) >= cap) return off(`đã chạm mức chi tháng $${cap} của Google Vertex`);
+    if (cap > 0 && Number(usd ?? 0) >= cap) return { ok: false, reason: `đã chạm mức chi tháng $${cap} của Google Vertex` };
   }
+  return { ok: true, projectId };
+}
+
+/** Whether this user may generate images now, and how many more today (Infinity when unmetered). */
+export async function aiImagesAvailable(userId: string): Promise<AiAvailability> {
+  const off = (reason: string): AiAvailability => ({ enabled: false, reason, remaining: 0, projectId: null });
+  if (!(await flagEnabled("ai_media"))) return off("cờ ai_media tắt");
+  const access = await vertexImageAccess();
+  if (!access.ok) return off(access.reason);
   const [limit, used] = await Promise.all([dailyLimit(userId, "ai_media"), usedToday(userId, "ai_media")]);
   const remaining = limit > 0 ? Math.max(0, limit - used) : Number.POSITIVE_INFINITY;
   if (remaining === 0) return off(`hết hạn mức AI media hôm nay (${used}/${limit})`);
-  return { enabled: true, reason: null, remaining, projectId };
+  return { enabled: true, reason: null, remaining, projectId: access.projectId };
 }
 
 /** Editorial, text-free, people-free illustration prompt built from the script's English terms. */
@@ -96,17 +106,28 @@ async function accessToken() {
   return token;
 }
 
-/** One 9:16 image from Vertex AI; returns the bytes and the modelled cost. */
-export async function generateImage(prompt: string, projectId: string): Promise<{ bytes: Buffer; mime: string; costUsd: number; tokens: number }> {
-  const url = `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/global/publishers/google/models/${AI_IMAGE_MODEL}:generateContent`;
+export type VertexImageRequest = {
+  model: string;
+  prompt: string;
+  /** Reference images sent before the prompt (character sheets, earlier panels…). */
+  refs?: { bytes: Buffer; mime: string }[];
+  aspectRatio: string;
+  imageSize: "1K" | "2K";
+  projectId: string;
+};
+
+/** One image from a Gemini image model on Vertex AI (global endpoint); returns the bytes and the token usage. */
+export async function vertexGenerateImage(req: VertexImageRequest): Promise<{ bytes: Buffer; mime: string; promptTokens: number; tokens: number }> {
+  const url = `https://aiplatform.googleapis.com/v1/projects/${req.projectId}/locations/global/publishers/google/models/${req.model}:generateContent`;
+  const parts = [...(req.refs ?? []).map((r) => ({ inlineData: { mimeType: r.mime, data: r.bytes.toString("base64") } })), { text: req.prompt }];
   const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${await accessToken()}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: "9:16", imageSize: "1K" }, candidateCount: 1 },
+      contents: [{ role: "user", parts }],
+      generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: req.aspectRatio, imageSize: req.imageSize }, candidateCount: 1 },
     }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(150_000),
   });
   if (!res.ok) throw new Error(`Vertex HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = (await res.json()) as GenerateResponse;
@@ -114,9 +135,18 @@ export async function generateImage(prompt: string, projectId: string): Promise<
   const cand = json.candidates?.[0];
   const part = cand?.content?.parts?.find((p) => p.inlineData?.data);
   if (!part?.inlineData) throw new Error(`no image returned (${cand?.finishReason ?? "no candidate"})`);
-  const tokens = json.usageMetadata?.totalTokenCount ?? 0;
-  const costUsd = IMAGE_OUTPUT_USD + (json.usageMetadata?.promptTokenCount ?? 0) * TEXT_INPUT_USD_PER_TOKEN;
-  return { bytes: Buffer.from(part.inlineData.data, "base64"), mime: part.inlineData.mimeType || "image/png", costUsd, tokens };
+  return {
+    bytes: Buffer.from(part.inlineData.data, "base64"),
+    mime: part.inlineData.mimeType || "image/png",
+    promptTokens: json.usageMetadata?.promptTokenCount ?? 0,
+    tokens: json.usageMetadata?.totalTokenCount ?? 0,
+  };
+}
+
+/** One 9:16 image from Vertex AI; returns the bytes and the modelled cost. */
+export async function generateImage(prompt: string, projectId: string): Promise<{ bytes: Buffer; mime: string; costUsd: number; tokens: number }> {
+  const img = await vertexGenerateImage({ model: AI_IMAGE_MODEL, prompt, aspectRatio: "9:16", imageSize: "1K", projectId });
+  return { bytes: img.bytes, mime: img.mime, costUsd: IMAGE_OUTPUT_USD + img.promptTokens * TEXT_INPUT_USD_PER_TOKEN, tokens: img.tokens };
 }
 
 /**

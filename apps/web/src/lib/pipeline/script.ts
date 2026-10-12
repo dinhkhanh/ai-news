@@ -41,6 +41,8 @@ export async function scriptPipeline(data: ScriptRequest, steps: PipelineSteps) 
     const row = await withOrgContext(ctx, async (tx) => {
       const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
       if (!project) throw new NonRetriableError("Project not found in this workspace");
+      // A motion comic's script is built from the comic (`comic/motion.ts`), never written by a model.
+      if (project.sourceKind === "comic") throw new NonRetriableError("A motion comic's script comes from its comic: make the video again from the comic");
       // Before anything is written: a direct run may hold the project right now, and its progress must stay intact.
       const latest = await tx.query.scripts.findFirst({ where: eq(schema.scripts.projectId, projectId), orderBy: desc(schema.scripts.createdAt), columns: { createdAt: true } });
       if (eventSuperseded(sentAt, { latestResultAt: latest?.createdAt, progress: project.busyProgress })) return null;
@@ -58,7 +60,7 @@ export async function scriptPipeline(data: ScriptRequest, steps: PipelineSteps) 
       siteName: row.article.siteName,
       url: row.article.canonicalUrl,
       publishedAt: row.article.publishedAt ? row.article.publishedAt.toISOString() : null,
-      kind: row.project.sourceKind,
+      kind: row.project.sourceKind === "comic" ? "text" : row.project.sourceKind,
       brief: row.project.brief,
     };
     return { article, language: row.project.language, articleId: row.article.id };
