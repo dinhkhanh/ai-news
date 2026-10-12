@@ -78,6 +78,7 @@ const CHECK_DESCRIPTION: Record<string, string> = {
   "checks.solid-shot": "Cảnh quay còn là nền màu tạm.",
   "checks.repeated-picture": "Một hình xuất hiện hai lần trong video.",
   "checks.faces": "Khuôn mặt bị cắt hoặc bị chữ che; căn khung tự động.",
+  "checks.watermark": "Clip mang watermark của ứng dụng hay kênh khác (TikTok, @tài khoản, logo đài); đổi clip khác.",
   "checks.originality": "Quá nửa thời lượng, hoặc hơn 10 s liền, là video của người khác (luật nội dung nguyên bản của Meta).",
   "checks.hook-text": "Cảnh mở đầu không có chữ trên màn hình.",
   "checks.audio": "Âm thanh chưa trộn, không có nhạc nền.",

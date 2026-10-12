@@ -15,6 +15,7 @@ import { listSoundCollections } from "@/lib/media/sound-collections";
 import { licenceInfo } from "@/lib/media/sound-library";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { storedFrame, storedSection } from "@/lib/media/framing";
+import { storedWatermark } from "@/lib/media/watermark";
 import type { PendingCapture } from "@/lib/media/visual-plan";
 import { busyStep, projectLabel } from "@/lib/project-state";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
@@ -108,6 +109,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
       frame: storedFrame(a.meta),
       sourceUrl: a.sourceUrl,
       section: storedSection(a.meta),
+      watermark: storedWatermark(a.meta),
     }));
   // YouTube picks the build could not download, minus the ones already recorded from a browser.
   const captured = new Set(assets.filter((a) => a.provider === "yt-capture").map((a) => (a.providerId ?? "").split("@")[0]));

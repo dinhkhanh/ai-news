@@ -10,6 +10,7 @@ import { PLATFORM_SPEC, type Platform } from "@/lib/publish/platforms";
 import { sceneShots, sceneVoiceMs, setShot, shotsMissing, visualKey, type EditorDoc, type EditorScene, type EditorVisual } from "./editor";
 import { frameStill, overlayZones, FRAMING_ISSUE_LABEL, type FrameFaces } from "./framing";
 import { docShots, MAX_THIRD_PARTY_RUN_SEC, MAX_THIRD_PARTY_VIDEO_SHARE, originalityReport } from "./originality";
+import { watermarkLabel, type WatermarkVerdict } from "./watermark";
 
 export type IssueSeverity = "fix" | "should" | "info";
 
@@ -43,6 +44,8 @@ export type CheckOption = {
   provider: string;
   sceneId: string | null;
   frame: FrameFaces | null;
+  /** Watermark scan of a clip; absent / null = never scanned. */
+  watermark?: WatermarkVerdict | null;
 };
 
 export type CheckInput = {
@@ -85,11 +88,11 @@ export function visualFromOption(o: CheckOption): EditorVisual {
 
 /**
  * Options not used anywhere in the document, best first for `sceneId`: the ones fetched for that scene, then the rest.
- * AI stills come last (sourcing priority, `visual-plan.ts`).
+ * AI stills come last (sourcing priority, `visual-plan.ts`), clips with a watermark after everything else.
  */
 export function unusedOptions(doc: Pick<EditorDoc, "scenes">, options: CheckOption[], sceneId: string): CheckOption[] {
   const used = usedKeys(doc);
-  const rank = (o: CheckOption) => (o.sceneId === sceneId ? 0 : 2) + (o.provider === "gemini_image" ? 1 : 0);
+  const rank = (o: CheckOption) => (o.sceneId === sceneId ? 0 : 2) + (o.provider === "gemini_image" ? 1 : 0) + (o.watermark?.watermarked ? 4 : 0);
   return options.filter((o) => !used[o.key]).sort((a, b) => rank(a) - rank(b));
 }
 
@@ -283,8 +286,25 @@ const originality: Check = {
   },
 };
 
+/** Clips whose watermark scan (`watermark.ts`) found another app's or channel's mark: visibly recycled footage. */
+const watermarks: Check = {
+  id: "checks.watermark",
+  label: "Clip không có watermark",
+  run: ({ doc, options }) => {
+    const byKey = new Map(options.map((o) => [o.key, o]));
+    return doc.scenes.flatMap((s) =>
+      sceneShots(s).flatMap((v, i): Issue[] => {
+        const w = v.kind === "video" ? byKey.get(v.key)?.watermark : null;
+        if (!w?.watermarked) return [];
+        const here = shotName(s.id, i);
+        return [{ id: `watermark:${here}`, checkId: "checks.watermark", severity: "should", sceneId: s.id, title: `${here}: clip có watermark (${watermarkLabel(w)})`, detail: "Facebook / Instagram coi clip mang watermark của ứng dụng hay kênh khác là nội dung lấy lại và hạ phân phối. Đổi sang clip hoặc hình khác.", fix: { kind: "replace-shot", sceneId: s.id, shot: i, label: "Đổi clip" } }];
+      }),
+    );
+  },
+};
+
 /** Every built-in check, in the order the panel lists them. */
-export const BUILTIN_CHECKS: Check[] = [faithfulness, duration, shotHold, solidShots, repeated, faces, originality, hookText, audio];
+export const BUILTIN_CHECKS: Check[] = [faithfulness, duration, shotHold, solidShots, repeated, faces, originality, watermarks, hookText, audio];
 
 /** Run checks and sort the issues: fix → should → info, then document order. */
 export function runChecks(checks: Check[], input: CheckInput): Issue[] {

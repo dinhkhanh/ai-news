@@ -29,6 +29,8 @@ import { LEAD_MS, sceneTimings, shotsNeeded } from "@/lib/media/timeline";
 import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice } from "@/lib/media/tts";
 import { allocateChecked, orderByTier, SHOT_SEC, shortfall, splitBudget, tier2Queries, tierAllowed, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type SceneQuery, type VisualTier } from "@/lib/media/visual-plan";
 import { findWebVideosFor, foundForHint, storeWebVideo, webVideoEnabled, webVideoHint, type FoundWebVideo } from "@/lib/media/webvideo";
+import { watermarkLabel, type WatermarkVerdict } from "@/lib/media/watermark";
+import { scanClipWatermark, watermarkScanAvailable } from "@/lib/media/watermark-scan";
 import { deleteObject, r2Key } from "@/lib/r2";
 import { sourceVideoShots } from "@/lib/video-source";
 
@@ -69,6 +71,9 @@ const MAX_AI_PER_BUILD = 8;
  * (`thirdPartyVideoMask`) and the tiers fill the rest; each web video gives at most two segments, tier 2 places
  * web video only within the remaining budget, and a scene's shots are reordered so footage is interspersed with
  * other pictures (`spreadThirdParty`). Slots no tier could fill in a video project fall back to the source video.
+ * Every downloaded clip is scanned for watermarks (`watermark.ts`: an app name or @handle, or a bug that stays put
+ * near the frame edge); a watermarked web video leaves the pool like a failed download, so another candidate or a
+ * later tier takes its shots. A video project's own source video is scanned too, and only reported.
  */
 export const prepareAssetsFn = inngest.createFunction(
   {
@@ -401,6 +406,34 @@ export const prepareAssetsFn = inngest.createFunction(
       pool[d.index].asset = d.asset;
       if (!d.asset) pool[d.index].capacity = 0;
     }
+    /* ---- originality: a clip carrying another app's or channel's watermark is visibly recycled, so it leaves the pool ---- */
+    const watermarks = await step.run("watermark-scan", async () => {
+      const off = (reason: string | null) => ({ enabled: false, reason, verdicts: {} as Record<string, WatermarkVerdict>, source: null as WatermarkVerdict | null, errors: [] as string[], costUsd: 0 });
+      const clips = downloads.flatMap((d) => (d.asset ? [{ index: d.index, asset: d.asset }] : []));
+      const src = input.sourceVideo;
+      if (!input.originality) return off("cờ originality_guard tắt");
+      if (!clips.length && !src) return off(null);
+      const a = await watermarkScanAvailable();
+      if (!a.enabled) return off(a.reason);
+      await reportProgress(pctx, { label: `Kiểm tra watermark ${clips.length + (src ? 1 : 0)} clip (Cloud Vision)`, pct: 47 });
+      const verdicts: Record<string, WatermarkVerdict> = {};
+      const errors: string[] = [];
+      let costUsd = 0;
+      for (let i = 0; i < clips.length; i += 4) {
+        const batch = await Promise.all(clips.slice(i, i + 4).map(async (c) => ({ index: c.index, r: await scanClipWatermark({ assetId: c.asset.assetId, key: c.asset.key, durationSec: c.asset.durationSec }, pctx) })));
+        for (const { index, r } of batch) {
+          if (r.verdict) verdicts[index] = r.verdict;
+          if (r.error) errors.push(r.error);
+          costUsd += r.costUsd;
+        }
+      }
+      // A video project's own video cannot be swapped out: its verdict is only reported (build_json, the editor's check).
+      const source = src ? await scanClipWatermark({ assetId: src.assetId, key: src.key, durationSec: src.durationSec }, pctx) : null;
+      if (source?.error) errors.push(source.error);
+      costUsd += source?.costUsd ?? 0;
+      return { enabled: true, reason: null as string | null, verdicts, source: source?.verdict ?? null, errors, costUsd };
+    });
+    for (const [index, v] of Object.entries(watermarks.verdicts)) if (v.watermarked) pool[Number(index)].capacity = 0;
     // Final placement: same picks, but a video whose download failed is out of the pool.
     const placed = allocateChecked(wanting, pool.length, assignment.picks, pool.map((it) => (it.video && !it.asset ? 0 : it.capacity)), faceOk, footageLimit);
     const placedCount: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, placed.perScene[sc.id]?.length ?? 0]));
@@ -662,6 +695,16 @@ export const prepareAssetsFn = inngest.createFunction(
           /** Video project: slots kept for other pictures that no tier could fill, so they show the source video after all. */
           sourceForced: doc.scenes.reduce((a, s) => a + [s.visual, ...s.shots].filter((v, i) => v.kind === "video" && v.key === input.sourceVideo?.key && !sourceSlots[s.id]?.[i]).length, 0),
           report: originalityReport(docShots(doc, (key) => providers.get(key)), rules ?? ORIGINALITY_RULES),
+          /** Watermark scan of the downloaded clips: which web videos it turned down, and the source video's verdict. */
+          watermarks: {
+            enabled: watermarks.enabled,
+            reason: watermarks.reason,
+            scanned: Object.keys(watermarks.verdicts).length,
+            rejected: Object.entries(watermarks.verdicts).flatMap(([index, v]) => (v.watermarked ? [{ assetId: pool[Number(index)].asset?.assetId ?? null, url: pool[Number(index)].video?.url ?? null, marks: watermarkLabel(v) }] : [])),
+            source: watermarks.source,
+            errors: watermarks.errors,
+            costUsd: watermarks.costUsd,
+          },
         },
         brandKitId: brand.id,
         doc,
@@ -681,10 +724,10 @@ export const prepareAssetsFn = inngest.createFunction(
           .where(eq(schema.projects.id, projectId));
         return t;
       });
-      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + faceScan.costUsd + aiCostUsd + mix.costUsd + motionCostUsd;
+      const costUsd = voices.reduce((a, v) => a + v.costUsd, 0) + Object.values(stock).reduce((a, s) => a + s.rankCostUsd, 0) + assignment.costUsd + faceScan.costUsd + watermarks.costUsd + aiCostUsd + mix.costUsd + motionCostUsd;
       await logActivity({
         actorId: requestedBy, organizationId, projectId, type: "timeline.built",
-        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, fullNeed[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, motionScenes: Object.keys(motionVisual), motionEngine: Object.keys(motionVisual).length ? input.motionEngine : null, photoSketch: input.photoSketch, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
+        payload: { timelineId: row.id, version: row.version, durationSec, scenes: doc.scenes.length, stockScenes: Object.values(stock).filter((s) => s.selected).length, imageScenes: doc.scenes.filter((s) => s.visual.kind === "image").length, shots: doc.scenes.reduce((a, s) => a + 1 + s.shots.length, 0), shotsShort: doc.scenes.reduce((a, s) => a + Math.max(0, fullNeed[s.id] - 1 - s.shots.length), 0), relatedImages: related.assets.length, webVideos: webVideoAssets.length, watermarkRejected: Object.values(watermarks.verdicts).filter((v) => v.watermarked).length, faceRejected: placed.rejected.length, faceForced: total(Object.fromEntries(Object.entries(forced).map(([k, v]) => [k, v.length]))), aiImages: aiAssets.length, aiSkipped: aiPlan.reason, motionScenes: Object.keys(motionVisual), motionEngine: Object.keys(motionVisual).length ? input.motionEngine : null, photoSketch: input.photoSketch, music: music.pick?.source ?? null, timing: voices.map((v) => v.timing), costUsd: Math.round(costUsd * 1e4) / 1e4 },
       });
       return { ...row, durationSec };
     });

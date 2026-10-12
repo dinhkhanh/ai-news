@@ -4,6 +4,7 @@ import type { EditorDoc } from "@/lib/media/editor";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import type { FrameFaces } from "@/lib/media/framing";
 import type { PendingCapture } from "@/lib/media/visual-plan";
+import type { WatermarkVerdict } from "@/lib/media/watermark";
 import type { Platform } from "@/lib/publish/platforms";
 import type { ProjectStatus } from "@/lib/project-state";
 
@@ -25,6 +26,8 @@ export type VisualOption = {
   sourceUrl: string | null;
   /** Section of the source video this clip is, in seconds (`assets.meta.section`); null for pictures / whole files. */
   section: [number, number] | null;
+  /** Watermark scan of a clip (`assets.meta.watermark`); null / absent = never scanned. */
+  watermark?: WatermarkVerdict | null;
 };
 
 /** A background-music choice: a platform music-library track (`group` null) or a sound from one of the member's collections. */
