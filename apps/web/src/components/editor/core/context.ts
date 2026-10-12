@@ -91,7 +91,14 @@ export type EditorCtx = {
   time: TimeStore;
   ui: {
     panel: string;
+    /** Show a panel (and the panel column, when collapsed). */
     setPanel: (id: string) => void;
+    /** Desktop: the panel column beside the rail is shown. */
+    panelOpen: boolean;
+    setPanelOpen: (open: boolean) => void;
+    /** Desktop: the inspector column is shown (collapsed = a slim strip with a button to reopen it). */
+    inspectorOpen: boolean;
+    setInspectorOpen: (open: boolean) => void;
     tab: string;
     setTab: (id: string) => void;
     mode: EditorMode;

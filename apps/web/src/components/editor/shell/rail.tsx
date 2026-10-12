@@ -1,5 +1,5 @@
 "use client";
-import { PencilLine } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PencilLine } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEditor } from "../core/context";
 import type { PanelContribution } from "../core/plugin";
@@ -20,23 +20,29 @@ function BadgeDot({ panel }: { panel: PanelContribution }) {
   );
 }
 
-/** Desktop: one icon per panel plugin, in plugin order; digits 1–9 open them. */
+/**
+ * Desktop: one icon per panel plugin, in plugin order; digits 1–9 open them. Clicking the open panel's icon
+ * collapses the panel column (so does the toggle at the bottom, or ⌘B); any icon opens it again.
+ */
 export function Rail({ className }: { className?: string }) {
   const ctx = useEditor();
   const panels = useVisiblePanels();
+  const open = ctx.ui.panelOpen;
+  const Toggle = open ? PanelLeftClose : PanelLeftOpen;
   return (
     <nav aria-label="Bảng" className={cn("flex-col items-center gap-1 border-r bg-sidebar py-2", className)}>
       {panels.map((p, i) => {
         const Icon = p.icon;
-        const active = ctx.ui.panel === p.id;
+        const active = open && ctx.ui.panel === p.id;
         return (
           <button
             key={p.id}
             type="button"
-            onClick={() => ctx.ui.setPanel(p.id)}
+            onClick={() => (active ? ctx.ui.setPanelOpen(false) : ctx.ui.setPanel(p.id))}
             aria-label={p.title}
             aria-pressed={active}
-            title={`${p.title} (${i + 1})`}
+            aria-controls="editor-panel"
+            title={active ? `${p.title} · bấm để thu gọn (${i + 1})` : `${p.title} (${i + 1})`}
             className={cn("relative flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-card hover:text-foreground", active && "bg-card text-foreground shadow-xs ring-1 ring-border")}
           >
             <Icon className="size-5" />
@@ -44,6 +50,17 @@ export function Rail({ className }: { className?: string }) {
           </button>
         );
       })}
+      <button
+        type="button"
+        onClick={() => ctx.ui.setPanelOpen(!open)}
+        aria-expanded={open}
+        aria-controls="editor-panel"
+        aria-label={open ? "Thu gọn bảng (⌘B)" : "Mở bảng (⌘B)"}
+        title={open ? "Thu gọn bảng (⌘B)" : "Mở bảng (⌘B)"}
+        className="mt-auto flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+      >
+        <Toggle className="size-5" />
+      </button>
     </nav>
   );
 }

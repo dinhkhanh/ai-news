@@ -31,10 +31,10 @@ export function currentAppItem(pathname: string, admin: boolean) {
 }
 
 /** Icon rail (`sm` and up). The admin area is reached from the top bar's segmented control, so it has no tile here. */
-export function AppNav() {
+export function AppNav({ expanded = false }: { expanded?: boolean }) {
   const pathname = usePathname();
   const [projects, publications, channels, brand, voices, sounds] = appNavItems(false);
-  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand, voices, sounds]]} isActive={(item) => isActive(pathname, item)} />;
+  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand, voices, sounds]]} isActive={(item) => isActive(pathname, item)} defaultExpanded={expanded} />;
 }
 
 /**
