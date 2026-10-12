@@ -8,6 +8,7 @@ import { inngest } from "@/inngest/client";
 import { projectFetchRequested } from "@/inngest/events";
 import { run, str, type ActionState } from "@/lib/admin";
 import { countWords } from "@/lib/fetch/readability";
+import { BRIEF_MIN_CHARS, briefTitle, normaliseBrief } from "@/lib/llm/research-sources";
 import { channelLogo } from "@/lib/media/logo";
 import { resolveVideoLink } from "@/lib/media/source-video";
 import { findVoice } from "@/lib/media/tts";
@@ -22,24 +23,31 @@ import { parseMotion } from "@/components/motion-select";
 import { parsePhotoSketch } from "@/components/sketch-select";
 
 /**
- * Create a project and start the fetch step. Three sources (`projects.source_kind`):
+ * Create a project and start the fetch step. Four sources (`projects.source_kind`):
  * - a link to a news article: fetched by the extraction chain; duplicates are checked org-wide;
  * - a link to a video page (YouTube, TikTok, Facebook…, share links followed): the video is downloaded as the
  *   footage and its caption pre-fills the content the user writes; duplicates are checked the same way;
- * - content typed in (`mode=text`): stored at once as a confirmed article (a direct run, like a manual paste).
+ * - content typed in (`mode=text`): stored at once as a confirmed article (a direct run, like a manual paste);
+ * - keywords, a topic or directions (`mode=topic`, `brief`): the fetch step researches it on the web and writes a
+ *   sourced article (`llm/research.ts`), then the pipeline goes on as for an article (auto mode included).
  */
 export async function createProject(_: ActionState, fd: FormData): Promise<ActionState> {
   let target: string | null = null;
   const state = await run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
-    const typed = str(fd, "mode") === "text";
+    const mode = str(fd, "mode");
+    const typed = mode === "text";
+    const topic = mode === "topic";
+    const linkless = typed || topic;
     const text = typed ? String(fd.get("text") ?? "").replace(/\r\n?/g, "\n").trim() : "";
-    const title = typed ? str(fd, "title") || text.split("\n")[0].slice(0, 90).trim() : "";
+    const brief = topic ? normaliseBrief(String(fd.get("brief") ?? "")) : "";
+    const title = typed ? str(fd, "title") || text.split("\n")[0].slice(0, 90).trim() : topic ? briefTitle(brief) : "";
     if (typed && countWords(text) < MIN_CONTENT_WORDS.text) throw new Error(`Write at least ${MIN_CONTENT_WORDS.text} words of content`);
-    const videoUrl = typed ? null : await resolveVideoLink(str(fd, "url"));
-    const url = typed ? null : (videoUrl ?? canonicalizeUrl(str(fd, "url")));
+    if (topic && brief.length < BRIEF_MIN_CHARS) throw new Error("Type a few keywords, a topic or directions to research");
+    const videoUrl = linkless ? null : await resolveVideoLink(str(fd, "url"));
+    const url = linkless ? null : (videoUrl ?? canonicalizeUrl(str(fd, "url")));
     if (url && isPrivateHost(url)) throw new Error("That address is not a public website");
-    const sourceKind = typed ? "text" : videoUrl ? "video" : "article";
+    const sourceKind = typed ? "text" : topic ? "topic" : videoUrl ? "video" : "article";
     const { durationSec, tone } = parsePreset(fd);
     const force = fd.get("force") === "on";
     const auto = fd.get("auto") === "on";
@@ -70,7 +78,7 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
       tx
         .insert(schema.projects)
         .values({
-          organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, sourceKind, title: title || null, durationSec, tone, autoPipeline: auto,
+          organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, sourceKind, brief: topic ? brief : null, title: title || null, durationSec, tone, autoPipeline: auto,
           brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null, voicePresetId: voice?.id ?? null,
           motionMode: motion.mode, motionEngine: motion.engine, photoSketch,
           // Typed content is saved in this request's `after()`, never through the queue: nothing to fetch, nothing to wait for.
@@ -78,10 +86,11 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
         })
         .returning({ id: schema.projects.id }),
     );
-    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, voice: voice?.name ?? "default", motion: motion.mode === "off" ? "off" : `${motion.mode}/${motion.engine}`, photoSketch, duplicateOf: existing?.id ?? null }, project.id);
+    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), ...(topic ? { brief: brief.slice(0, 300) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, voice: voice?.name ?? "default", motion: motion.mode === "off" ? "off" : `${motion.mode}/${motion.engine}`, photoSketch, duplicateOf: existing?.id ?? null }, project.id);
     if (typed) after(() => runFetchDirect({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
     else await inngest.send(projectFetchRequested.create({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
     target = `/app/projects/${project.id}`;
+    if (topic) return auto ? "Project created; researching the topic, then script → build → render automatically…" : "Project created; researching the topic on the web…";
     if (sourceKind === "video") return auto ? "Project created; downloading the video. Write its content, and the rest runs automatically…" : "Project created; downloading the video…";
     return auto ? "Project created; running fetch → script → build → render automatically…" : typed ? "Project created; saving your content…" : "Project created; fetching the article…";
   });

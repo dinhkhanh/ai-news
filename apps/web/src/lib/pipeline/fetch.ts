@@ -8,6 +8,9 @@ import { logActivity } from "@/lib/activity";
 import { FETCH_METHOD_LABEL as PROVIDER_LABEL, fetchArticle, fetchOrder, manualArticle, type FetchAttempt, type FetchMethod, type FetchProvider } from "@/lib/fetch";
 import { heuristicLanguage } from "@/lib/language";
 import { classifyArticle } from "@/lib/llm/classify";
+import { isPermanentLlmError, LlmOutputError } from "@/lib/llm/client";
+import { researchBrief, writeTopicArticle } from "@/lib/llm/research";
+import { creditLine, type ResearchSource } from "@/lib/llm/research-sources";
 import { chooseBrandKit } from "@/lib/media/brand";
 import { downloadSourceVideo, lookupVideo, videoArticle } from "@/lib/media/source-video";
 import { reportProgress } from "@/lib/progress";
@@ -33,7 +36,8 @@ export type FetchRequest = {
 /**
  * Pipeline step 1 (docs/PLAN.md §4.1): extract the article, snapshot it to R2,
  * (a `video` project instead: read the video page's title + caption with yt-dlp and download the video itself,
- * the footage of every shot; the caption is only a starting point the user rewrites before confirming),
+ * the footage of every shot; the caption is only a starting point the user rewrites before confirming;
+ * a `topic` project: research the brief on the web and write a sourced article from what was found),
  * detect language + sensitive topic, store the article row and move the project
  * to `fetched`. One body for both runners: the `fetch-article` Inngest function
  * passes its durable `step`, a direct run (src/lib/pipeline/direct.ts) passes
@@ -54,22 +58,47 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
     if (eventSuperseded(sentAt, { latestResultAt: article?.createdAt, progress: row.busyProgress })) return null;
     await reportProgress(pctx, { label: "Mở dự án", pct: 5 });
     await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", lastError: null }).where(eq(schema.projects.id, projectId)));
-    return { id: row.id, url: row.url, sourceKind: row.sourceKind, language: row.language, brandKitId: row.brandKitId, brandKitSource: row.brandKitSource };
+    return { id: row.id, url: row.url, sourceKind: row.sourceKind, brief: row.brief, language: row.language, brandKitId: row.brandKitId, brandKitSource: row.brandKitSource };
   });
   if (!project) return { next: null, result: { projectId, skipped: "superseded" as const } };
 
   const video = !manual && project.sourceKind === "video";
+  const topic = !manual && project.sourceKind === "topic";
+  // Topic projects: the web research is its own step (minutes of searching and reading), the article is written in `extract`.
+  const research = topic
+    ? await steps.run("research", async () => {
+        if (!project.brief) throw new NonRetriableError("This project has no brief to research");
+        await reportProgress(pctx, { label: "Claude tìm và đọc nguồn trên web", pct: 8 });
+        const r = await researchBrief(project.brief, pctx).catch(llmFailure);
+        return { notes: r.notes, found: r.found, searches: r.searches, fetches: r.fetches, costUsd: r.costUsd };
+      })
+    : null;
   const fetched = await steps.run("extract", async () => {
-    await reportProgress(pctx, { label: manual ? "Lưu nội dung" : video ? "Đọc tiêu đề + chú thích video (yt-dlp)" : `Lấy nội dung bài (${fetchOrder(method, only).map((m) => PROVIDER_LABEL[m]).join(" → ")})`, pct: 10 });
+    await reportProgress(pctx, {
+      label: manual
+        ? "Lưu nội dung"
+        : video
+          ? "Đọc tiêu đề + chú thích video (yt-dlp)"
+          : research
+            ? `Viết bài tổng hợp từ ${research.found.length} nguồn`
+            : `Lấy nội dung bài (${fetchOrder(method, only).map((m) => PROVIDER_LABEL[m]).join(" → ")})`,
+      pct: research ? 40 : 10,
+    });
     if (manual) {
-      return { method: "manual" as FetchMethod, extracted: manualArticle({ ...manual, url: project.url }), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[], video: null };
+      return { method: "manual" as FetchMethod, extracted: manualArticle({ ...manual, url: project.url }), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[], video: null, sources: [] as ResearchSource[] };
+    }
+    if (research) {
+      const a = await writeTopicArticle(project.brief ?? "", research, pctx).catch(llmFailure);
+      // No link: the outro and the publish text credit the outlets the article is based on.
+      const extracted = manualArticle({ title: a.title, text: a.text, url: null, siteName: creditLine(a.sources) });
+      return { method: "research" as const, extracted, rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[], video: null, sources: a.sources };
     }
     if (!project.url) throw new NonRetriableError("This project has no link to fetch; edit its content instead");
     if (video) {
       const c = await lookupVideo(project.url).catch((e) => {
         throw new NonRetriableError(e instanceof Error ? e.message : String(e));
       });
-      return { method: "video" as const, extracted: videoArticle(c), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[], video: c };
+      return { method: "video" as const, extracted: videoArticle(c), rawHtml: null, screenshotB64: null, attempts: [] as FetchAttempt[], video: c, sources: [] as ResearchSource[] };
     }
     const url = project.url;
     try {
@@ -82,7 +111,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
             ? reportProgress(pctx, { label: `${PROVIDER_LABEL[previous.method]} ${previous.blocked ? "bị chặn" : "không lấy được bài"}, chuyển sang ${PROVIDER_LABEL[next]}`, pct: 10 + 15 * fetchOrder(method, only).indexOf(next) })
             : undefined,
       });
-      return { method: out.method as FetchMethod | "video", extracted: out.extracted, rawHtml: out.rawHtml, screenshotB64: out.screenshot?.toString("base64") ?? null, attempts: out.attempts, video: null };
+      return { method: out.method as FetchMethod | "video" | "research", extracted: out.extracted, rawHtml: out.rawHtml, screenshotB64: out.screenshot?.toString("base64") ?? null, attempts: out.attempts, video: null, sources: [] as ResearchSource[] };
     } catch (e) {
       // Every provider failed: not worth retrying automatically; the user picks a fallback.
       throw new NonRetriableError(e instanceof Error ? e.message : String(e));
@@ -168,6 +197,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
         fetchMethod: fetched.method,
         flags: extracted.flags,
         wordCount: extracted.wordCount,
+        sources: fetched.sources,
         // A manual paste is the user's own text: confirmed by definition.
         confirmedAt: fetched.method === "manual" ? new Date() : null,
         confirmedBy: fetched.method === "manual" ? requestedBy : null,
@@ -204,6 +234,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
         categories: classification.categories,
         brandKit: kit ? { id: kit.id, name: kit.name, method: kit.method, reason: kit.reason } : null,
         attempts: fetched.attempts,
+        ...(research ? { research: { searches: research.searches, fetches: research.fetches, pagesFound: research.found.length, sources: fetched.sources.length, costUsd: Math.round(research.costUsd * 10000) / 10000 } } : {}),
         ...(sourceVideo ? { video: { assetId: sourceVideo.assetId, durationSec: sourceVideo.durationSec, truncated: sourceVideo.truncated, site: fetched.video?.site ?? null } } : {}),
       },
     });
@@ -211,6 +242,12 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
 
   const next = await steps.run("auto-continue", () => autoAfterFetch(ctx, projectId));
   return { next, result: { projectId, method: fetched.method, words: fetched.extracted.wordCount, language: classification.language, auto: Boolean(next) } };
+}
+
+/** Research failures: a refusal, "nothing found" or a bad request will not fix itself on retry; rate limits / 5xx may. */
+function llmFailure(e: unknown): never {
+  if (e instanceof LlmOutputError || isPermanentLlmError(e)) throw new NonRetriableError(e instanceof Error ? e.message : String(e));
+  throw e;
 }
 
 /**

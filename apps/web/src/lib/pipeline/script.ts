@@ -59,6 +59,7 @@ export async function scriptPipeline(data: ScriptRequest, steps: PipelineSteps) 
       url: row.article.canonicalUrl,
       publishedAt: row.article.publishedAt ? row.article.publishedAt.toISOString() : null,
       kind: row.project.sourceKind,
+      brief: row.project.brief,
     };
     return { article, language: row.project.language, articleId: row.article.id };
   });

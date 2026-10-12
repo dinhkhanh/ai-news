@@ -12,8 +12,23 @@ const FETCH_METHODS = [
   ["firecrawl", "Firecrawl"],
 ] as const;
 
-/** "Run it here, without the queue": one provider per button, because a direct run does not walk the chain. */
-export function DirectFetchButtons({ projectId, disabled }: { projectId: string; disabled?: boolean }) {
+/**
+ * "Run it here, without the queue": one provider per button, because a direct run does not walk the chain. A topic
+ * project has nothing to pick: one button runs its web research.
+ */
+export function DirectFetchButtons({ projectId, disabled, topic }: { projectId: string; disabled?: boolean; topic?: boolean }) {
+  if (topic) {
+    return (
+      <ActionForm action={fetchDirect}>
+        <input type="hidden" name="projectId" value={projectId} />
+        <input type="hidden" name="method" value="research" />
+        <Button type="submit" size="sm" variant="outline" disabled={disabled} title="Chạy ngay trong ứng dụng, không qua hàng đợi.">
+          <Zap className="size-3.5" />
+          Chạy trực tiếp: nghiên cứu chủ đề
+        </Button>
+      </ActionForm>
+    );
+  }
   return (
     <>
       {FETCH_METHODS.map(([method, label]) => (
@@ -35,7 +50,7 @@ export function DirectFetchButtons({ projectId, disabled }: { projectId: string;
  * or the step went stale: says that the wait is not the user's fault and, for the short steps (`DIRECT_STEPS`),
  * offers to run the step inside the app. The longer steps can only wait for the queue.
  */
-export function QueueRescue({ projectId, step, stale, canRun = true, className }: { projectId: string; step: string; stale?: boolean; canRun?: boolean; className?: string }) {
+export function QueueRescue({ projectId, step, stale, canRun = true, topic, className }: { projectId: string; step: string; stale?: boolean; canRun?: boolean; /** A topic project: the fetch step is its web research. */ topic?: boolean; className?: string }) {
   const direct = (DIRECT_STEPS as readonly string[]).includes(step);
   if (stale && !(direct && canRun)) return null; // the stale banner already says "run it again"; nothing to add
   return (
@@ -47,10 +62,16 @@ export function QueueRescue({ projectId, step, stale, canRun = true, className }
       )}
       {direct && canRun ? (
         <>
-          <p>{step === "fetch" ? "Bạn có thể lấy bài ngay trong ứng dụng, không cần chờ hàng đợi. Mỗi nút chỉ thử đúng một cách:" : "Bạn có thể viết kịch bản ngay trong ứng dụng, không cần chờ hàng đợi:"}</p>
+          <p>
+            {step !== "fetch"
+              ? "Bạn có thể viết kịch bản ngay trong ứng dụng, không cần chờ hàng đợi:"
+              : topic
+                ? "Bạn có thể nghiên cứu chủ đề ngay trong ứng dụng, không cần chờ hàng đợi:"
+                : "Bạn có thể lấy bài ngay trong ứng dụng, không cần chờ hàng đợi. Mỗi nút chỉ thử đúng một cách:"}
+          </p>
           <div className="flex flex-wrap gap-2">
             {step === "fetch" ? (
-              <DirectFetchButtons projectId={projectId} />
+              <DirectFetchButtons projectId={projectId} topic={topic} />
             ) : (
               <ActionForm action={scriptDirect}>
                 <input type="hidden" name="projectId" value={projectId} />

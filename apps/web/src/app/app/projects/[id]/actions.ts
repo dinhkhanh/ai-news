@@ -11,6 +11,7 @@ import { projectAssetsRequested, projectFetchRequested, projectScriptRequested }
 import { run, str, type ActionState } from "@/lib/admin";
 import { FETCH_METHOD_LABEL } from "@/lib/fetch";
 import { countWords } from "@/lib/fetch/readability";
+import { BRIEF_MIN_CHARS, normaliseBrief } from "@/lib/llm/research-sources";
 import { claimDirectRun, runFetchDirect, runScriptDirect } from "@/lib/pipeline/direct";
 import { parsePreset } from "@/lib/presets";
 import { busyStep, startProgress } from "@/lib/project-state";
@@ -65,19 +66,31 @@ export async function confirmArticle(_: ActionState, fd: FormData): Promise<Acti
   });
 }
 
-/** Re-run extraction, optionally starting with one provider (the others follow if it is blocked or fails). */
+/**
+ * Re-run extraction, optionally starting with one provider (the others follow if it is blocked or fails). A topic
+ * project researches again, with the brief as edited in the form when one is sent.
+ */
 export async function refetchArticle(_: ActionState, fd: FormData): Promise<ActionState> {
   return run(async () => {
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
     const project = await loadProject(ws, projectId);
-    if (!project.url) throw new Error("This project has no link to fetch; edit its content instead");
+    const topic = project.sourceKind === "topic";
+    if (!project.url && !topic) throw new Error("This project has no link to fetch; edit its content instead");
+    const brief = topic && fd.has("brief") ? normaliseBrief(String(fd.get("brief") ?? "")) : null;
+    if (brief !== null && brief.length < BRIEF_MIN_CHARS) throw new Error("Type a few keywords, a topic or directions to research");
     const m = str(fd, "method");
-    const method = m === "browser_rendering" || m === "http" || m === "firecrawl" ? m : undefined;
-    await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
+    const method = !topic && (m === "browser_rendering" || m === "http" || m === "firecrawl") ? m : undefined;
+    await withOrgContext(ws, (tx) =>
+      tx
+        .update(schema.projects)
+        .set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null, ...(brief !== null ? { brief } : {}) })
+        .where(eq(schema.projects.id, projectId)),
+    );
     await inngest.send(projectFetchRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, method }));
-    await log("article.refetch_requested", { method: method ?? "auto" }, projectId);
+    await log("article.refetch_requested", topic ? { method: "research", ...(brief !== null && brief !== project.brief ? { brief: brief.slice(0, 300) } : {}) } : { method: method ?? "auto" }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
+    if (topic) return "Researching the topic again…";
     return project.sourceKind === "video" ? "Downloading the video again…" : `Fetching again${method ? ` via ${method} first` : ""}…`;
   });
 }
@@ -112,6 +125,16 @@ export async function fetchDirect(_: ActionState, fd: FormData): Promise<ActionS
     const { ws, log } = await assertWorkspaceWriter();
     const projectId = str(fd, "projectId");
     const method = str(fd, "method");
+    if (method === "research") {
+      // A topic project: its fetch is the web research, there is no provider to pick.
+      const kind = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId), columns: { sourceKind: true } }));
+      if (kind?.sourceKind !== "topic") throw new Error("Only a topic project is researched");
+      const project = await claimDirectRun(ws, projectId, "fetch", "Chạy trực tiếp: nghiên cứu chủ đề", { allowIdle: true });
+      after(() => runFetchDirect({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId }));
+      await log("article.fetch_direct", { method, queuedStep: project.busyStep, queuedSince: project.busyProgress?.startedAt ?? null }, projectId);
+      revalidatePath(`/app/projects/${projectId}`);
+      return "Researching the topic directly, without the queue…";
+    }
     if (method !== "browser_rendering" && method !== "http" && method !== "firecrawl") throw new Error("Pick a fetch method");
     const project = await claimDirectRun(ws, projectId, "fetch", `Chạy trực tiếp: ${FETCH_METHOD_LABEL[method]}`, { allowIdle: true });
     after(() => runFetchDirect({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, method }));
