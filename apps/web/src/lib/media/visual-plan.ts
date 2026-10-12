@@ -72,20 +72,27 @@ export const total = (rec: Record<string, number>) => Object.values(rec).reduce(
  * up to `capacity[i]` times (default 1) – a web video contributes one shot
  * per 5 s segment – and consecutive uses of the same item are numbered by
  * `segment` so no two shots show the same footage. No scene gets more than it wants.
+ * `limit` caps how many shots the `members` of the pool may fill together (the originality budget for
+ * third-party footage, `originality.ts`); a member past the cap is skipped like a used-up item.
  */
 export type Placement = { index: number; segment: number };
+export type PoolLimit = { members: boolean[]; max: number };
 
 export function allocate(
   wanting: Array<{ id: string; want: number }>,
   poolSize: number,
   picks: Record<string, number[]>,
   capacity: number[] = [],
+  limit: PoolLimit | null = null,
 ): { perScene: Record<string, Placement[]>; used: number } {
   const usedCount: number[] = Array.from({ length: poolSize }, () => 0);
+  let limited = 0;
   const cap = (i: number) => Math.max(0, Math.floor(capacity[i] ?? 1));
+  const free = (i: number) => usedCount[i] < cap(i) && !(limit?.members[i] && limited >= limit.max);
   const take = (i: number) => {
     const p: Placement = { index: i, segment: usedCount[i] };
     usedCount[i] += 1;
+    if (limit?.members[i]) limited += 1;
     return p;
   };
   const perScene: Record<string, Placement[]> = {};
@@ -94,13 +101,13 @@ export function allocate(
     for (const i of picks[w.id] ?? []) {
       if (!Number.isInteger(i) || i < 0 || i >= poolSize) continue;
       // A ranked pick of a multi-segment item fills consecutive shots of this scene.
-      while (chosen.length < w.want && usedCount[i] < cap(i)) chosen.push(take(i));
+      while (chosen.length < w.want && free(i)) chosen.push(take(i));
     }
     perScene[w.id] = chosen;
   }
   for (const w of wanting) {
     const chosen = perScene[w.id];
-    for (let i = 0; i < poolSize && chosen.length < w.want; i++) while (chosen.length < w.want && usedCount[i] < cap(i)) chosen.push(take(i));
+    for (let i = 0; i < poolSize && chosen.length < w.want; i++) while (chosen.length < w.want && free(i)) chosen.push(take(i));
   }
   return { perScene, used: usedCount.filter((n) => n > 0).length };
 }
@@ -117,11 +124,12 @@ export function allocateChecked(
   picks: Record<string, number[]>,
   capacity: number[],
   accept: (index: number, sceneId: string) => boolean,
+  limit: PoolLimit | null = null,
 ): { perScene: Record<string, Placement[]>; used: number; rejected: Array<{ index: number; sceneId: string }> } {
   const cap = Array.from({ length: poolSize }, (_, i) => capacity[i] ?? 1);
   const rejected: Array<{ index: number; sceneId: string }> = [];
   for (;;) {
-    const a = allocate(wanting, poolSize, picks, cap);
+    const a = allocate(wanting, poolSize, picks, cap, limit);
     const bad = Object.entries(a.perScene).flatMap(([sceneId, list]) => list.filter((p) => cap[p.index] > 0 && !accept(p.index, sceneId)).map((p) => ({ index: p.index, sceneId })));
     if (bad.length === 0) return { ...a, rejected };
     for (const b of bad) {

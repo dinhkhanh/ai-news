@@ -27,7 +27,20 @@ describe("buildMetadata", () => {
     const m = buildMetadata({ platform: "facebook", meta: { title: "T", description: "D", hashtags: [] }, fallbackTitle: "x", language: "vi", source: { siteName: null, url: null }, aiDisclosure: false });
     expect(m.description).toBe("D");
     const v = buildMetadata({ platform: "facebook", meta: { title: "T", description: "D", hashtags: [] }, fallbackTitle: "x", language: "vi", source: { siteName: "TikTok", url: "https://www.tiktok.com/@x/video/1" }, aiDisclosure: false });
-    expect(v.description).toBe("D\n\nNguồn: TikTok · https://www.tiktok.com/@x/video/1");
+    expect(v.description).toBe("D\n\nNguồn: TikTok");
+    const y = buildMetadata({ platform: "youtube", meta: { title: "T", description: "D", hashtags: [] }, fallbackTitle: "x", language: "vi", source: { siteName: "TikTok", url: "https://www.tiktok.com/@x/video/1" }, aiDisclosure: false });
+    expect(y.description).toBe("D\n\nNguồn: TikTok · https://www.tiktok.com/@x/video/1");
+  });
+  it("keeps Facebook / Instagram captions free of links and at five hashtags (Meta's reach guidance)", () => {
+    for (const platform of ["facebook", "instagram"] as const) {
+      const m = buildMetadata({ platform, meta: { title: "T", description: "D", hashtags: ["a", "b", "c", "d", "e", "f", "g"] }, fallbackTitle: "x", language: "vi", source, aiDisclosure: false });
+      expect(m.description).toBe("D\n\nNguồn: VnExpress");
+      expect(m.hashtags).toEqual(["a", "b", "c", "d", "e"]);
+    }
+    // No outlet name: the host stands in for the link.
+    const h = buildMetadata({ platform: "facebook", meta: { title: "T", description: "D", hashtags: [] }, fallbackTitle: "x", language: "en", source: { siteName: null, url: "https://www.example.com/a" }, aiDisclosure: false });
+    expect(h.description).toBe("D\n\nSource: example.com");
+    expect(validateMetadata("facebook", { title: "t", description: "", hashtags: ["a", "b", "c", "d", "e", "f"] }, "public", 30)).toContain("Quá 5 hashtag");
   });
   it("puts caption and hashtags in the TikTok title within 2200 chars", () => {
     const m = buildMetadata({ platform: "tiktok", meta: { title: "T", description: "d".repeat(3000), hashtags: ["a", "b"] }, fallbackTitle: "x", language: "vi", source, aiDisclosure: true });

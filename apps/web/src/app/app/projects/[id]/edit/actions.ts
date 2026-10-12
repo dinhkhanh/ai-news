@@ -15,6 +15,8 @@ import { storedFrame, type FrameFaces } from "@/lib/media/framing";
 import { downloadToR2 } from "@/lib/media/stock";
 import { formatTimecode, manualSection, SHOT_SEC, webVideoPageUrl, youtubeId, type PendingCapture } from "@/lib/media/visual-plan";
 import { storeWebVideo, webVideoEnabled } from "@/lib/media/webvideo";
+import { watermarkLabel } from "@/lib/media/watermark";
+import { scanClipWatermark, watermarkScanAvailable } from "@/lib/media/watermark-scan";
 import type { ChosenAsset } from "@/lib/media/broll";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { deleteObject, headObject, presignGet, presignPut, r2Key } from "@/lib/r2";
@@ -189,6 +191,15 @@ async function guardFrame(asset: { assetId: string; key: string }, ctx: { userId
   return (await analyseAsset(asset, ctx)).frame;
 }
 
+/** Watermark scan of a clip the editor brought in (the build scans its own downloads); null when the scan is off or failed. */
+async function guardWatermark(asset: { assetId: string; key: string; durationSec: number | null }, ctx: { userId: string; organizationId: string; projectId: string }) {
+  if (!(await watermarkScanAvailable()).enabled) return null;
+  return (await scanClipWatermark(asset, ctx)).verdict;
+}
+
+/** The import message, with a warning when the clip carries a watermark. */
+const withWatermarkNote = (message: string, w: { watermarked: boolean; marks: Array<{ label: string }> } | null) => (w?.watermarked ? `${message}. Clip có watermark (${watermarkLabel(w)}): nên đổi clip khác` : message);
+
 export type FrameResult = { ok: true; frame: FrameFaces; message: string } | { ok: false; message: string };
 
 /**
@@ -286,9 +297,10 @@ export async function importVisualFromUrl(input: { projectId: string; url: strin
         .values({ organizationId: ws.organizationId, projectId: input.projectId, origin: "upload", provider: "url", sourceUrl: url, r2Path: key, hash: dl.hash, mime: dl.contentType, sizeBytes: dl.sizeBytes, licence: "linked by editor", attribution: null, thumbnailUrl: kind === "image" ? url : null, meta: { importedBy: ws.userId } })
         .returning({ id: schema.assets.id }),
     );
-    await log("asset.imported_url", { assetId: row.id, key, kind, sizeBytes: dl.sizeBytes, url: url.slice(0, 300) }, input.projectId);
-    const option: VisualOption = { assetId: row.id, key, kind, durationSec: null, credit: null, thumbnailUrl: kind === "image" ? url : null, provider: "url", sceneId: null, searchTerm: null, rankScore: null, frame: kind === "image" ? await guardFrame({ assetId: row.id, key }, { ...ws, projectId: input.projectId }) : null, sourceUrl: url, section: null };
-    return { ok: true, option, url: await presignGet(key, 3600), message: kind === "video" ? "Đã lấy clip từ đường dẫn" : "Đã lấy ảnh từ đường dẫn" };
+    const watermark = kind === "video" ? await guardWatermark({ assetId: row.id, key, durationSec: null }, { ...ws, projectId: input.projectId }) : null;
+    await log("asset.imported_url", { assetId: row.id, key, kind, sizeBytes: dl.sizeBytes, url: url.slice(0, 300), watermarked: watermark?.watermarked ?? null }, input.projectId);
+    const option: VisualOption = { assetId: row.id, key, kind, durationSec: null, credit: null, thumbnailUrl: kind === "image" ? url : null, provider: "url", sceneId: null, searchTerm: null, rankScore: null, frame: kind === "image" ? await guardFrame({ assetId: row.id, key }, { ...ws, projectId: input.projectId }) : null, sourceUrl: url, section: null, watermark };
+    return { ok: true, option, url: await presignGet(key, 3600), message: kind === "video" ? withWatermarkNote("Đã lấy clip từ đường dẫn", watermark) : "Đã lấy ảnh từ đường dẫn" };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
   }
@@ -336,9 +348,10 @@ export async function importWebVideo(input: { projectId: string; url: string; st
         capture: { videoId, url, title: c.title, uploader: c.uploader, thumbnailUrl: c.thumbnailUrl, startSec: section.startSec, segments, scenes: [{ sceneId: input.sceneId, segments }], error: message.slice(0, 200), manual: { sceneId: input.sceneId, shot: input.shot } },
       };
     }
-    await log("asset.imported_web_video", { assetId: asset.assetId, key: asset.key, url: url.slice(0, 300), site: c.site, startSec: section.startSec, endSec: section.endSec }, input.projectId);
-    const option: VisualOption = { assetId: asset.assetId, key: asset.key, kind: "video", durationSec: asset.durationSec, credit: asset.credit, thumbnailUrl: asset.thumbnailUrl, provider: asset.provider, sceneId: null, searchTerm: null, rankScore: null, frame: null, sourceUrl: url, section: [section.startSec, section.endSec] };
-    return { ok: true, option, url: await presignGet(asset.key, 3600), message: `Đã lấy ${formatTimecode(section.startSec)}–${formatTimecode(section.endSec)} từ ${c.site}` };
+    const watermark = await guardWatermark({ assetId: asset.assetId, key: asset.key, durationSec: asset.durationSec }, ctx);
+    await log("asset.imported_web_video", { assetId: asset.assetId, key: asset.key, url: url.slice(0, 300), site: c.site, startSec: section.startSec, endSec: section.endSec, watermarked: watermark?.watermarked ?? null }, input.projectId);
+    const option: VisualOption = { assetId: asset.assetId, key: asset.key, kind: "video", durationSec: asset.durationSec, credit: asset.credit, thumbnailUrl: asset.thumbnailUrl, provider: asset.provider, sceneId: null, searchTerm: null, rankScore: null, frame: null, sourceUrl: url, section: [section.startSec, section.endSec], watermark };
+    return { ok: true, option, url: await presignGet(asset.key, 3600), message: withWatermarkNote(`Đã lấy ${formatTimecode(section.startSec)}–${formatTimecode(section.endSec)} từ ${c.site}`, watermark) };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
   }
@@ -392,9 +405,10 @@ export async function registerWebCapture(input: {
         })
         .returning({ id: schema.assets.id }),
     );
-    await log("asset.web_captured", { assetId: row.id, key, videoId: c.videoId, startSec: c.startSec, durationSec: clipSec, width: probe.width, height: probe.height, sizeBytes: probe.sizeBytes }, input.projectId);
-    const option: VisualOption = { assetId: row.id, key, kind: "video", durationSec: clipSec, credit, thumbnailUrl: c.thumbnailUrl, provider: "yt-capture", sceneId: null, searchTerm: c.title.slice(0, 80), rankScore: null, frame: null, sourceUrl: c.url, section: [c.startSec, c.startSec + durationSec] };
-    return { ok: true, option, url: await presignGet(key, 3600), message: "Đã ghi clip YouTube" };
+    const watermark = await guardWatermark({ assetId: row.id, key, durationSec: clipSec }, { ...ws, projectId: input.projectId });
+    await log("asset.web_captured", { assetId: row.id, key, videoId: c.videoId, startSec: c.startSec, durationSec: clipSec, width: probe.width, height: probe.height, sizeBytes: probe.sizeBytes, watermarked: watermark?.watermarked ?? null }, input.projectId);
+    const option: VisualOption = { assetId: row.id, key, kind: "video", durationSec: clipSec, credit, thumbnailUrl: c.thumbnailUrl, provider: "yt-capture", sceneId: null, searchTerm: c.title.slice(0, 80), rankScore: null, frame: null, sourceUrl: c.url, section: [c.startSec, c.startSec + durationSec], watermark };
+    return { ok: true, option, url: await presignGet(key, 3600), message: withWatermarkNote("Đã ghi clip YouTube", watermark) };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
   }

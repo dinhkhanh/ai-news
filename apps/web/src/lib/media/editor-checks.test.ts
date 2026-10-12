@@ -87,3 +87,45 @@ describe("fixes", () => {
     expect(replaceWithUnused(doc, [opt("a.jpg"), opt("b.jpg")], "s3", 1)).toBeNull();
   });
 });
+
+describe("originality check", () => {
+  const clip = (key: string) => ({ kind: "video" as const, key, clipDurationSec: 5 });
+  const footageDoc = (shots: ReturnType<typeof clip>[]): EditorDoc =>
+    editorDocSchema.parse({ ...doc, scenes: [{ id: "s1", kind: "body", onScreenText: "x", voiceover: "a", durationSec: 20, voice: voice("s1", 20000), visual: shots[0], shots: shots.slice(1) }] });
+  const clips = [opt("w1.mp4", { kind: "video", provider: "yt-dlp" }), opt("w2.mp4", { kind: "video", provider: "yt-capture" }), opt("w3.mp4", { kind: "video", provider: "yt-dlp" }), opt("p.mp4", { kind: "video", provider: "pexels" })];
+  const originality = (d: EditorDoc) => runChecks(BUILTIN_CHECKS, input({ doc: d, options: [...options, ...clips] })).filter((i) => i.checkId === "checks.originality");
+
+  it("flags a cut that is mostly someone else's footage, and footage running past 10 s", () => {
+    const issues = originality(footageDoc([clip("w1.mp4"), clip("w2.mp4"), clip("w3.mp4"), clip("p.mp4")]));
+    expect(issues.map((i) => i.id)).toEqual(["originality:share", "originality:run:s1"]);
+    expect(issues[0].title).toContain("75 %");
+    expect(issues[1].title).toContain("s1 → s1 #3");
+    expect(issues[1].fix).toMatchObject({ kind: "open", tab: "shots", shot: 2 });
+  });
+
+  it("accepts footage interspersed with stock", () => {
+    expect(originality(footageDoc([clip("w1.mp4"), clip("p.mp4"), clip("w2.mp4"), clip("p.mp4")]))).toEqual([]);
+  });
+
+  it("does not count stills or media it cannot place", () => {
+    expect(originality(doc)).toEqual([]);
+  });
+});
+
+describe("watermark check", () => {
+  const clip = (key: string) => ({ kind: "video" as const, key, clipDurationSec: 5 });
+  const marked = { watermarked: true, marks: [{ kind: "platform" as const, label: "TikTok", box: { x: 0, y: 0, w: 0.1, h: 0.05 } }], frames: 3 };
+  const d = editorDocSchema.parse({ ...doc, scenes: [{ id: "s1", kind: "body", onScreenText: "x", voiceover: "a", durationSec: 8, voice: voice("s1", 8000), visual: clip("w1.mp4"), shots: [clip("w2.mp4")] }] });
+  const opts = [opt("w1.mp4", { kind: "video", provider: "yt-dlp", watermark: marked }), opt("w2.mp4", { kind: "video", provider: "yt-dlp", watermark: { ...marked, watermarked: false, marks: [] } })];
+
+  it("flags a clip whose scan found a watermark and offers to swap it", () => {
+    const issues = runChecks(BUILTIN_CHECKS, input({ doc: d, options: opts })).filter((i) => i.checkId === "checks.watermark");
+    expect(issues.map((i) => [i.id, i.title])).toEqual([["watermark:s1", "s1: clip có watermark (TikTok)"]]);
+    expect(issues[0].fix).toMatchObject({ kind: "replace-shot", sceneId: "s1", shot: 0 });
+  });
+
+  it("offers watermarked clips last when filling shots", () => {
+    const pool = [opt("m.mp4", { kind: "video", provider: "yt-dlp", sceneId: "s2", watermark: marked }), opt("c.jpg")];
+    expect(unusedOptions(doc, pool, "s2").map((o) => o.key)).toEqual(["c.jpg", "m.mp4"]);
+  });
+});
