@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDownIcon, LogOutIcon, UserRoundXIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ThemeMenuGroup } from "@/components/theme-toggle";
 import { authClient } from "@/lib/auth-client";
 
 const initials = (name: string) =>
@@ -13,7 +14,7 @@ const initials = (name: string) =>
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
 
-/** Account menu: an avatar button (name beside it from `sm` up) opening sign-out and, when impersonating, the way back. */
+/** Account menu: an avatar button (name beside it from `sm` up) opening the theme choice, sign-out and, when impersonating, the way back. */
 export function UserMenu({ name, email, impersonated }: { name: string; email: string; impersonated?: boolean }) {
   const router = useRouter();
   return (
@@ -32,6 +33,8 @@ export function UserMenu({ name, email, impersonated }: { name: string; email: s
             <div className="truncate text-xs font-normal">{email}</div>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <ThemeMenuGroup />
         <DropdownMenuSeparator />
         {impersonated ? (
           <DropdownMenuItem
