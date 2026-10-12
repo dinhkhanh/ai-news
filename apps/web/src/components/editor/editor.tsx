@@ -1,53 +1,20 @@
 "use client";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { useCallback, useMemo, useRef, useState, useTransition } from "react";
-import {
-  Eye,
-  Film,
-  History,
-  Image as ImageIcon,
-  Layers,
-  MessageSquare,
-  Palette,
-  PencilLine,
-  RotateCcw,
-  Save,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { PlayerRef } from "@remotion/player";
-import { SKETCH_STYLES, type SketchStyle, type Timeline } from "@ai-news/video/schema";
+import type { Timeline } from "@ai-news/video/schema";
 import { toast } from "sonner";
-import { regenerateScene, renderTimeline, saveTimeline } from "@/app/app/projects/[id]/edit/actions";
-import type { MotionEngine } from "@ai-news/video/motion";
-import { ReviewPanel } from "@/components/review-panel";
-import { SectionTabs, StickyToolbar, type SectionTab } from "@/components/sticky-toolbar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { CollapsibleSection } from "@/components/ui/collapsible-section";
-import { NativeSelect } from "@/components/ui/native-select";
-import {
-  audioSignature,
-  buildFromDoc,
-  replaceTailShots,
-  sceneShots,
-  setSceneSketch,
-  setShot,
-  shotsMissing,
-  SKETCH_LABEL,
-  sketchCount,
-  type EditorDoc,
-  type EditorScene,
-  type EditorVisual,
-  visualKey,
-} from "@/lib/media/editor";
+import { regenerateScene, renderTimeline, rewriteSceneVoiceover, saveTimeline, setEditorPlugins } from "@/app/app/projects/[id]/edit/actions";
+import { audioSignature, buildFromDoc, replaceTailShots, sceneShots, setShot, type EditorDoc, type EditorVisual } from "@/lib/media/editor";
+import { autoFrameShot, fillMissingShots, replaceWithUnused, runChecks, sceneZones, usedKeys as computeUsedKeys, visualFromOption, type Issue } from "@/lib/media/editor-checks";
+import { commit, initHistory, redo, redoLabel, undo, undoLabel } from "@/lib/media/editor-history";
+import { frameStill } from "@/lib/media/framing";
 import { SHOT_SEC, type PendingCapture } from "@/lib/media/visual-plan";
-import { cn } from "@/lib/utils";
-import { CommentsPanel } from "./comments-panel";
-import { ExportPanel } from "./export-panel";
-import { Preview } from "./preview";
-import { SceneInspector } from "./scene-inspector";
-import { SceneList } from "./scene-list";
-import { WebCapturePanel } from "./web-capture-panel";
+import type { RewriteMode } from "@/lib/llm/rewrite-modes";
+import { createTimeStore, EditorContext, isTyping, type EditorCtx, type EditorMode, type RegeneratePayload, type RegenerateWhat, type Selection } from "./core/context";
+import { collect } from "./core/plugin";
+import { BUILTIN_PLUGINS } from "./plugins";
+import { Workspace } from "./shell/workspace";
 import type { EditorProps, VisualOption } from "./types";
 
 const FPS = 30;
@@ -69,835 +36,432 @@ function resolveForPlayer(t: Timeline, urls: Record<string, string>, logoUrl: st
         const src = u(v.src);
         return src ? { ...v, src } : { kind: "solid" as const };
       };
-      return {
-        ...s,
-        voiceSrc: u(s.voiceSrc),
-        visual: visual(s.visual),
-        shots: s.shots.map((sh) => ({ ...sh, visual: visual(sh.visual) })),
-      };
+      return { ...s, voiceSrc: u(s.voiceSrc), visual: visual(s.visual), shots: s.shots.map((sh) => ({ ...sh, visual: visual(sh.visual) })) };
     }),
     audio: { ...t.audio, mixSrc: u(t.audio.mixSrc), voiceSrc: u(t.audio.voiceSrc), musicSrc: u(t.audio.musicSrc) },
   };
 }
 
-const KIND_LABEL: Record<string, string> = { built: "dựng", edited: "sửa", regenerated: "tạo lại" };
+/** Which panel / inspector tab the editor opened with last time (per browser; a convenience only). */
+const PREFS_KEY = "ai-news.editor.prefs";
+function readPrefs(): { panel?: string; tab?: string; overlays?: Record<string, boolean> } {
+  try {
+    return JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function writePrefs(p: { panel: string; tab: string; overlays: Record<string, boolean> }) {
+  try {
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+  } catch {
+    /* private mode: nothing to remember */
+  }
+}
 
+/**
+ * The editor core: owns the document (with undo history), the selection, the player and the server
+ * services, collects the plugins that are on for this workspace and hands everything to them through
+ * `EditorContext`. The layout is `shell/workspace.tsx`; every feature is a plugin in `plugins/`.
+ */
 export function Editor(props: EditorProps) {
   const router = useRouter();
   const playerRef = useRef<PlayerRef>(null);
-  const [doc, setDoc] = useState<EditorDoc>(props.doc);
-  const [selectedId, setSelectedId] = useState<string | null>(props.doc.scenes[0]?.id ?? null);
-  const [note, setNote] = useState("");
+  const [time] = useState(createTimeStore);
+  const [hist, setHist] = useState(() => initHistory<EditorDoc>(props.doc));
+  const doc = hist.present;
+  const [selection, setSelection] = useState<Selection>({ sceneId: props.doc.scenes[0]?.id ?? null, shot: 0 });
   const [pending, startTransition] = useTransition();
   const [saving, setSaving] = useState(false);
-  // Uploads and linked files join the swap options (and get a presigned URL for the preview) without a reload.
+  const [exporting, setExporting] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  const [rewriting, setRewriting] = useState<string | null>(null);
   const [options, setOptions] = useState<VisualOption[]>(props.options);
   const [urls, setUrls] = useState<Record<string, string>>(props.urls);
-  // YouTube pages the server could not fetch: from the build, plus any pasted in the inspector meanwhile.
   const [captures, setCaptures] = useState<PendingCapture[]>(props.captures);
-  const addCapture = (c: PendingCapture) => setCaptures((list) => [...list.filter((x) => x.videoId !== c.videoId), c]);
-  const addOption = (o: VisualOption, url: string) => {
-    setOptions((list) => [o, ...list.filter((x) => x.assetId !== o.assetId)]);
-    setUrls((u) => ({ ...u, [o.key]: url }));
-  };
+  const [voiceDrafts, setVoiceDrafts] = useState<Record<string, string>>({});
+  const [disabled, setDisabled] = useState<string[]>(props.plugins.disabled);
+  const [mode, setMode] = useState<EditorMode>("edit");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [commentAtMs, setCommentAtMs] = useState<number | null>(null);
+  // Which panel / tab / overlays the editor opened with last time (the editor only runs in the browser).
+  const [panel, setPanelState] = useState(() => readPrefs().panel ?? "scenes");
+  const [tab, setTabState] = useState(() => readPrefs().tab ?? "content");
+  const [overlays, setOverlays] = useState<Record<string, boolean>>(() => {
+    const saved = readPrefs().overlays ?? {};
+    return Object.fromEntries(collect(BUILTIN_PLUGINS, props.plugins.disabled).contributions.overlays.map((o) => [o.id, saved[o.id] ?? o.defaultOn]));
+  });
 
-  // A YouTube section recorded in this browser: one clip, cut into the 5 s segments the build had planned, placed at the tail of those scenes.
-  const placeCapture = (c: PendingCapture, o: VisualOption, url: string) => {
-    addOption(o, url);
-    setCaptures((list) => list.filter((x) => x.videoId !== c.videoId));
-    // Pasted by hand for one shot: the whole recording becomes that shot.
-    if (c.manual) {
-      const { sceneId, shot } = c.manual;
-      setDoc((d) => ({
-        ...d,
-        scenes: d.scenes.map((s) =>
-          s.id === sceneId
-            ? setShot(s, Math.min(shot, sceneShots(s).length - 1), {
-                kind: "video",
-                key: o.key,
-                clipDurationSec: o.durationSec ?? c.segments * SHOT_SEC,
-                trimStartSec: 0,
-                credit: o.credit,
-                assetId: o.assetId,
-                thumbnailUrl: o.thumbnailUrl,
-              })
-            : s,
-        ),
-      }));
-      toast.success(`Đã ghi "${c.title.slice(0, 40)}" vào cảnh ${sceneId}. Xem lại rồi bấm Lưu.`);
-      return;
-    }
-    const usable = Math.floor((o.durationSec ?? c.segments * SHOT_SEC) / SHOT_SEC);
-    let segment = 0;
-    setDoc((d) => ({
-      ...d,
-      scenes: d.scenes.map((s) => {
-        const plan = c.scenes.find((x) => x.sceneId === s.id);
-        if (!plan) return s;
-        const visuals: EditorVisual[] = [];
-        for (let i = 0; i < plan.segments && segment < usable; i++, segment++)
-          visuals.push({
-            kind: "video",
-            key: o.key,
-            clipDurationSec: SHOT_SEC,
-            trimStartSec: segment * SHOT_SEC,
-            credit: o.credit,
-            assetId: o.assetId,
-            thumbnailUrl: o.thumbnailUrl,
-          });
-        return visuals.length ? replaceTailShots(s, visuals) : s;
-      }),
-    }));
-    toast.success(
-      `Đã ghi "${c.title.slice(0, 40)}" và đặt vào ${c.scenes.map((x) => x.sceneId).join(", ")}. Xem lại rồi bấm Lưu.`,
-    );
-  };
+  const { active, contributions } = useMemo(() => collect(BUILTIN_PLUGINS, disabled), [disabled]);
+  useEffect(() => writePrefs({ panel, tab, overlays }), [panel, tab, overlays]);
 
   const savedJson = useMemo(() => JSON.stringify(props.doc), [props.doc]);
-  const dirty = JSON.stringify(doc) !== savedJson;
+  const dirty = useMemo(() => JSON.stringify(doc) !== savedJson, [doc, savedJson]);
   const busy = Boolean(props.busyStep);
   const readOnly = !props.canEdit || !props.version.isLatest || busy;
+  const canSave = props.canEdit && props.version.isLatest;
   const mixUsable = Boolean(props.mix && props.mix.signature === audioSignature(doc));
 
-  const built = useMemo(
-    () => buildFromDoc(doc, mixUsable && props.mix ? { mixKey: props.mix.mixKey, voiceKey: null } : null),
-    [doc, mixUsable, props.mix],
-  );
-  const playerTimeline = useMemo(
-    () => resolveForPlayer(built.timeline, urls, props.previewLogo?.url ?? null),
-    [built.timeline, urls, props.previewLogo],
-  );
-  // Where each picture is used, so the inspector can flag repeats across scenes.
-  const usedKeys = useMemo(() => {
-    const out: Record<string, string[]> = {};
-    for (const s of doc.scenes)
-      sceneShots(s).forEach(
-        (v, i) => {
-          const k = visualKey(v);
-          if (k) out[k] = [...(out[k] ?? []), i === 0 ? s.id : `${s.id} #${i + 1}`];
-        },
-      );
-    return out;
-  }, [doc.scenes]);
-  const shortScenes = doc.scenes.filter((s) => shotsMissing(s) > 0).map((s) => s.id);
-  const repeatedKeys = Object.values(usedKeys).filter((at) => at.length > 1).length;
-  const timings = built.timings.map((t) => ({ id: t.id, atSec: t.atSec, durationMs: t.durationMs }));
-  const selected = doc.scenes.find((s) => s.id === selectedId) ?? doc.scenes[0] ?? null;
-  const selectedIndex = selected ? doc.scenes.findIndex((s) => s.id === selected.id) : -1;
+  const built = useMemo(() => buildFromDoc(doc, mixUsable && props.mix ? { mixKey: props.mix.mixKey, voiceKey: null } : null), [doc, mixUsable, props.mix]);
+  const usedKeys = useMemo(() => computeUsedKeys(doc), [doc]);
+  const isAiStill = useCallback((v: { key: string }) => options.some((o) => o.key === v.key && o.provider === "gemini_image"), [options]);
+  const hasLogo = Boolean(doc.brand.logoSrc || props.previewLogo);
 
-  const seekToScene = useCallback(
-    (id: string) => {
-      const t = built.timings.find((x) => x.id === id);
-      if (t) playerRef.current?.seekTo(t.fromFrame + 2);
+  /* ------------------------------------------------------------ document */
+
+  const update = useCallback<EditorCtx["update"]>(
+    (label, fn, opts) => {
+      if (readOnly) return;
+      setHist((h) => commit(h, fn(h.present), label, { coalesce: opts?.coalesce }));
     },
-    [built.timings],
+    [readOnly],
   );
-  const currentMs = () => ((playerRef.current?.getCurrentFrame() ?? 0) / FPS) * 1000;
+  const updateScene = useCallback<EditorCtx["updateScene"]>(
+    (sceneId, label, fn, opts) => update(label, (d) => ({ ...d, scenes: d.scenes.map((s) => (s.id === sceneId ? fn(s) : s)) }), opts),
+    [update],
+  );
+  const reset = useCallback(() => setHist((h) => commit(h, props.doc, "Huỷ mọi thay đổi")), [props.doc]);
 
-  const updateScene = (next: EditorScene) =>
-    setDoc((d) => ({ ...d, scenes: d.scenes.map((s) => (s.id === next.id ? next : s)) }));
-  const removeScene = (id: string) => {
-    setDoc((d) => ({ ...d, scenes: d.scenes.filter((s) => s.id !== id) }));
-    setSelectedId((cur) => (cur === id ? (doc.scenes.find((s) => s.id !== id)?.id ?? null) : cur));
-  };
+  /* ------------------------------------------------------------ selection + player */
 
-  const save = () => {
-    if (!dirty || saving) return;
-    setSaving(true);
-    startTransition(async () => {
-      const res = await saveTimeline({
-        projectId: props.projectId,
-        baseVersion: props.version.version,
-        doc,
-        note: note || undefined,
-      });
-      setSaving(false);
-      if (!res.ok) {
-        toast.error(res.message);
+  const selectedScene = doc.scenes.find((s) => s.id === selection.sceneId) ?? doc.scenes[0] ?? null;
+  const selectedIndex = selectedScene ? doc.scenes.findIndex((s) => s.id === selectedScene.id) : -1;
+  const timingsRef = useRef(built.timings);
+  timingsRef.current = built.timings;
+
+  const player = useMemo<EditorCtx["player"]>(
+    () => ({
+      ref: playerRef,
+      fps: FPS,
+      seek: (sec) => playerRef.current?.seekTo(Math.max(0, Math.round(sec * FPS))),
+      seekScene: (id) => {
+        const t = timingsRef.current.find((x) => x.id === id);
+        if (t) playerRef.current?.seekTo(t.fromFrame + 2);
+      },
+      toggle: () => playerRef.current?.toggle(),
+      nowSec: () => (playerRef.current?.getCurrentFrame() ?? time.get().frame) / FPS,
+    }),
+    [time],
+  );
+  const select = useCallback((patch: Partial<Selection>) => {
+    setSelection((cur) => {
+      const next = { ...cur, ...patch };
+      if (patch.sceneId !== undefined && patch.sceneId !== cur.sceneId && patch.shot === undefined) next.shot = 0;
+      return next;
+    });
+  }, []);
+
+  /* ------------------------------------------------------------ media */
+
+  const addOption = useCallback((o: VisualOption, url: string) => {
+    setOptions((list) => [o, ...list.filter((x) => x.assetId !== o.assetId)]);
+    setUrls((u) => ({ ...u, [o.key]: url }));
+  }, []);
+  const frameOption = useCallback((assetId: string, frame: VisualOption["frame"]) => setOptions((list) => list.map((o) => (o.assetId === assetId ? { ...o, frame } : o))), []);
+  const addCapture = useCallback((c: PendingCapture) => setCaptures((list) => [...list.filter((x) => x.videoId !== c.videoId), c]), []);
+
+  // A YouTube section recorded in this browser: one clip, cut into the 5 s segments the build had planned, placed at the tail of those scenes.
+  const placeCapture = useCallback(
+    (c: PendingCapture, o: VisualOption, url: string) => {
+      addOption(o, url);
+      setCaptures((list) => list.filter((x) => x.videoId !== c.videoId));
+      const clip = (trimStartSec: number, clipDurationSec: number): EditorVisual => ({ kind: "video", key: o.key, clipDurationSec, trimStartSec, credit: o.credit, assetId: o.assetId, thumbnailUrl: o.thumbnailUrl });
+      if (c.manual) {
+        const { sceneId, shot } = c.manual;
+        updateScene(sceneId, `${sceneId}: clip YouTube đã ghi`, (s) => setShot(s, Math.min(shot, sceneShots(s).length - 1), clip(0, o.durationSec ?? c.segments * SHOT_SEC)));
+        toast.success(`Đã ghi "${c.title.slice(0, 40)}" vào cảnh ${sceneId}. Xem lại rồi bấm Lưu.`);
         return;
       }
-      toast.success(res.message);
-      router.push(`/app/projects/${props.projectId}/edit?t=${res.version}`);
-      router.refresh();
-    });
-  };
-
-  // Export without leaving the editor: unsaved edits become a new version first, and that version is the one rendered.
-  const [exporting, setExporting] = useState(false);
-  // The logo picked for the next export lives here so both the sticky toolbar and the export panel can trigger it.
-  const [exportLogo, setExportLogo] = useState(
-    props.exportInfo.logoChannels.some((c) => c.id === props.exportInfo.defaultLogoChannelId)
-      ? props.exportInfo.defaultLogoChannelId!
-      : "",
-  );
-  const exportNow = () => exportVideo(props.exportInfo.logoChannels.length ? exportLogo || "kit" : null);
-  const exportVideo = (logoChannelId: string | null) => {
-    if (exporting || saving) return;
-    setExporting(true);
-    startTransition(async () => {
-      let timelineId = props.version.id;
-      let version = props.version.version;
-      if (dirty) {
-        const saved = await saveTimeline({
-          projectId: props.projectId,
-          baseVersion: props.version.version,
-          doc,
-          note: note || undefined,
-        });
-        if (!saved.ok || !saved.timelineId || saved.version == null) {
-          setExporting(false);
-          return void toast.error(saved.message);
-        }
-        toast.success(saved.message);
-        timelineId = saved.timelineId;
-        version = saved.version;
-      }
-      const res = await renderTimeline({ projectId: props.projectId, timelineId, logoChannelId });
-      setExporting(false);
-      if (res.ok) toast.success(res.message);
-      else
-        toast.error(
-          version !== props.version.version
-            ? `Đã lưu v${version} nhưng chưa kết xuất được: ${res.message}`
-            : res.message,
-        );
-      // A save made a new version: open it (the editor is keyed by version). Otherwise reload in place for the busy state.
-      if (version !== props.version.version) router.push(`/app/projects/${props.projectId}/edit?t=${version}`);
-      router.refresh();
-    });
-  };
-  const forceRender = (r: EditorProps["exportInfo"]["renders"][number]) => {
-    if (exporting || !r.timelineId) return;
-    setExporting(true);
-    startTransition(async () => {
-      const res = await renderTimeline({
-        projectId: props.projectId,
-        timelineId: r.timelineId!,
-        logoChannelId: r.logoChannelId ?? "kit",
-        skipQa: true,
+      const usable = Math.floor((o.durationSec ?? c.segments * SHOT_SEC) / SHOT_SEC);
+      update("Đặt clip YouTube đã ghi", (d) => {
+        let segment = 0;
+        return {
+          ...d,
+          scenes: d.scenes.map((s) => {
+            const plan = c.scenes.find((x) => x.sceneId === s.id);
+            if (!plan) return s;
+            const visuals: EditorVisual[] = [];
+            for (let i = 0; i < plan.segments && segment < usable; i++, segment++) visuals.push(clip(segment * SHOT_SEC, SHOT_SEC));
+            return visuals.length ? replaceTailShots(s, visuals) : s;
+          }),
+        };
       });
-      setExporting(false);
-      (res.ok ? toast.success : toast.error)(res.message);
-      router.refresh();
-    });
-  };
-  const exportHint = !props.canEdit
-    ? "Vai trò của bạn chỉ được xem."
-    : busy
-      ? `Đang chạy bước ${props.busyStep}…`
-      : dirty && !props.version.isLatest
-        ? "Phiên bản cũ chỉ đọc: huỷ thay đổi để kết xuất nguyên bản này."
-        : null;
+      toast.success(`Đã ghi "${c.title.slice(0, 40)}" và đặt vào ${c.scenes.map((x) => x.sceneId).join(", ")}. Xem lại rồi bấm Lưu.`);
+    },
+    [addOption, update, updateScene],
+  );
 
-  const restore = () => {
+  const place = useCallback(
+    (o: VisualOption, sceneId: string, shot: number) => {
+      updateScene(sceneId, `${sceneId}: đổi hình ${shot + 1}`, (s) => {
+        const current = sceneShots(s)[shot];
+        let next = visualFromOption(o);
+        // A new picture in a hand-drawn shot is drawn too: the look belongs to the shot, not to the file.
+        if (next.kind === "image" && current?.kind === "image" && current.sketch) next = { ...next, sketch: current.sketch };
+        if (next.kind === "image" && o.frame) {
+          const f = frameStill(o.frame, sceneZones(doc, s, hasLogo));
+          next = { ...next, focus: f.focus, kenBurns: f.focus ? next.kenBurns && f.kenBurns : next.kenBurns };
+        }
+        return setShot(s, Math.min(shot, sceneShots(s).length - 1), next);
+      });
+      select({ sceneId, shot });
+    },
+    [doc, hasLogo, select, updateScene],
+  );
+
+  const thumb = useCallback((v: EditorVisual) => (v.kind !== "video" && v.kind !== "image" ? { src: null, video: false } : v.thumbnailUrl ? { src: v.thumbnailUrl, video: false } : { src: urls[v.key] ?? null, video: v.kind === "video" }), [urls]);
+
+  /* ------------------------------------------------------------ checks */
+
+  const platforms = useMemo(() => [...new Set(props.exportInfo.logoChannels.map((c) => c.platform))], [props.exportInfo.logoChannels]);
+  const issues = useMemo(
+    () => runChecks(contributions.checks, { doc, options, verdicts: props.verdicts, mixUsable, durationSec: built.durationSec, platforms, hasLogo }),
+    [contributions.checks, doc, options, props.verdicts, mixUsable, built.durationSec, platforms, hasLogo],
+  );
+
+  /* ------------------------------------------------------------ services */
+
+  const regenerateHint = !props.canEdit ? "Vai trò của bạn chỉ được xem." : !props.version.isLatest ? "Chỉ tạo lại được trên phiên bản mới nhất." : busy ? `Đang chạy bước ${props.busyStep}…` : dirty ? "Lưu thay đổi trước khi tạo lại." : null;
+  const exportHint = !props.canEdit ? "Vai trò của bạn chỉ được xem." : busy ? `Đang chạy bước ${props.busyStep}…` : dirty && !props.version.isLatest ? "Phiên bản cũ chỉ đọc: huỷ thay đổi để kết xuất nguyên bản này." : null;
+
+  const openVersion = useCallback((v: number) => {
+    router.push(`/app/projects/${props.projectId}/edit?t=${v}`);
+    router.refresh();
+  }, [router, props.projectId]);
+
+  const save = useCallback(() => {
+    if (!dirty || saving || !canSave || busy) return;
+    setSaving(true);
+    startTransition(async () => {
+      const res = await saveTimeline({ projectId: props.projectId, baseVersion: props.version.version, doc, note: note || undefined });
+      setSaving(false);
+      if (!res.ok) return void toast.error(res.message);
+      toast.success(res.message);
+      if (res.version != null) openVersion(res.version);
+    });
+  }, [dirty, saving, canSave, busy, props.projectId, props.version.version, doc, note, openVersion]);
+
+  const exportVideo = useCallback(
+    (logos: string[]) => {
+      if (exporting || saving || exportHint) return;
+      setExporting(true);
+      startTransition(async () => {
+        let timelineId = props.version.id;
+        let version = props.version.version;
+        if (dirty) {
+          const saved = await saveTimeline({ projectId: props.projectId, baseVersion: props.version.version, doc, note: note || undefined });
+          if (!saved.ok || !saved.timelineId || saved.version == null) {
+            setExporting(false);
+            return void toast.error(saved.message);
+          }
+          toast.success(saved.message);
+          timelineId = saved.timelineId;
+          version = saved.version;
+        }
+        const res = await renderTimeline({ projectId: props.projectId, timelineId, logoChannelIds: logos.length ? logos : undefined });
+        setExporting(false);
+        if (res.ok) toast.success(res.message);
+        else toast.error(version !== props.version.version ? `Đã lưu v${version} nhưng chưa kết xuất được: ${res.message}` : res.message);
+        // A save made a new version: open it (the editor is keyed by version). Otherwise reload in place for the busy state.
+        if (version !== props.version.version) openVersion(version);
+        else router.refresh();
+      });
+    },
+    [exporting, saving, exportHint, props.version.id, props.version.version, props.projectId, dirty, doc, note, openVersion, router],
+  );
+
+  const forceRender = useCallback<EditorCtx["services"]["forceRender"]>(
+    (r) => {
+      if (exporting || !r.timelineId) return;
+      setExporting(true);
+      startTransition(async () => {
+        const res = await renderTimeline({ projectId: props.projectId, timelineId: r.timelineId!, logoChannelId: r.logoChannelId ?? "kit", skipQa: true });
+        setExporting(false);
+        (res.ok ? toast.success : toast.error)(res.message);
+        router.refresh();
+      });
+    },
+    [exporting, props.projectId, router],
+  );
+
+  const regenerate = useCallback(
+    (what: RegenerateWhat, payload: RegeneratePayload = {}) => {
+      if (regenerateHint) return void toast.error(regenerateHint);
+      setRequesting(true);
+      startTransition(async () => {
+        const res = await regenerateScene({ projectId: props.projectId, timelineId: props.version.id, what, ...payload });
+        setRequesting(false);
+        if (!res.ok) return void toast.error(res.message);
+        toast.success(res.message);
+        router.push(`/app/projects/${props.projectId}/edit`);
+        router.refresh();
+      });
+    },
+    [regenerateHint, props.projectId, props.version.id, router],
+  );
+
+  const rewrite = useCallback(
+    async (sceneId: string, rewriteMode: RewriteMode, instruction?: string) => {
+      const scene = doc.scenes.find((s) => s.id === sceneId);
+      if (!scene || rewriting || !props.canEdit) return;
+      setRewriting(sceneId);
+      try {
+        const res = await rewriteSceneVoiceover({ projectId: props.projectId, timelineId: props.version.id, sceneId, voiceover: voiceDrafts[sceneId] ?? scene.voiceover, mode: rewriteMode, instruction });
+        if (!res.ok) return void toast.error(res.message);
+        setVoiceDrafts((d) => ({ ...d, [sceneId]: res.voiceover }));
+        toast.success(`${sceneId}: ${res.message}`, { description: "Lời mới nằm trong ô Lời đọc. Bấm “Đọc lại giọng” để dùng." });
+      } finally {
+        setRewriting(null);
+      }
+    },
+    [doc.scenes, rewriting, props.canEdit, props.projectId, props.version.id, voiceDrafts],
+  );
+
+  const restore = useCallback(() => {
     const latest = props.versions[0];
     if (!latest || latest.id === props.version.id) return;
     startTransition(async () => {
-      const res = await saveTimeline({
-        projectId: props.projectId,
-        baseVersion: latest.version,
-        doc: props.doc,
-        note: `Khôi phục v${props.version.version}`,
-      });
+      const res = await saveTimeline({ projectId: props.projectId, baseVersion: latest.version, doc: props.doc, note: `Khôi phục v${props.version.version}` });
       if (!res.ok) return void toast.error(res.message);
       toast.success(res.message);
-      router.push(`/app/projects/${props.projectId}/edit?t=${res.version}`);
-      router.refresh();
+      if (res.version != null) openVersion(res.version);
     });
-  };
+  }, [props.versions, props.version.id, props.version.version, props.projectId, props.doc, openVersion]);
 
-  const regenerate = (
-    what: "voice" | "broll" | "music" | "motion",
-    payload: { sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { key: string; trimStartSec: number } | null } = {},
-  ) => {
-    startTransition(async () => {
-      const res = await regenerateScene({ projectId: props.projectId, timelineId: props.version.id, what, ...payload });
-      if (!res.ok) return void toast.error(res.message);
-      toast.success(res.message);
-      router.push(`/app/projects/${props.projectId}/edit`);
-      router.refresh();
-    });
-  };
-  const regenerateHint = !props.canEdit
-    ? "Vai trò của bạn chỉ được xem."
-    : !props.version.isLatest
-      ? "Chỉ tạo lại được trên phiên bản mới nhất."
-      : busy
-        ? `Đang chạy bước ${props.busyStep}…`
-        : dirty
-          ? "Lưu thay đổi trước khi tạo lại."
-          : null;
-  const canRegenerate = !regenerateHint;
+  const setPlugins = useCallback(async (next: string[]) => {
+    const prev = disabled;
+    setDisabled(next);
+    const res = await setEditorPlugins({ disabled: next });
+    if (!res.ok) {
+      setDisabled(prev);
+      toast.error(res.message);
+    } else toast.success(res.message);
+  }, [disabled]);
 
-  const thumb = (s: EditorScene) => {
-    if (s.visual.kind !== "video" && s.visual.kind !== "image") return { url: null, video: false };
-    if (s.visual.thumbnailUrl) return { url: s.visual.thumbnailUrl, video: false };
-    return { url: urls[s.visual.key] ?? null, video: s.visual.kind === "video" };
-  };
+  /* ------------------------------------------------------------ fixes */
 
-  // The document embeds a copy of its kit; "current" = the workspace kit that still equals that copy.
-  const brandJson = JSON.stringify(doc.brand);
-  const currentKit = props.brandKits.find((k) => JSON.stringify(k.brand) === brandJson) ?? null;
-  const overlayOn = doc.scenes.filter((s) => s.overlay).length;
-  const setOverlayAll = (on: boolean) =>
-    setDoc((d) => ({ ...d, scenes: d.scenes.map((s) => ({ ...s, overlay: on })) }));
-
-  // Hand-drawn photos for the whole video; AI stills are original already and stay as they are.
-  const isAiStill = (v: { key: string }) => options.some((o) => o.key === v.key && o.provider === "gemini_image");
-  const sketches = sketchCount(doc, isAiStill);
-  const setSketchAll = (style: SketchStyle | null) => setDoc((d) => ({ ...d, scenes: d.scenes.map((s) => setSceneSketch(s, style, isAiStill)) }));
-
-  const coverFrame = doc.coverAtSec != null ? Math.round(doc.coverAtSec * FPS) : null;
-
-  // On phones the inspector sits below the scene list: selecting a scene brings it into view.
-  const inspectorRef = useRef<HTMLDivElement>(null);
-  const selectScene = (id: string) => {
-    setSelectedId(id);
-    seekToScene(id);
-    if (window.matchMedia("(max-width: 1023px)").matches)
-      inspectorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-  const canSave = props.canEdit && props.version.isLatest;
-  const exportDisabled = Boolean(exportHint) || saving || pending || exporting;
-  const tabs: SectionTab[] = [
-    { id: "preview", label: "Xem trước", icon: <Eye /> },
-    { id: "scenes", label: "Cảnh", icon: <Layers /> },
-    { id: "inspector", label: "Chi tiết", icon: <PencilLine /> },
-    { id: "look", label: "Diện mạo", icon: <Palette /> },
-    { id: "review", label: "Duyệt", icon: <Eye /> },
-    { id: "comments", label: "Bình luận", icon: <MessageSquare /> },
-    { id: "versions", label: "Phiên bản", icon: <History /> },
-  ];
-  const panel = "rounded-xl bg-card p-3 shadow-xs ring-1 ring-border sm:p-4";
-  const heading = "text-sm font-medium text-muted-foreground";
-
-  return (
-    <div className="space-y-4">
-      <StickyToolbar tabs={<SectionTabs tabs={tabs} />}>
-        {canSave ? (
-          <>
-            <Button type="button" onClick={save} disabled={!dirty || saving || pending || busy}>
-              <Save /> {saving ? "Đang lưu…" : dirty ? `Lưu v${props.version.version + 1}` : "Đã lưu"}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={!dirty || saving}
-              onClick={() => setDoc(props.doc)}
-              aria-label="Huỷ thay đổi"
-            >
-              <RotateCcw /> <span className="hidden sm:inline">Huỷ thay đổi</span>
-            </Button>
-          </>
-        ) : !props.version.isLatest && props.canEdit ? (
-          <Button type="button" variant="outline" disabled={pending || busy} onClick={restore}>
-            <History /> Khôi phục thành v{props.versions[0].version + 1}
-          </Button>
-        ) : null}
-        {props.canEdit ? (
-          <Button
-            type="button"
-            variant={props.approvedTimelineId === props.version.id && !dirty ? "default" : "outline"}
-            disabled={exportDisabled}
-            onClick={exportNow}
-            title={exportHint ?? undefined}
-          >
-            <Film />{" "}
-            {exporting ? "Đang gửi…" : dirty && canSave ? `Lưu và kết xuất` : `Kết xuất v${props.version.version}`}
-          </Button>
-        ) : null}
-        <span className="ml-auto flex items-center gap-1.5 pl-2 text-xs text-muted-foreground">
-          {dirty ? <Badge variant="default">chưa lưu</Badge> : null}
-          {props.approvedTimelineId === props.version.id ? <Badge variant="success">đã duyệt</Badge> : null}
-          <Badge variant="outline">v{props.version.version}</Badge>
-        </span>
-      </StickyToolbar>
-
-      {/* ---------------- 1. Workspace: preview beside the scene track and the inspector ---------------- */}
-      <section
-        aria-label="Dựng cảnh"
-        className="min-w-0 space-y-4 xl:grid xl:grid-cols-[340px_minmax(0,1fr)] xl:gap-4 xl:space-y-0"
-      >
-        <div id="preview" className="min-w-0 space-y-3 scroll-mt-40 xl:sticky xl:top-[7.5rem] xl:self-start">
-          <div className="mx-auto w-full max-w-[340px]">
-            <Preview ref={playerRef} timeline={playerTimeline} width="100%" />
-          </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <span>{(built.timeline.durationFrames / FPS).toFixed(1)} s</span>
-            <span>· {doc.scenes.length} cảnh</span>
-            <span>· {built.timeline.scenes.reduce((a, s) => a + s.shots.length, 0)} hình</span>
-            <span>· {built.timeline.captions.length} phụ đề</span>
-            {mixUsable ? (
-              <Badge variant="outline">âm thanh đã trộn</Badge>
-            ) : (
-              <Badge variant="secondary">xem trước: lời + nhạc chưa trộn (lưu để trộn lại)</Badge>
-            )}
-          </div>
-          {props.lastError ? (
-            <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-xs">{props.lastError}</p>
-          ) : null}
-          {shortScenes.length || repeatedKeys ? (
-            <p className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-2 text-[11px] text-amber-800 dark:text-amber-300">
-              {shortScenes.length ? `Cảnh ${shortScenes.join(", ")} giữ một hình quá 5 s. ` : ""}
-              {repeatedKeys ? `${repeatedKeys} hình bị dùng lặp lại. ` : ""}
-              Thêm hình trong “Chi tiết cảnh” (tải lên, dán link hoặc chọn từ kho).
-            </p>
-          ) : null}
-          {busy ? (
-            <p className="text-xs text-muted-foreground">
-              Đang chạy bước {props.busyStep}… tiến độ ở đầu trang; phiên bản mới tự mở khi xong.
-            </p>
-          ) : null}
-        </div>
-        {/* Scenes + inspector (grid items need min-w-0 or a wide <select> stretches the column). */}
-        <div className="grid min-w-0 content-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          <WebCapturePanel
-            projectId={props.projectId}
-            captures={captures}
-            disabled={readOnly}
-            onCaptured={placeCapture}
-          />
-          <div id="scenes" className="min-w-0 space-y-2 scroll-mt-40">
-            <div className="flex items-center justify-between px-1">
-              <h2 className={heading}>Cảnh · {doc.scenes.length}</h2>
-              <span className="text-xs text-muted-foreground">kéo để đổi thứ tự · bấm để sửa</span>
-            </div>
-            <SceneList
-              scenes={doc.scenes}
-              timings={timings}
-              selectedId={selected?.id ?? null}
-              verdicts={props.verdicts}
-              thumb={thumb}
-              disabled={readOnly}
-              onSelect={selectScene}
-              onReorder={(scenes) => setDoc((d) => ({ ...d, scenes }))}
-            />
-          </div>
-          <div id="inspector" ref={inspectorRef} className="min-w-0 space-y-2 scroll-mt-40">
-            <h2 className={cn(heading, "px-1")}>Chi tiết cảnh{selected ? ` · ${selected.id}` : ""}</h2>
-            <div className={panel}>
-              {selected ? (
-                <SceneInspector
-                  key={selected.id}
-                  projectId={props.projectId}
-                  scene={selected}
-                  index={selectedIndex}
-                  total={doc.scenes.length}
-                  options={options}
-                  overlay={{
-                    caption: doc.brand.caption,
-                    headlineStyle: doc.brand.headline,
-                    showSource: doc.brand.showSource,
-                    hasLogo: Boolean(doc.brand.logoSrc || props.previewLogo),
-                  }}
-                  hasOverlay={Boolean(doc.brand.overlaySrc)}
-                  urls={urls}
-                  usedKeys={usedKeys}
-                  verdict={props.verdicts?.[selected.id] ?? null}
-                  disabled={readOnly}
-                  canRegenerate={canRegenerate}
-                  regenerateHint={regenerateHint}
-                  political={props.political}
-                  motionEngine={props.motionEngine}
-                  onChange={updateScene}
-                  onRemove={() => removeScene(selected.id)}
-                  onRegenerate={(what, payload) => regenerate(what, { sceneId: selected.id, ...payload })}
-                  onSeek={() => seekToScene(selected.id)}
-                  onOptionAdded={addOption}
-                  onOptionFramed={(assetId, frame) =>
-                    setOptions((list) => list.map((o) => (o.assetId === assetId ? { ...o, frame } : o)))
-                  }
-                  onCaptureNeeded={addCapture}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">Chọn một cảnh.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ---------------- 2. The whole video's look and sound ---------------- */}
-      <section id="look" aria-labelledby="look-heading" className="min-w-0 space-y-2 scroll-mt-40">
-        <h2 id="look-heading" className={cn(heading, "px-1")}>
-          Diện mạo &amp; âm thanh
-        </h2>
-        <div className="grid min-w-0 items-start gap-4 md:grid-cols-3">
-          <CollapsibleSection
-            title="Bộ nhận diện"
-            defaultOpen="desktop"
-            summary={`${currentKit?.name ?? doc.brand.name}${doc.brand.overlaySrc ? ` · lớp phủ ${overlayOn}/${doc.scenes.length}` : ""}`}
-            summaryAlways
-            bodyClassName="space-y-2"
-          >
-            {props.brandKits.length ? (
-              <NativeSelect
-                id="brand-kit"
-                aria-label="Bộ nhận diện"
-                value={currentKit?.id ?? ""}
-                disabled={readOnly}
-                onChange={(e) => {
-                  const kit = props.brandKits.find((k) => k.id === e.target.value);
-                  if (kit) setDoc((d) => ({ ...d, brand: kit.brand }));
-                }}
-                className="w-full"
-              >
-                {!currentKit ? <option value="">{doc.brand.name} (bản lưu trong phiên bản này)</option> : null}
-                {props.brandKits.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.name}
-                    {k.isDefault ? " (mặc định)" : ""}
-                  </option>
-                ))}
-              </NativeSelect>
-            ) : null}
-            {!currentKit && props.brandKits.some((k) => k.name === doc.brand.name) ? (
-              <p className="text-[11px] text-muted-foreground">
-                Bộ “{doc.brand.name}” đã được sửa sau lần dựng này; chọn lại nó để lấy bản mới.
-              </p>
-            ) : null}
-            {doc.brand.overlaySrc ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={readOnly || overlayOn === doc.scenes.length}
-                  onClick={() => setOverlayAll(true)}
-                >
-                  Bật lớp phủ mọi cảnh
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={readOnly || overlayOn === 0}
-                  onClick={() => setOverlayAll(false)}
-                >
-                  Tắt hết
-                </Button>
-              </div>
-            ) : (
-              <p className="text-[11px] text-muted-foreground">
-                Bộ này chưa có lớp phủ PNG; tải lên ở{" "}
-                <Link href="/app/brand" className="underline">
-                  Bộ nhận diện
-                </Link>
-                .
-              </p>
-            )}
-            {sketches.photos ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-muted-foreground">
-                  Ảnh vẽ tay: {sketches.drawn}/{sketches.photos} ảnh
-                </span>
-                <NativeSelect
-                  id="sketch-all"
-                  aria-label="Ảnh vẽ tay cho mọi ảnh"
-                  fieldSize="sm"
-                  value=""
-                  disabled={readOnly}
-                  onChange={(e) => e.target.value && setSketchAll(e.target.value === "off" ? null : (e.target.value as SketchStyle))}
-                  title="Mỗi ảnh mở bằng ảnh thật rồi chuyển thành tranh vẽ tay của chính nó. Ảnh AI giữ nguyên. Chỉnh từng ảnh ở khung cảnh quay."
-                  className="min-w-0 flex-1"
-                >
-                  <option value="">Đổi cho mọi ảnh…</option>
-                  {SKETCH_STYLES.map((st) => (
-                    <option key={st} value={st}>
-                      tranh {SKETCH_LABEL[st]}
-                    </option>
-                  ))}
-                  <option value="off">giữ ảnh gốc</option>
-                </NativeSelect>
-              </div>
-            ) : null}
-            <p className="text-[11px] text-muted-foreground">
-              {props.previewLogo
-                ? `Logo đang xem: kênh ${props.previewLogo.channelName}. `
-                : "Logo đang xem: của bộ nhận diện. "}
-              Logo đi theo kênh, chọn lại được mỗi lần kết xuất (khung “Kết xuất” bên dưới).
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              Đổi bộ chỉ đổi diện mạo (màu, font, logo, lớp phủ, phụ đề); lời đọc, hình và nhạc giữ nguyên, không trộn
-              lại âm thanh.
-            </p>
-          </CollapsibleSection>
-          <CollapsibleSection
-            title="Nhạc nền"
-            defaultOpen="desktop"
-            summary={doc.music ? `${doc.music.title} (${doc.music.source})` : "không"}
-            summaryAlways
-            bodyClassName="space-y-2"
-          >
-            <NativeSelect
-              aria-label="Nhạc nền"
-              value={doc.music?.key ?? ""}
-              disabled={readOnly}
-              onChange={(e) => {
-                const key = e.target.value;
-                if (!key) return setDoc((d) => ({ ...d, music: null }));
-                if (doc.music && key === doc.music.key) return;
-                const m = props.music.find((x) => x.key === key);
-                if (m)
-                  setDoc((d) => ({
-                    ...d,
-                    music: {
-                      key: m.key,
-                      gainDb: d.music?.gainDb ?? -12,
-                      attribution: `Nhạc: ${m.title}`,
-                      title: m.title,
-                      source: "library",
-                      licence: m.licence,
-                    },
-                  }));
-              }}
-              className="w-full"
-            >
-              <option value="">— không nhạc —</option>
-              {doc.music && !props.music.some((m) => m.key === doc.music!.key) ? (
-                <option value={doc.music.key}>{doc.music.title} (hiện tại)</option>
-              ) : null}
-              {props.music.map((m) => (
-                <option key={m.id} value={m.key}>
-                  {m.title}
-                  {m.durationSec ? ` · ${m.durationSec.toFixed(0)} s` : ""}
-                  {m.moodTags.length ? ` · ${m.moodTags.slice(0, 3).join(", ")}` : ""}
-                </option>
-              ))}
-            </NativeSelect>
-            {doc.music ? (
-              <div className="flex items-center gap-2 text-xs">
-                <span className="shrink-0">Âm lượng dưới lời</span>
-                <input
-                  type="range"
-                  min={-24}
-                  max={-6}
-                  step={1}
-                  value={doc.music.gainDb}
-                  disabled={readOnly}
-                  onChange={(e) =>
-                    setDoc((d) => (d.music ? { ...d, music: { ...d.music, gainDb: Number(e.target.value) } } : d))
-                  }
-                  className="flex-1"
-                  aria-label="Âm lượng nhạc dưới lời"
-                />
-                <span className="w-12 text-right text-muted-foreground">{doc.music.gainDb} dB</span>
-              </div>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={!canRegenerate}
-              onClick={() => regenerate("music")}
-            >
-              Nhạc mới (Mubert / thư viện)
-            </Button>
-          </CollapsibleSection>
-          <CollapsibleSection
-            title="Ảnh bìa"
-            defaultOpen="desktop"
-            summary={coverFrame != null ? `tại ${(coverFrame / FPS).toFixed(1)} s` : "tự động (~1,2 s)"}
-            summaryAlways
-          >
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={readOnly}
-                onClick={() =>
-                  setDoc((d) => ({
-                    ...d,
-                    coverAtSec: Math.round(((playerRef.current?.getCurrentFrame() ?? 0) / FPS) * 10) / 10,
-                  }))
-                }
-              >
-                <ImageIcon /> Dùng khung hình hiện tại
-              </Button>
-              {coverFrame != null ? (
-                <>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => playerRef.current?.seekTo(coverFrame)}>
-                    xem
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={readOnly}
-                    onClick={() => setDoc((d) => ({ ...d, coverAtSec: null }))}
-                  >
-                    bỏ
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          </CollapsibleSection>
-        </div>
-      </section>
-
-      {/* ---------------- 3. Save, export, review: one row, one card per step ---------------- */}
-      <section aria-labelledby="deliver-heading" className="min-w-0 space-y-2">
-        <h2 id="deliver-heading" className={cn(heading, "px-1")}>
-          Lưu · kết xuất · duyệt
-        </h2>
-        <div className="grid min-w-0 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="min-w-0 space-y-4">
-            {canSave ? (
-              <div className={cn(panel, "space-y-2")}>
-                <input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Ghi chú phiên bản (tuỳ chọn)"
-                  maxLength={200}
-                  className="h-9 w-full rounded-lg border border-input bg-card px-3 text-base shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 md:text-sm pointer-coarse:h-11"
-                  disabled={!dirty}
-                  aria-label="Ghi chú phiên bản"
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button type="button" onClick={save} disabled={!dirty || saving || pending || busy}>
-                    <Save /> {saving ? "Đang lưu…" : `Lưu thành v${props.version.version + 1}`}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={!dirty || saving}
-                    onClick={() => setDoc(props.doc)}
-                  >
-                    Huỷ thay đổi
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Mỗi lần lưu là một phiên bản mới; đổi thứ tự, độ dài, lời hoặc nhạc sẽ trộn lại âm thanh (media
-                  Lambda, vài giây).
-                  {props.approvedTimelineId === props.version.id
-                    ? " Phiên bản này đã được duyệt: lưu sẽ huỷ duyệt."
-                    : ""}
-                </p>
-              </div>
-            ) : !props.version.isLatest ? (
-              <div className={cn(panel, "space-y-2 text-xs")}>
-                <p>Bạn đang xem phiên bản cũ (v{props.version.version}); chỉ đọc.</p>
-                {props.canEdit ? (
-                  <Button type="button" size="sm" variant="outline" disabled={pending || busy} onClick={restore}>
-                    Khôi phục thành v{props.versions[0].version + 1}
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            <section id="versions" className={cn(panel, "space-y-2 scroll-mt-40")}>
-              <h2 className={heading}>Phiên bản · {props.versions.length}</h2>
-              {versionList(props.versions.slice(0, 5))}
-              {props.versions.length > 5 ? (
-                <CollapsibleSection
-                  variant="plain"
-                  defaultOpen={false}
-                  title={`Cũ hơn (${props.versions.length - 5})`}
-                  className="text-xs"
-                >
-                  {versionList(props.versions.slice(5))}
-                </CollapsibleSection>
-              ) : null}
-            </section>
-          </div>
-          {props.canEdit ? (
-            <ExportPanel
-              projectId={props.projectId}
-              info={props.exportInfo}
-              version={props.version.version}
-              nextVersion={props.versions[0].version + 1}
-              approved={props.approvedTimelineId === props.version.id}
-              dirty={dirty}
-              canSave={props.version.isLatest}
-              disabled={Boolean(exportHint) || saving || pending}
-              busy={busy || saving || pending}
-              hint={exportHint}
-              working={exporting}
-              logo={exportLogo}
-              onLogoChange={setExportLogo}
-              onExport={exportNow}
-              onForce={forceRender}
-            />
-          ) : null}
-          <section id="review" className={cn(panel, "space-y-2 scroll-mt-40")}>
-            <h2 className={heading}>Duyệt</h2>
-            <ReviewPanel
-              projectId={props.projectId}
-              state={props.projectState}
-              latestTimeline={
-                props.versions[0] ? { id: props.versions[0].id, version: props.versions[0].version } : null
-              }
-              approvedTimelineId={props.approvedTimelineId}
-              canEdit={props.canEdit}
-              canApprove={props.canApprove}
-              busy={busy || dirty}
-              needsOverride={
-                !props.faithfulnessCounts ||
-                props.faithfulnessCounts.unsupported + props.faithfulnessCounts.unchecked > 0
-              }
-              faithfulnessCounts={props.faithfulnessCounts}
-              sensitiveTopic={props.sensitiveTopic}
-              reviews={props.reviews}
-            />
-            {dirty ? (
-              <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                Lưu thay đổi trước khi gửi duyệt / duyệt.
-              </p>
-            ) : null}
-            <Link
-              href={`/app/projects/${props.projectId}`}
-              className="inline-flex min-h-8 items-center text-xs underline"
-            >
-              Về trang dự án (đăng, kịch bản, bài gốc)
-            </Link>
-          </section>
-          <section id="comments" className={cn(panel, "space-y-2 scroll-mt-40")}>
-            <h2 className={heading}>Bình luận</h2>
-            <CommentsPanel
-              projectId={props.projectId}
-              timelineId={props.version.id}
-              comments={props.comments}
-              canComment={props.canEdit}
-              selectedSceneId={selected?.id ?? null}
-              currentMs={currentMs}
-              onJump={(atMs, sceneId) => {
-                if (sceneId) setSelectedId(sceneId);
-                if (atMs != null) playerRef.current?.seekTo(Math.round((atMs / 1000) * FPS));
-                else if (sceneId) seekToScene(sceneId);
-              }}
-            />
-          </section>
-        </div>
-      </section>
-    </div>
+  const applyFix = useCallback(
+    (issue: Issue) => {
+      const fix = issue.fix;
+      if (!fix) return;
+      const goTo = (sceneId: string, tabId: string, shot = 0) => {
+        select({ sceneId, shot });
+        setTabState(tabId);
+        player.seekScene(sceneId);
+      };
+      if (fix.kind === "open") return goTo(fix.sceneId, fix.tab, fix.shot ?? 0);
+      if (fix.kind === "rewrite") {
+        goTo(fix.sceneId, "content");
+        return void rewrite(fix.sceneId, "faithful");
+      }
+      if (readOnly) return void toast.error(regenerateHint ?? "Phiên bản này chỉ đọc");
+      const scene =
+        fix.kind === "add-shots" ? fillMissingShots(doc, options, fix.sceneId) : fix.kind === "replace-shot" ? replaceWithUnused(doc, options, fix.sceneId, fix.shot) : autoFrameShot(doc, options, fix.sceneId, fix.shot, hasLogo);
+      if (!scene) {
+        goTo(fix.sceneId, "shots", "shot" in fix ? fix.shot : 0);
+        return void toast.warning("Kho của dự án không còn hình chưa dùng: tải lên hoặc dán link trong Thư viện.");
+      }
+      updateScene(fix.sceneId, `${fix.sceneId}: ${fix.label.toLowerCase()}`, () => scene);
+      goTo(fix.sceneId, "shots", "shot" in fix ? fix.shot : sceneShots(scene).length - 1);
+      toast.success(`${fix.label}: xong. Xem lại rồi bấm Lưu.`);
+    },
+    [select, player, rewrite, readOnly, regenerateHint, doc, options, hasLogo, updateScene],
   );
 
-  function versionList(list: EditorProps["versions"]) {
-    return (
-      <ul className="space-y-1 text-xs">
-        {list.map((v) => (
-          <li key={v.id} className={cn("rounded-md px-1.5 py-1", v.id === props.version.id && "bg-muted")}>
-            <Link
-              href={`/app/projects/${props.projectId}/edit?t=${v.version}`}
-              className="inline-flex min-h-6 items-center font-medium underline"
-            >
-              v{v.version}
-            </Link>{" "}
-            <span className="text-muted-foreground">
-              {KIND_LABEL[v.kind] ?? v.kind} · {v.createdAt.slice(0, 16).replace("T", " ")}
-              {v.createdByName ? ` · ${v.createdByName}` : ""}
-              {v.id === props.approvedTimelineId ? " · đã duyệt" : ""}
-            </span>
-            {v.changes.length ? (
-              <div className="text-muted-foreground">
-                {v.changes.slice(0, 4).join(" · ")}
-                {v.changes.length > 4 ? ` · +${v.changes.length - 4}` : ""}
-              </div>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    );
-  }
+  /* ------------------------------------------------------------ context */
+
+  const ctx: EditorCtx = {
+    props,
+    doc,
+    built,
+    durationSec: built.durationSec,
+    update,
+    updateScene,
+    history: { canUndo: hist.past.length > 0 && !readOnly, canRedo: hist.future.length > 0 && !readOnly, undoLabel: undoLabel(hist), redoLabel: redoLabel(hist), undo: () => !readOnly && setHist(undo), redo: () => !readOnly && setHist(redo) },
+    dirty,
+    reset,
+    readOnly,
+    canSave,
+    canRegenerate: !regenerateHint && !pending,
+    regenerateHint,
+    exportHint,
+    pending: { saving, exporting, rewriting, requesting: requesting || pending },
+    busy,
+    selection: { sceneId: selectedScene?.id ?? null, shot: selectedScene ? Math.min(selection.shot, sceneShots(selectedScene).length - 1) : 0 },
+    select,
+    selectedScene,
+    selectedIndex,
+    player,
+    time,
+    ui: {
+      panel,
+      setPanel: setPanelState,
+      tab,
+      setTab: setTabState,
+      mode,
+      setMode,
+      overlays,
+      toggleOverlay: (id) => setOverlays((o) => ({ ...o, [id]: !o[id] })),
+      paletteOpen,
+      setPaletteOpen,
+      note,
+      setNote,
+      commentAtMs,
+      setCommentAtMs,
+    },
+    media: { options, urls, addOption, frameOption, captures, addCapture, placeCapture, place },
+    drafts: { voice: voiceDrafts, setVoice: (sceneId, text) => setVoiceDrafts((d) => ({ ...d, [sceneId]: text })) },
+    derived: { usedKeys, mixUsable, isAiStill, issues, thumb },
+    plugins: { all: BUILTIN_PLUGINS, active, disabled, contributions },
+    applyFix,
+    services: { save, exportVideo, forceRender, regenerate, rewrite, restore, setPlugins },
+  };
+
+  // Keyboard: every command with a shortcut, from any plugin.
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const c = ctxRef.current;
+      if (c.ui.paletteOpen) return;
+      // Digits open the rail's panels in order (the rail's tooltips say which).
+      if (/^[1-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e) && c.ui.mode === "edit") {
+        const panelsShown = c.plugins.contributions.panels.filter((p) => !p.when || p.when(c));
+        const target = panelsShown[Number(e.key) - 1];
+        if (target) {
+          e.preventDefault();
+          c.ui.setPanel(target.id);
+        }
+        return;
+      }
+      for (const cmd of c.plugins.contributions.commands) {
+        if (!cmd.shortcut || !cmd.shortcut.match(e)) continue;
+        if (!cmd.shortcut.global && isTyping(e)) continue;
+        if (cmd.when && !cmd.when(c)) continue;
+        e.preventDefault();
+        cmd.run(c);
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Leaving with unsaved edits asks first.
+  useEffect(() => {
+    if (!dirty) return;
+    const onLeave = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [dirty]);
+
+  const playerTimeline = useMemo(() => resolveForPlayer(built.timeline, urls, props.previewLogo?.url ?? null), [built.timeline, urls, props.previewLogo]);
+
+  return (
+    <EditorContext.Provider value={ctx}>
+      <Workspace timeline={playerTimeline} />
+    </EditorContext.Provider>
+  );
 }
+

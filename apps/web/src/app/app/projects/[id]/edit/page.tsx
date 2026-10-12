@@ -7,6 +7,7 @@ import { PipelineStatus } from "@/components/pipeline-status";
 import { EditorLoader } from "@/components/editor/editor-loader";
 import type { EditorProps, VisualOption } from "@/components/editor/types";
 import { Badge } from "@/components/ui/badge";
+import { canManagePlugins, disabledPlugins } from "@/lib/editor-plugins";
 import { brandFromRow, listBrandKits } from "@/lib/media/brand";
 import { docKeys } from "@/lib/media/editor";
 import { channelLogo } from "@/lib/media/logo";
@@ -55,13 +56,14 @@ export default async function EditPage({ params, searchParams }: { params: Promi
       .where(eq(schema.projectReviews.projectId, id))
       .orderBy(desc(schema.projectReviews.createdAt))
       .limit(20);
-    const renders = await tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt), limit: 4 });
+    const renders = await tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt), limit: 8 });
     const channels = await tx.query.channels.findMany({ where: eq(schema.channels.organizationId, project.organizationId), orderBy: [schema.channels.platform, schema.channels.name] });
     const authors = await tx.select({ id: schema.user.id, name: schema.user.name }).from(schema.user);
-    return { project, timelines, assets, comments, reviews, renders, channels, authors: new Map(authors.map((a) => [a.id, a.name])) };
+    const pluginRow = await tx.query.editorPluginSettings.findFirst({ where: eq(schema.editorPluginSettings.organizationId, project.organizationId) });
+    return { project, timelines, assets, comments, reviews, renders, channels, pluginRow, authors: new Map(authors.map((a) => [a.id, a.name])) };
   });
   if (!data) notFound();
-  const { project, timelines, assets, comments, reviews, renders, channels } = data;
+  const { project, timelines, assets, comments, reviews, renders, channels, pluginRow } = data;
   const selected = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   if (!selected) {
     return (
@@ -142,8 +144,10 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     faithfulnessCounts: verdicts?.counts ?? null,
     comments: comments.map((c) => ({ ...c, createdAt: c.createdAt.toISOString(), resolvedAt: c.resolvedAt?.toISOString() ?? null })),
     reviews: reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+    status,
+    plugins: { disabled: disabledPlugins(pluginRow), canManage: canManagePlugins(ws) },
     exportInfo: {
-      logoChannels: channels.filter((c) => c.logoPath).map((c) => ({ id: c.id, name: c.name, platformLabel: PLATFORM_SPEC[c.platform].label })),
+      logoChannels: channels.filter((c) => c.logoPath).map((c) => ({ id: c.id, name: c.name, platform: c.platform, platformLabel: PLATFORM_SPEC[c.platform].label })),
       defaultLogoChannelId: project.logoChannelId,
       quota: { used: Math.ceil(renderUsed), limit: renderLimit },
       renders: renders.map((r, i) => ({

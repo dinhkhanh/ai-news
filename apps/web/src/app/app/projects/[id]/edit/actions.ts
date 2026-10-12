@@ -19,7 +19,10 @@ import type { ChosenAsset } from "@/lib/media/broll";
 import { busyStep, startProgress } from "@/lib/project-state";
 import { deleteObject, headObject, presignGet, presignPut, r2Key } from "@/lib/r2";
 import { queueRender } from "@/lib/render-request";
-import { saveTimelineVersion } from "@/lib/review";
+import { canManagePlugins, PLUGIN_ID_RE } from "@/lib/editor-plugins";
+import { REWRITE_MODES, rewriteVoiceover, type RewriteMode } from "@/lib/llm/rewrite";
+import { sceneVoiceMs } from "@/lib/media/editor";
+import { docOfRow, saveTimelineVersion, verdictsOfScript } from "@/lib/review";
 import { isPrivateHost } from "@/lib/url";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 
@@ -45,16 +48,91 @@ export async function saveTimeline(input: { projectId: string; baseVersion: numb
   }
 }
 
-/** Export from the editor: render one saved version (same rules as the project page's render button). */
-export async function renderTimeline(input: { projectId: string; timelineId: string; logoChannelId?: string | null; skipQa?: boolean }): Promise<EditorActionResult> {
+/**
+ * Export from the editor: render one saved version (same rules as the project page's render button).
+ * `logoChannelIds` (the Deliver view's channel list) renders the version once per logo, one after another;
+ * otherwise `logoChannelId` picks the one logo.
+ */
+export async function renderTimeline(input: { projectId: string; timelineId: string; logoChannelId?: string | null; logoChannelIds?: string[]; skipQa?: boolean }): Promise<EditorActionResult> {
   try {
     const { ws, log } = await assertWorkspaceWriter();
-    const r = await queueRender(ws, log, { projectId: input.projectId, timelineId: input.timelineId, logoChoice: input.logoChannelId || undefined, skipQa: input.skipQa === true });
+    const logos = (input.logoChannelIds ?? []).map((l) => String(l).slice(0, 64)).filter(Boolean);
+    const first = logos[0] ?? (input.logoChannelId || undefined);
+    const more = logos.slice(1);
+    const r = await queueRender(ws, log, { projectId: input.projectId, timelineId: input.timelineId, logoChoice: first || undefined, moreLogos: more, skipQa: input.skipQa === true });
     revalidatePath(`/app/projects/${input.projectId}`);
     revalidatePath(`/app/projects/${input.projectId}/edit`);
-    return { ok: true, message: `Đang kết xuất v${r.version}${r.skipQa ? " (bỏ qua QA)" : ""}${r.logoName ? ` với logo ${r.logoName}` : ""} (${r.minutesToday}/${r.minutesLimit} phút hôm nay)…`, version: r.version, timelineId: r.timelineId };
+    const what = r.renders > 1 ? `${r.renders} bản (mỗi kênh một bản, lần lượt)` : r.logoName ? `với logo ${r.logoName}` : "";
+    return { ok: true, message: `Đang kết xuất v${r.version}${r.skipQa ? " (bỏ qua QA)" : ""}${what ? ` ${what}` : ""} (${r.minutesToday}/${r.minutesLimit} phút hôm nay)…`, version: r.version, timelineId: r.timelineId };
   } catch (e) {
     return fail(e);
+  }
+}
+
+export type RewriteResultAction = { ok: true; voiceover: string; message: string } | { ok: false; message: string };
+
+/**
+ * A rewritten voice-over for one scene, suggested by Claude ("Viết gọn hơn", the faithfulness fix "Viết lại theo bài gốc",
+ * or the editor's own direction). Nothing is stored: the editor shows it in the voice-over field and the user re-voices.
+ */
+export async function rewriteSceneVoiceover(input: { projectId: string; timelineId: string; sceneId: string; voiceover: string; mode: RewriteMode; instruction?: string }): Promise<RewriteResultAction> {
+  try {
+    const { ws, log } = await assertWorkspaceWriter();
+    if (!REWRITE_MODES.includes(input.mode)) throw new Error("Unknown rewrite mode");
+    const instruction = input.instruction?.trim().slice(0, 500) || null;
+    if (input.mode === "custom" && !instruction) throw new Error("Viết yêu cầu cho Claude trước");
+    const loaded = await withOrgContext(ws, async (tx) => {
+      const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, input.projectId) });
+      if (!project) return null;
+      const timeline = await tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, input.projectId), eq(schema.timelines.id, input.timelineId)) });
+      if (!timeline) return null;
+      const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, input.projectId), orderBy: desc(schema.articles.createdAt), columns: { text: true, siteName: true } });
+      const script = timeline.scriptId ? await tx.query.scripts.findFirst({ where: eq(schema.scripts.id, timeline.scriptId), columns: { faithfulnessJson: true } }) : null;
+      return { project, timeline, article, script };
+    });
+    if (!loaded) throw new Error("Project not found in this workspace");
+    const { doc } = docOfRow(loaded.timeline);
+    const i = doc.scenes.findIndex((s) => s.id === input.sceneId);
+    if (i < 0) throw new Error("Không thấy cảnh này trong phiên bản");
+    const scene = doc.scenes[i];
+    const voiceover = (input.voiceover?.trim() || scene.voiceover).slice(0, 2000);
+    const res = await rewriteVoiceover(
+      {
+        mode: input.mode,
+        language: doc.language,
+        title: doc.title,
+        article: loaded.article?.text ? { text: loaded.article.text, siteName: loaded.article.siteName } : null,
+        scene: { id: scene.id, kind: scene.kind, onScreenText: scene.onScreenText, voiceover, durationSec: sceneVoiceMs(scene) / 1000 },
+        before: doc.scenes[i - 1]?.voiceover ?? null,
+        after: doc.scenes[i + 1]?.voiceover ?? null,
+        verdict: verdictsOfScript(loaded.script)?.verdicts[scene.id] ?? null,
+        instruction,
+      },
+      { userId: ws.userId, organizationId: ws.organizationId, projectId: input.projectId },
+    );
+    await log("scene.rewrite_suggested", { timelineId: input.timelineId, sceneId: scene.id, mode: input.mode, instruction, costUsd: res.costUsd, words: res.voiceover.split(/\s+/).length }, input.projectId);
+    return { ok: true, voiceover: res.voiceover, message: res.note || "Đã viết lại; nghe thử rồi bấm Đọc lại giọng" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+
+/** Editor plugins this workspace switched off; only workspace admins (or platform admins) change it. */
+export async function setEditorPlugins(input: { disabled: string[] }): Promise<{ ok: boolean; message: string }> {
+  try {
+    const { ws, log } = await assertWorkspaceWriter();
+    if (!canManagePlugins(ws)) throw new Error("Chỉ quản trị workspace mới bật / tắt tiện ích");
+    const disabled = [...new Set((input.disabled ?? []).map(String).filter((id) => PLUGIN_ID_RE.test(id)))].slice(0, 64);
+    await withOrgContext(ws, (tx) =>
+      tx
+        .insert(schema.editorPluginSettings)
+        .values({ organizationId: ws.organizationId, disabled, updatedBy: ws.userId })
+        .onConflictDoUpdate({ target: schema.editorPluginSettings.organizationId, set: { disabled, updatedBy: ws.userId, updatedAt: new Date() } }),
+    );
+    await log("editor.plugins_changed", { disabled });
+    return { ok: true, message: disabled.length ? `Đã tắt ${disabled.length} tiện ích cho workspace` : "Mọi tiện ích đang bật" };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong" };
   }
 }
 

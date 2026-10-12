@@ -89,6 +89,8 @@ export const projectRenderRequested = eventType("project/render.requested", {
     logoChannelId: z.string().optional(),
     /** Forced render: the QA probe still runs and is stored, but a failed check no longer fails the render. Only offered after a `qa_failed` render of the same version. */
     skipQa: z.boolean().optional(),
+    /** Further logos to render the same version with, one after another (the editor's multi-channel export): the next render is requested when this one passes QA. */
+    thenLogoChannelIds: z.array(z.string()).max(8).optional(),
   }),
 });
 

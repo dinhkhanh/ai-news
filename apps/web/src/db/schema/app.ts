@@ -706,3 +706,16 @@ export const usageCosts = pgTable(
     index("usage_costs_provider_idx").on(t.provider, t.createdAt),
   ],
 );
+
+/**
+ * Editor plugins a workspace switched off (`components/editor/plugins`, migration 0028). One row per workspace,
+ * written by its admins from the editor's “Tiện ích” panel; no row = every built-in plugin on.
+ */
+export const editorPluginSettings = pgTable("editor_plugin_settings", {
+  organizationId: text("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  disabled: text("disabled").array().notNull().default(sql`'{}'::text[]`),
+  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedAt: updatedAt(),
+});

@@ -11,14 +11,19 @@ import type { Workspace } from "@/lib/workspace";
 
 type Log = (type: string, payload?: Record<string, unknown>, projectId?: string) => Promise<unknown>;
 
+/** At most this many logos in one export request (one render each, run back to back). */
+export const MAX_EXPORT_LOGOS = 6;
+
 /**
  * Queue a Remotion Lambda render of one timeline version (default: the latest).
  * Shared by the project page and the editor's export button, so both enforce the
  * busy lock and the daily render-minutes quota and log the same activity.
  * `logoChoice`: a channel id, "kit" (the kit's own logo), or undefined = the project's logo channel.
+ * `moreLogos`: further logo choices rendered after the first one, one at a time (`thenLogoChannelIds`),
+ * so one request can export a version for several channels; their minutes are counted now.
  * `skipQa`: force a render whose QA result does not gate it; only after this version already failed QA once.
  */
-export async function queueRender(ws: Workspace, log: Log, input: { projectId: string; timelineId?: string; logoChoice?: string; skipQa?: boolean }) {
+export async function queueRender(ws: Workspace, log: Log, input: { projectId: string; timelineId?: string; logoChoice?: string; moreLogos?: string[]; skipQa?: boolean }) {
   const { projectId, timelineId, logoChoice } = input;
   const skipQa = Boolean(input.skipQa);
   const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) }));
@@ -33,13 +38,28 @@ export async function queueRender(ws: Workspace, log: Log, input: { projectId: s
     const failed = await withOrgContext(ws, (tx) => tx.query.renders.findFirst({ where: and(eq(schema.renders.timelineId, timeline.id), eq(schema.renders.status, "qa_failed")), columns: { id: true } }));
     if (!failed) throw new Error("QA can only be skipped after a render of this version failed QA");
   }
-  const logo = logoChoice && logoChoice !== "kit" ? await channelLogo(ws, logoChoice) : null;
-  if (logoChoice && logoChoice !== "kit" && !logo) throw new Error("That channel has no logo (any more)");
-  const minutes = Number(timeline.durationSec ?? 60) / 60;
+  // A forced render is about one version + logo; it never chains.
+  const more = skipQa ? [] : [...new Set((input.moreLogos ?? []).filter((l) => l && l !== logoChoice))];
+  if (more.length + 1 > MAX_EXPORT_LOGOS) throw new Error(`At most ${MAX_EXPORT_LOGOS} logos per export`);
+  const logoName = async (choice: string | undefined) => {
+    if (!choice || choice === "kit") return choice === "kit" ? "kit" : null;
+    const logo = await channelLogo(ws, choice);
+    if (!logo) throw new Error("That channel has no logo (any more)");
+    return logo.name;
+  };
+  const firstLogo = await logoName(logoChoice);
+  const moreNames = await Promise.all(more.map(logoName));
+  const minutes = (Number(timeline.durationSec ?? 60) / 60) * (more.length + 1);
   const quota = await assertQuota(ws.userId, "render_minutes");
   await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "render", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, projectId)));
-  await inngest.send(projectRenderRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: timeline.id, logoChannelId: logoChoice, ...(skipQa ? { skipQa: true } : {}) }));
-  await log("quota.render_minutes", { minutes: Math.round(minutes * 100) / 100, timelineId: timeline.id }, projectId);
-  await log("render.requested", { timelineId: timeline.id, version: timeline.version, logo: logo?.name ?? (logoChoice === "kit" ? "kit" : "project default"), quotaUsed: quota.used, quotaLimit: quota.limit, ...(skipQa ? { skipQa: true } : {}) }, projectId);
-  return { skipQa, timelineId: timeline.id, version: timeline.version, logoName: logo?.name ?? null, minutesToday: Math.ceil(quota.used + minutes), minutesLimit: quota.limit };
+  await inngest.send(
+    projectRenderRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: timeline.id, logoChannelId: logoChoice, ...(skipQa ? { skipQa: true } : {}), ...(more.length ? { thenLogoChannelIds: more } : {}) }),
+  );
+  await log("quota.render_minutes", { minutes: Math.round(minutes * 100) / 100, timelineId: timeline.id, ...(more.length ? { renders: more.length + 1 } : {}) }, projectId);
+  await log(
+    "render.requested",
+    { timelineId: timeline.id, version: timeline.version, logo: firstLogo ?? "project default", ...(more.length ? { thenLogos: moreNames } : {}), quotaUsed: quota.used, quotaLimit: quota.limit, ...(skipQa ? { skipQa: true } : {}) },
+    projectId,
+  );
+  return { skipQa, timelineId: timeline.id, version: timeline.version, logoName: firstLogo === "kit" ? null : firstLogo, renders: more.length + 1, minutesToday: Math.ceil(quota.used + minutes), minutesLimit: quota.limit };
 }
