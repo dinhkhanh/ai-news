@@ -49,6 +49,7 @@ describe("migrations", () => {
       "integrations", "quotas", "activity_events", "usage_costs", "allowed_domains", "feature_flags",
       "eval_articles", "prompt_evals", "comments", "project_reviews", "editor_plugin_settings",
       "sound_collections", "sound_collection_items",
+      "comic_styles", "comic_characters", "comics", "comic_versions", "comic_images", "comic_exports",
     ]) {
       expect(names, `missing table ${t}`).toContain(t);
     }
@@ -359,5 +360,39 @@ describe("migrations", () => {
     await pg.query("delete from channels where id=$1", [ch.rows[0].id]);
     const left = await pg.query<{ p: string | null; r: string | null; path: string }>("select p.logo_channel_id as p, r.logo_channel_id as r, r.logo_path as path from projects p join renders r on r.project_id=p.id where p.id='00000000-0000-4000-8000-000000000017'");
     expect(left.rows[0]).toEqual({ p: null, r: null, path: "library/brand/o17/channel-logo.png" });
+  });
+
+  it("seed the comic style presets for every workspace, keep comics per workspace and one accepted sheet per character and style (migration 0031)", async () => {
+    await pg.exec(`insert into "user"(id,name,email) values ('u31','U31','u31@suzu.group');
+      insert into organization(id,name,slug) values ('o31','O31','o31'), ('o31b','O31b','o31b');`);
+    const presets = await pg.query<{ n: number; rtl: number }>("select count(*)::int as n, count(*) filter (where reading_direction = 'rtl')::int as rtl from comic_styles where organization_id is null");
+    expect(presets.rows[0]).toEqual({ n: 8, rtl: 1 });
+    const comic = await pg.query<{ id: string }>(`insert into comics(organization_id,owner_id,story,style_snapshot,text_model,image_model) values ('o31','u31','Ngày xưa…','{}','claude-opus-5-5','gemini-3.1-flash-image') returning id`);
+    await expect(pg.query(`update comics set state = 'nope' where id = $1`, [comic.rows[0].id])).rejects.toThrow(/comics_state_check/);
+    await expect(pg.query(`update comics set page_target = 41 where id = $1`, [comic.rows[0].id])).rejects.toThrow(/comics_page_target_check/);
+    const ch = await pg.query<{ id: string }>(`insert into comic_characters(organization_id,name) values ('o31','Lan') returning id`);
+    const style = await pg.query<{ id: string }>("select id from comic_styles where organization_id is null order by position limit 1");
+    const sheet = (status: string | null, kind = "sheet") =>
+      pg.query(`insert into comic_images(organization_id,kind,character_id,style_id,status,image_key,width,height,model,prompt) values ('o31',$1,$2,$3,$4,'k',1,1,'m','p')`, [kind, ch.rows[0].id, style.rows[0].id, status]);
+    await sheet("accepted");
+    await sheet("draft");
+    await expect(sheet("accepted")).rejects.toThrow(/comic_images_one_accepted_sheet_idx/);
+    await expect(sheet(null)).rejects.toThrow(/comic_images_status_check/);
+    await expect(sheet("draft", "panel")).rejects.toThrow(/comic_images_status_check/);
+    // Another workspace sees the presets but not the comic, and cannot write a preset.
+    const as = "select set_config('role','ai_news_app',true), set_config('app.user_id','u31',true), set_config('app.org_id','o31b',true), set_config('app.role','user',true)";
+    const seen = await pg.transaction(async (tx) => {
+      await tx.query(as);
+      const styles = await tx.query<{ n: number }>("select count(*)::int as n from comic_styles");
+      const comics = await tx.query<{ n: number }>("select count(*)::int as n from comics");
+      return { styles: styles.rows[0].n, comics: comics.rows[0].n };
+    });
+    expect(seen).toEqual({ styles: 8, comics: 0 });
+    await expect(
+      pg.transaction(async (tx) => {
+        await tx.query(as);
+        await tx.query("update comic_styles set name = 'x' where organization_id is null");
+      }),
+    ).rejects.toThrow(/row-level security/);
   });
 });

@@ -17,6 +17,8 @@ export const MODELS = {
   rewrite: "claude-opus-5-5",
   /** Topic projects (lib/llm/research.ts): researches the brief with web search + web fetch, then writes the article. */
   research: "claude-opus-5-5",
+  /** Comic studio adaptation default (lib/comic/adapt.ts); each comic may pick another model from `TEXT_MODELS`. */
+  comic: "claude-opus-5-5",
 } as const;
 
 /** USD per million tokens (Anthropic first-party rates). Cache write = 1.25x input, cache read = 0.1x input. */
@@ -25,7 +27,9 @@ const PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
+  "claude-sonnet-5-5": { input: 2, output: 10 },
   "claude-sonnet-5": { input: 2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 

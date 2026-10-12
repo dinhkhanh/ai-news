@@ -1,5 +1,5 @@
 import "server-only";
-import { getRenderProgress, renderMediaOnLambda } from "@remotion/lambda-client";
+import { getRenderProgress, renderMediaOnLambda, renderStillOnLambda } from "@remotion/lambda-client";
 import { env } from "@/lib/env";
 import { r2Bucket, r2Endpoint } from "@/lib/r2";
 import { isTransientRemotionSiteError, withRetry } from "@/lib/retry";
@@ -102,4 +102,34 @@ export async function getRenderStatus(h: RenderHandle) {
     region: h.region as Parameters<typeof getRenderProgress>[0]["region"],
     s3OutputProvider: r2OutputProvider(),
   });
+}
+
+/**
+ * One still (a comic page, docs/COMIC.md §3) rendered on the Remotion Lambda straight to R2 as a PNG. Waits for the
+ * result: a page takes a few seconds. Returns the cost Remotion estimates for the invocation.
+ */
+export async function renderStill(opts: { composition: string; inputProps: Record<string, unknown>; outKey: string }) {
+  const e = env();
+  const { region } = awsCreds();
+  if (!e.REMOTION_FUNCTION_NAME || !e.REMOTION_SERVE_URL) {
+    throw new Error("REMOTION_FUNCTION_NAME / REMOTION_SERVE_URL are not set (run packages/video deploy)");
+  }
+  const res = await withRetry(
+    () =>
+      renderStillOnLambda({
+        region,
+        functionName: e.REMOTION_FUNCTION_NAME!,
+        serveUrl: e.REMOTION_SERVE_URL!,
+        composition: opts.composition,
+        inputProps: opts.inputProps,
+        imageFormat: "png",
+        privacy: "no-acl",
+        maxRetries: 2,
+        timeoutInMilliseconds: 120_000,
+        downloadBehavior: { type: "play-in-browser" },
+        outName: { key: opts.outKey, bucketName: r2Bucket(), s3OutputProvider: r2OutputProvider() },
+      }),
+    { attempts: 3, delayMs: 3000, isRetryable: isTransientRemotionSiteError },
+  );
+  return { key: opts.outKey, sizeBytes: res.sizeInBytes, costUsd: res.estimatedPrice.accruedSoFar };
 }

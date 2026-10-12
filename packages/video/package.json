@@ -1,6 +1,6 @@
 {
   "name": "@ai-news/video",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
@@ -8,7 +8,9 @@
     ".": "./src/index.ts",
     "./compositions": "./src/compositions/index.ts",
     "./schema": "./src/schema.ts",
-    "./motion": "./src/motion.ts"
+    "./motion": "./src/motion.ts",
+    "./comic": "./src/comic.ts",
+    "./comic-view": "./src/comic-view.tsx"
   },
   "scripts": {
     "dev": "remotion studio src/index.ts",

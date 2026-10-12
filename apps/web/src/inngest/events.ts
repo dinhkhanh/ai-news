@@ -142,3 +142,46 @@ export const publicationCancelled = eventType("publication/cancelled", {
     publicationId: z.string(),
   }),
 });
+
+/** Comic studio (docs/COMIC.md §8): adapt the story into a script, or re-write one page (`pageId` + `instruction`). */
+export const comicAdaptRequested = eventType("comic/adapt.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    pageId: z.string().optional(),
+    instruction: z.string().max(1000).optional(),
+  }),
+});
+
+/** Comic studio: draw character sheets for the cast (missing ones, or `refs` again with an `instruction`). */
+export const comicCastRequested = eventType("comic/cast.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    refs: z.array(z.string()).max(40).optional(),
+    instruction: z.string().max(1000).optional(),
+  }),
+});
+
+/** Comic studio: draw panels (every panel without a picture, or `panelIds` again with an `instruction`), then letter them. */
+export const comicDrawRequested = eventType("comic/draw.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    panelIds: z.array(z.string()).max(400).optional(),
+    instruction: z.string().max(1000).optional(),
+  }),
+});
+
+/** Comic studio: render the current version's pages as PNG (Remotion `renderStillOnLambda`, composition `ComicPage`). */
+export const comicExportRequested = eventType("comic/export.requested", {
+  schema: z.object({
+    comicId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    exportId: z.string(),
+  }),
+});

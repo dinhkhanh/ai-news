@@ -1,13 +1,13 @@
 # Comic studio: design
 
-Status: **draft for review**, nothing implemented. Written 2026-10-12.
+Status: **accepted** 2026-10-12 (decisions in §13). M1 in progress.
 
 A standalone feature: a member pastes a story (plain text), picks or defines a style, a cast and the AI models,
 and the app produces a short comic, 5–10 pages by default or as many as asked. It shares the app's infrastructure
 (auth, workspaces, Claude client, Vertex image generation, R2, Inngest, cost and activity rows, Remotion Lambda)
 but none of the news pipeline: no article, no timeline, no publishing.
 
-Open questions that change the build are at the end (§13), each with a recommendation.
+Decisions taken on the open questions are at the end (§13).
 
 ---
 
@@ -221,27 +221,29 @@ are rows with `organization_id` null, readable by every workspace like `voice_pr
 
 ```
 comic_styles        id, organization_id (null = preset), name, prompt, negative, colour_mode ('colour'|'bw'),
-                    reference_keys text[], font, balloon_style, reading_direction, panel_density, storytelling_notes,
-                    created_by, created_at, updated_at
+                    storytelling_notes, reference_keys text[], font, reading_direction, swatch, position,
+                    created_by, created_at, updated_at                       -- 8 presets seeded by the migration
 comic_characters    id, organization_id, name, role, visual, personality, reference_keys text[],
                     created_by, created_at, updated_at
-comic_character_sheets
-                    id, organization_id, character_id → comic_characters, style_id → comic_styles,
-                    image_key, model, prompt, status ('draft'|'accepted'), created_at
-                    unique (character_id, style_id) where status = 'accepted'
-comics              id, organization_id, owner_id, title, story text, language, page_target int null (null = auto),
-                    format, reading_direction, style_id, style_snapshot jsonb, text_model, image_model,
-                    audience, options jsonb, state ('created'|'adapted'|'script_approved'|'drawing'|'drawn'|'exported'),
-                    current_version_id, busy_step, busy_progress, last_error, cost_usd numeric,
-                    lock_version, created_at, updated_at
-comic_cast          comic_id, character_id, role                      (pk comic_id + character_id)
+comics              id, organization_id, owner_id, title, story, language, page_target (null = auto, CHECK 1–40),
+                    format, reading_direction, style_id, style_snapshot jsonb, text_model, image_model, audience,
+                    options jsonb (dialogue, free, review, castIds, font, credit),
+                    state ('created'|'adapted'|'script_approved'|'drawing'|'drawn'|'exported'),
+                    current_version_id, busy_step, busy_progress, last_error, cost_usd, lock_version, timestamps
 comic_versions      id, organization_id, comic_id, parent_id, kind ('adapt'|'edit'|'draw'|'letter'),
-                    doc jsonb, changes jsonb, created_by, created_at  -- immutable, like `timelines`
-comic_images        id, organization_id, comic_id, panel_id, kind ('panel'|'sheet'|'sample'), image_key, width, height,
-                    model, prompt, refs text[], instruction, cost_usd, meta jsonb (faces, finishReason), created_at
+                    doc jsonb, changes jsonb, created_by, created_at        -- immutable, like `timelines`
+comic_images        id, organization_id, kind ('panel'|'sheet'|'sample'), comic_id, panel_id, character_id, style_id,
+                    status ('draft'|'accepted' for sheets only), image_key, width, height, model, prompt, refs text[],
+                    instruction, cost_usd, meta jsonb (aspect, faces), created_by, created_at
+                    unique (character_id, style_id) where kind = 'sheet' and status = 'accepted'
 comic_exports       id, organization_id, comic_id, version_id, kind ('png'|'pdf'|'webtoon'|'zip'),
-                    status, keys text[], error, created_by, created_at
+                    status ('queued'|'rendering'|'done'|'failed'), keys text[], error, created_by, timestamps
 ```
+
+As built (M1), two tables of the first draft were folded into others: the cast lives in the document
+(`doc.cast[]`, each member's `characterId` links a library character; proposed characters carry a `new:<slug>` ref
+until the script is approved, which creates them in `comic_characters`), and character sheets are `comic_images`
+rows of kind `sheet`.
 
 The **document** (`comic_versions.doc`, schema in `comic/schema.ts`) is the single source for the reader, editor and
 export: format + page size in px, style snapshot, cast snapshot, pages → panels (rect, `imageId` selected,
@@ -368,6 +370,20 @@ approval, render, QA, multi-channel logos, publishing) is reused unchanged and t
 - **Composition**: no new visual kind is needed for v1 of M4 (stills + Ken Burns + captions already exist). A later
   "panel reveal" transition (the next panel slides in along the page's reading order) would be a composition bump.
 
+### 11.2 M1 as built (2026-10-12)
+
+- Pure modules with tests: `packages/video/src/comic.ts` (document schema), `comic-view.tsx` (`ComicPageView`, the page
+  renderer shared by the app and the export), `apps/web/src/lib/comic/{models,layout,lettering,script,doc,prompts}.ts`.
+- Server: `lib/comic/{service,adapt,images,drawing,flow}.ts`; `media/generate.ts` now exposes `vertexImageAccess` and
+  `vertexGenerateImage` (reference images, any aspect ratio) for both the news stills and the comics.
+- Jobs: `comic-adapt`, `comic-cast`, `comic-draw` (sheets first, then panels four at a time, each picture written into
+  the document as it lands and re-lettered), `comic-export` (PNG per page via `renderStillOnLambda`).
+- UI: `/app/comics` (list), `/app/comics/new`, `/app/comics/[id]` with tabs Kịch bản / Nhân vật / Trang / Đọc / Xuất.
+- To switch it on: apply migration 0031, deploy `packages/video` 0.18.0 (composition `ComicPage`, needed by the
+  export), make sure the `google_veo` integration is on, then turn on flag `comics` in /admin/integrations.
+- Left for M2: style / character library pages (`/app/comics/styles`, `/app/comics/characters`), "Vẽ thử", uploading
+  one's own sheet, picking among a panel's variants, crop / pan, moving balloons by hand, the vision quality gate.
+
 ---
 
 ## 12. Risks
@@ -384,18 +400,15 @@ approval, render, QA, multi-channel logos, publishing) is reused unchanged and t
 
 ---
 
-## 13. Open questions (recommendation first)
+## 13. Decisions (2026-10-12)
 
-1. **Panel-by-panel or whole-page generation?** Recommended: **panel-by-panel**, composed by the app. Cheaper
-   redraws, exact layouts, editable lettering, any page format. Whole-page generation (Gemini Pro can draw a full
-   page) gives more "organic" layouts but makes every fix a full-page redraw and bakes the gutters in. Could be added
-   later as a style option.
-2. **Script review mandatory?** Recommended: **yes by default**, with a "Vẽ luôn" (skip review) checkbox for people
-   who trust it. It is the cheapest place to fix a story.
-3. **Which image models in v1?** Recommended: **Gemini 3.1 Flash Image + Gemini 3 Pro Image** (Vertex, nothing new
-   to contract). OpenAI / others in M3 once someone needs them.
-4. **Who can use it?** Recommended: any workspace writer when the flag is on, same as voices and sounds; admins tune
-   the quota.
-5. **Page formats to offer.** Recommended: `A4 dọc`, `Truyện tranh Mỹ (6.625×10.25")`, `Manga B6`, `Webtoon (cuộn dọc)`,
-   `Vuông 1:1` (social carousel), `9:16` (stories). Print-ready bleed / CMYK is out of scope.
-6. ~~**Motion comic (M4)** — wanted at all?~~ **Decided: yes**, phase M4 (§11.1).
+All six questions are settled; the recommendations were taken.
+
+1. **Panel-by-panel generation**, composed by the app: cheaper redraws, exact layouts, editable lettering, any page
+   format. Whole-page generation may come back later as a style option.
+2. **Script review on by default**, with a "Vẽ luôn" (skip review) checkbox.
+3. **Image models in v1: Gemini 3.1 Flash Image + Gemini 3 Pro Image** (Vertex). OpenAI / others in M3.
+4. **Any workspace writer** can use it while flag `comics` is on; admins tune the `comic_images` quota.
+5. **Page formats**: `A4 dọc`, `Truyện tranh Mỹ (6.625×10.25")`, `Manga B6`, `Webtoon (cuộn dọc)`, `Vuông 1:1`, `9:16`.
+   No print bleed / CMYK.
+6. **Motion comic: yes**, phase M4 (§11.1).

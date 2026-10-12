@@ -2,6 +2,7 @@ import { AppNav, MobileNav } from "@/components/app-nav";
 import { TopBar } from "@/components/top-bar";
 import { UserMenu } from "@/components/user-menu";
 import { cookies } from "next/headers";
+import { flagEnabled } from "@/lib/flags";
 import { navExpanded } from "@/lib/nav-prefs";
 import { requireSession } from "@/lib/session";
 
@@ -9,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await requireSession();
   const impersonated = Boolean((session.session as { impersonatedBy?: string | null }).impersonatedBy);
   const admin = session.user.role === "admin";
-  const expanded = navExpanded(await cookies());
+  const [expanded, comics] = [navExpanded(await cookies()), await flagEnabled("comics")];
   return (
     // The reference shell: a grey frame carrying the icon rail, and the page as a white panel inset into it.
     <div className="flex min-h-dvh flex-col bg-sidebar">
@@ -19,7 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       ) : null}
       <div className="flex flex-1">
-        <AppNav expanded={expanded} />
+        <AppNav expanded={expanded} comics={comics} />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar area="app" admin={admin}>
             <UserMenu name={session.user.name} email={session.user.email} impersonated={impersonated} />
@@ -28,7 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <main className="flex-1 overflow-x-clip bg-background px-3 pt-4 pb-24 sm:border-l sm:px-6 sm:pt-6 sm:pb-8">{children}</main>
         </div>
       </div>
-      <MobileNav admin={admin} />
+      <MobileNav admin={admin} comics={comics} />
     </div>
   );
 }

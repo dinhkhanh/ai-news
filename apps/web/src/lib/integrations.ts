@@ -25,6 +25,7 @@ export const FEATURE_FLAGS = [
   { key: "ai_media", label: "AI media (Gemini image on Vertex)", description: "Last tier of the visual priority: generate stills only for shots the article, other outlets and stock could not fill. Subject to the daily ai_media quota and the Vertex spend cap." },
   { key: "face_guard", defaultOn: true, label: "Face guard (Cloud Vision)", description: "On by default. Face detection and automatic alignment of stills before they enter a video: faces must not be cropped by the 9:16 frame, must not sit under text overlays or platform UI, and are centred on the upper-third line. Needs the Cloud Vision API on the Google service account's project." },
   { key: "originality_guard", defaultOn: true, label: "Originality guard (Meta unoriginal-content rules)", description: "On by default. Builds keep third-party video footage (web video, a video project's own source video) to at most half of the running time and never more than two 5 s shots in a row, so the video stays our commentary with footage interspersed, as Meta's original content guidelines ask; the shots it frees go to other outlets' photos, stock, AI stills or motion graphics. Also scans every downloaded clip for watermarks (3 frames through the media Lambda, Cloud Vision text + logo detection, ~$0.01 per clip) and drops clips carrying another app's or channel's mark. Off = footage fills every shot it can, unscanned, as before." },
+  { key: "comics", label: "Comic studio", description: "Truyện tranh (/app/comics): a story typed in becomes a short comic. Claude writes the script, Gemini on Vertex draws the panels (google_veo integration and its spend cap), metered by the daily comic_images quota (docs/COMIC.md)." },
   { key: "scheduling", label: "Scheduled publishing", description: "Allow publish-at-time via delayed events." },
   { key: "publish_youtube", label: "Publish: YouTube Shorts", description: "Uploads via the Internal Google OAuth client (youtube.upload scope)." },
   { key: "publish_facebook", label: "Publish: Facebook Reels", description: "Needs the Meta app with publish_video approved (or app-role testers)." },
@@ -43,4 +44,5 @@ export const QUOTA_RESOURCES = [
   { key: "ai_media", label: "AI media generations / day", defaultUser: 5 },
   { key: "render_minutes", label: "Render minutes / day", defaultUser: 30 },
   { key: "publishes", label: "Publishes / day", defaultUser: 10 },
+  { key: "comic_images", label: "Comic pictures / day (panels, character sheets, style samples)", defaultUser: 120 },
 ] as const;

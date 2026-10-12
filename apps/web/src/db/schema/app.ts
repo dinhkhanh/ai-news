@@ -788,3 +788,179 @@ export const soundCollectionItems = pgTable(
     uniqueIndex("sound_collection_items_unique_idx").on(t.collectionId, t.provider, t.providerId),
   ],
 );
+
+// ---------- comic studio (docs/COMIC.md, migration 0031) ----------
+
+/**
+ * Comic art styles: platform presets (`organization_id` null, readable by every workspace) and a workspace's own.
+ * A comic copies its style into `comics.style_snapshot`, so editing a style later never changes a comic.
+ */
+export const comicStyles = pgTable(
+  "comic_styles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id").references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** English art direction for the image model: medium, line, colour, shading. */
+    prompt: text("prompt").notNull(),
+    negative: text("negative").notNull().default(""),
+    /** colour | bw (CHECK in SQL) */
+    colourMode: text("colour_mode").notNull().default("colour"),
+    /** How the style tells a story (pacing, silent panels…), given to the adaptation. */
+    storytellingNotes: text("storytelling_notes").notNull().default(""),
+    /** Style samples sent as reference images with every panel (R2 keys under `library/comics/<org>/`). */
+    referenceKeys: text("reference_keys").array().notNull().default(sql`'{}'::text[]`),
+    /** Lettering font id (`COMIC_FONTS`). */
+    font: text("font").notNull().default("itim"),
+    /** ltr | rtl: the default reading direction of comics in this style. */
+    readingDirection: text("reading_direction").notNull().default("ltr"),
+    /** CSS background of the swatch on the style picker. */
+    swatch: text("swatch").notNull().default("#e4e4e7"),
+    position: integer("position").notNull().default(0),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("comic_styles_org_idx").on(t.organizationId, t.position)],
+);
+
+/** Reusable comic characters of a workspace: what they look like (English, for the image model) and how they speak. */
+export const comicCharacters = pgTable(
+  "comic_characters",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    name: text("name").notNull(),
+    role: text("role").notNull().default(""),
+    visual: text("visual").notNull().default(""),
+    personality: text("personality").notNull().default(""),
+    referenceKeys: text("reference_keys").array().notNull().default(sql`'{}'::text[]`),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("comic_characters_org_idx").on(t.organizationId, t.name)],
+);
+
+/** One comic: the story, its options and the pointer to its current document version. */
+export const comics = pgTable(
+  "comics",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    title: text("title"),
+    story: text("story").notNull(),
+    language: languageEnum("language").notNull().default("vi"),
+    /** null = automatic (5–10 pages from the story's length). */
+    pageTarget: integer("page_target"),
+    /** `PAGE_FORMATS` id. */
+    format: text("format").notNull().default("a4"),
+    readingDirection: text("reading_direction").notNull().default("ltr"),
+    styleId: uuid("style_id").references(() => comicStyles.id, { onDelete: "set null" }),
+    /** `ComicStyle` (lib/comic/prompts.ts) as it was when the comic was created. */
+    styleSnapshot: jsonb("style_snapshot").$type<Record<string, unknown>>().notNull(),
+    textModel: text("text_model").notNull(),
+    imageModel: text("image_model").notNull(),
+    /** kids | general | adult */
+    audience: text("audience").notNull().default("general"),
+    /** dialogue density, free adaptation, review before drawing, chosen cast ids… */
+    options: jsonb("options").$type<Record<string, unknown>>().notNull().default({}),
+    /** created | adapted | script_approved | drawing | drawn | exported (CHECK in SQL) */
+    state: text("state").notNull().default("created"),
+    currentVersionId: uuid("current_version_id"),
+    busyStep: text("busy_step"),
+    busyProgress: jsonb("busy_progress").$type<BusyProgress>(),
+    lastError: text("last_error"),
+    /** Everything spent on this comic (adaptation, sheets, panels, exports). */
+    costUsd: numeric("cost_usd", { precision: 10, scale: 4 }).notNull().default("0"),
+    lockVersion: integer("lock_version").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("comics_org_idx").on(t.organizationId, t.createdAt)],
+);
+
+/** Immutable versions of a comic's document (`ComicDoc`), like `timelines`: every change is a new row. */
+export const comicVersions = pgTable(
+  "comic_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    comicId: uuid("comic_id")
+      .notNull()
+      .references(() => comics.id, { onDelete: "cascade" }),
+    parentId: uuid("parent_id"),
+    /** adapt | edit | draw | letter */
+    kind: text("kind").notNull(),
+    doc: jsonb("doc").$type<Record<string, unknown>>().notNull(),
+    changes: jsonb("changes").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("comic_versions_comic_idx").on(t.comicId, t.createdAt)],
+);
+
+/**
+ * Every picture the studio generated: panels (of a comic), character sheets (per character × style, reusable by
+ * later comics once `accepted`) and style samples.
+ */
+export const comicImages = pgTable(
+  "comic_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    /** panel | sheet | sample (CHECK in SQL) */
+    kind: text("kind").notNull(),
+    comicId: uuid("comic_id").references(() => comics.id, { onDelete: "cascade" }),
+    panelId: text("panel_id"),
+    characterId: uuid("character_id").references(() => comicCharacters.id, { onDelete: "cascade" }),
+    styleId: uuid("style_id").references(() => comicStyles.id, { onDelete: "cascade" }),
+    /** Sheets: draft | accepted; null for panels and samples. */
+    status: text("status"),
+    imageKey: text("image_key").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    model: text("model").notNull(),
+    prompt: text("prompt").notNull(),
+    refs: text("refs").array().notNull().default(sql`'{}'::text[]`),
+    instruction: text("instruction"),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 6 }).notNull().default("0"),
+    meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("comic_images_comic_idx").on(t.comicId, t.panelId),
+    index("comic_images_sheet_idx").on(t.characterId, t.styleId, t.createdAt),
+    /** One accepted sheet per character and style. */
+    uniqueIndex("comic_images_one_accepted_sheet_idx").on(t.characterId, t.styleId).where(sql`${t.kind} = 'sheet' and ${t.status} = 'accepted'`),
+  ],
+);
+
+/** Page exports of a comic version (PNG per page in M1; PDF / webtoon strip / zip in M3). */
+export const comicExports = pgTable(
+  "comic_exports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    comicId: uuid("comic_id")
+      .notNull()
+      .references(() => comics.id, { onDelete: "cascade" }),
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => comicVersions.id, { onDelete: "cascade" }),
+    /** png | pdf | webtoon | zip */
+    kind: text("kind").notNull(),
+    /** queued | rendering | done | failed */
+    status: text("status").notNull().default("queued"),
+    keys: text("keys").array().notNull().default(sql`'{}'::text[]`),
+    error: text("error"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("comic_exports_comic_idx").on(t.comicId, t.createdAt)],
+);

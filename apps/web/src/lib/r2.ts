@@ -52,6 +52,10 @@ export const r2Key = {
   article: (org: string, project: string, name: string) => `articles/${org}/${project}/${name}`,
   media: (org: string, project: string, name: string) => `media/${org}/${project}/${name}`,
   library: (name: string) => `library/${name}`,
+  /** Comic studio (docs/COMIC.md §7): a comic's panels, reusable sheets and style samples, page exports. */
+  comic: (org: string, comic: string, name: string) => `media/${org}/comics/${comic}/${name}`,
+  comicLibrary: (org: string, name: string) => `library/comics/${org}/${name}`,
+  comicExport: (org: string, comic: string, name: string) => `renders/comics/${org}/${comic}/${name}`,
   test: (name: string) => `tmp/_test/${name}`,
 };
 
