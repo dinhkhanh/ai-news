@@ -19,6 +19,8 @@ export const MODELS = {
   research: "claude-opus-5-5",
   /** Comic studio adaptation default (lib/comic/adapt.ts); each comic may pick another model from `TEXT_MODELS`. */
   comic: "claude-opus-5-5",
+  /** Comic quality gate (lib/comic/quality.ts): compares a drawn panel with its characters' sheets. */
+  comicCheck: "claude-sonnet-5-5",
 } as const;
 
 /** USD per million tokens (Anthropic first-party rates). Cache write = 1.25x input, cache read = 0.1x input. */

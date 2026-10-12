@@ -6,9 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { formatUsd, imageModel } from "@/lib/comic/models";
-import type { ComicRow } from "@/lib/comic/service";
-import { appendPanel, approveAndDraw, castAction, changeLayout, readaptComic, removePage, removePanel, rewritePage, savePanel } from "../actions";
+import { formatUsd, IMAGE_MODELS, imageModel, TEXT_MODELS } from "@/lib/comic/models";
+import { optionsOf, type ComicRow } from "@/lib/comic/service";
+import { appendPanel, approveAndDraw, castAction, changeLayout, readaptComic, removePage, removePanel, rewritePage, saveComicSettings, savePanel } from "../actions";
 import { KIND_LABEL, LAYOUT_LABEL, SHOT_LABEL, SIZE_LABEL } from "../labels";
 
 /**
@@ -192,8 +192,54 @@ export function ScriptTab({ comic, doc, writer, busy, estimate }: { comic: Comic
             ) : null}
           </CardContent>
         </Card>
+
+        {writer ? <SettingsCard comic={comic} locked={locked} /> : null}
       </aside>
     </div>
+  );
+}
+
+/** Models of this comic (M3): switching applies to the next drawings; the panels already drawn keep their pictures. */
+function SettingsCard({ comic, locked }: { comic: ComicRow; locked: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Mô hình</CardTitle>
+        <CardDescription>Đổi được bất cứ lúc nào không có bước đang chạy; khung đã vẽ giữ nguyên hình.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ActionForm action={saveComicSettings} className="space-y-3">
+          <input type="hidden" name="comicId" value={comic.id} />
+          <div className="space-y-1.5">
+            <Label htmlFor="set-image">Vẽ tranh</Label>
+            <NativeSelect id="set-image" name="imageModel" defaultValue={imageModel(comic.imageModel).id} fieldSize="sm" className="w-full" disabled={locked}>
+              {IMAGE_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} · {formatUsd(m.usdPerImage)}/ảnh
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="set-text">Viết kịch bản</Label>
+            <NativeSelect id="set-text" name="textModel" defaultValue={comic.textModel} fieldSize="sm" className="w-full" disabled={locked}>
+              {TEXT_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" name="qualityGate" defaultChecked={Boolean(optionsOf(comic).qualityGate)} className="mt-0.5 size-4" disabled={locked} />
+            <span>Kiểm tra chất lượng bằng Claude, vẽ lại một lần khung lỗi (~$0.01–0.02 mỗi khung)</span>
+          </label>
+          <Button type="submit" size="sm" variant="outline" className="w-full" disabled={locked}>
+            Lưu
+          </Button>
+        </ActionForm>
+      </CardContent>
+    </Card>
   );
 }
 

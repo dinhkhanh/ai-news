@@ -1,18 +1,22 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { and, eq, gte, sum } from "drizzle-orm";
 import { imageSize } from "image-size";
-import { schema } from "@/db";
+import { db, schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity, recordUsageCost } from "@/lib/activity";
 import { detectFaces } from "@/lib/media/faces";
 import { USAGE_PROVIDER, vertexGenerateImage } from "@/lib/media/generate";
 import { getObjectBuffer, putObject, r2Key } from "@/lib/r2";
-import { imageCostUsd, imageModel } from "./models";
+import { readSecret } from "@/lib/vault";
+import { imageCostUsd, imageModel, openaiImageCostUsd, openaiSize } from "./models";
+import { openaiGenerateImage } from "./openai-image";
 import type { Ctx } from "./service";
 
 /**
  * Drawing for the comic studio (docs/COMIC.md §5, §6): one picture from the comic's image model with its reference
- * images, stored in R2 and in `comic_images`, metered (`usage_costs` + one `quota.comic_images` event). Panels also
+ * images (Gemini on Vertex or GPT Image on OpenAI, by the model's provider), stored in R2 and in `comic_images`,
+ * metered (`usage_costs` under the provider's name + one `quota.comic_images` event). Panels also
  * get their faces detected (Cloud Vision), which the lettering keeps the balloons away from.
  */
 
@@ -27,7 +31,8 @@ export type DrawRequest = {
   prompt: string;
   refKeys: string[];
   aspect: string;
-  projectId: string;
+  /** Vertex project (from `comicDrawAccess`); null for OpenAI models. */
+  projectId: string | null;
   comicId?: string | null;
   panelId?: string | null;
   characterId?: string | null;
@@ -44,23 +49,63 @@ function keyFor(ctx: Ctx, r: DrawRequest, ext: string) {
   return r2Key.comicLibrary(ctx.organizationId, `samples/${r.styleId ?? "x"}/${name}`);
 }
 
+/** USD recorded under `provider` since the first of the month (UTC), for an integration's monthly spend cap. */
+async function spentThisMonth(provider: string) {
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const [{ usd }] = await db
+    .select({ usd: sum(schema.usageCosts.costUsd) })
+    .from(schema.usageCosts)
+    .where(and(eq(schema.usageCosts.provider, provider), gte(schema.usageCosts.createdAt, monthStart)));
+  return Number(usd ?? 0);
+}
+
+/** Whether GPT Image can be called: the `openai` integration is on, its key is in Vault, its monthly cap not reached. */
+export async function openaiImageAccess(): Promise<{ ok: true; apiKey: string } | { ok: false; reason: string }> {
+  const row = await db.query.integrations.findFirst({ where: eq(schema.integrations.provider, "openai") });
+  if (!row?.enabled) return { ok: false, reason: "tích hợp OpenAI chưa bật" };
+  const apiKey = (row.vaultRef ? await readSecret(row.vaultRef) : null)?.trim();
+  if (!apiKey) return { ok: false, reason: "thiếu API key OpenAI (/admin/integrations)" };
+  const cap = Number(row.spendCapMonthlyUsd ?? 0);
+  if (cap > 0 && (await spentThisMonth("openai")) >= cap) return { ok: false, reason: `đã chạm mức chi tháng $${cap} của OpenAI` };
+  return { ok: true, apiKey };
+}
+
+type Drawn = { bytes: Buffer; mime: string; costUsd: number; provider: string; meta: Record<string, unknown> };
+
+async function draw(r: DrawRequest, refs: { bytes: Buffer; mime: string }[]): Promise<Drawn> {
+  const model = imageModel(r.modelId);
+  if (model.provider === "openai") {
+    // The key is read here, not passed through the job's step state.
+    const access = await openaiImageAccess();
+    if (!access.ok) throw new Error(access.reason);
+    const size = openaiSize(r.aspect);
+    const img = await openaiGenerateImage({ apiKey: access.apiKey, model: model.apiId, prompt: r.prompt, refs, size, quality: model.quality ?? "medium" });
+    return { bytes: img.bytes, mime: img.mime, costUsd: openaiImageCostUsd(model.id, img.usage, refs.length), provider: "openai", meta: { size, quality: model.quality ?? "medium", usage: img.usage } };
+  }
+  if (!r.projectId) throw new Error("thiếu Project ID của Google Vertex");
+  const img = await vertexGenerateImage({ model: model.apiId, prompt: r.prompt, refs, aspectRatio: r.aspect, imageSize: model.imageSize ?? "1K", projectId: r.projectId });
+  return { bytes: img.bytes, mime: img.mime, costUsd: imageCostUsd(model.id, img.promptTokens), provider: USAGE_PROVIDER, meta: { tokens: img.tokens } };
+}
+
 export async function drawComicImage(ctx: Ctx, r: DrawRequest): Promise<DrawnImage> {
   const model = imageModel(r.modelId);
   const refs = await Promise.all(r.refKeys.map(async (key) => ({ bytes: await getObjectBuffer(key), mime: mimeOf(key) })));
-  const img = await vertexGenerateImage({ model: model.vertexId, prompt: r.prompt, refs, aspectRatio: r.aspect, imageSize: model.imageSize, projectId: r.projectId });
+  const img = await draw(r, refs);
   const size = imageSize(img.bytes);
   const key = keyFor(ctx, r, extOf(img.mime));
   await putObject(key, img.bytes, img.mime);
-  const costUsd = imageCostUsd(model.id, img.promptTokens);
+  const costUsd = img.costUsd;
   await recordUsageCost({
-    provider: USAGE_PROVIDER,
-    resource: model.vertexId,
+    provider: img.provider,
+    resource: model.apiId,
     units: 1,
     unitType: "images",
     costUsd,
     userId: ctx.userId,
     organizationId: ctx.organizationId,
-    meta: { comicId: r.comicId ?? null, kind: r.kind, panelId: r.panelId ?? null, characterId: r.characterId ?? null, refs: r.refKeys.length, tokens: img.tokens },
+    meta: { comicId: r.comicId ?? null, kind: r.kind, panelId: r.panelId ?? null, characterId: r.characterId ?? null, refs: r.refKeys.length, ...img.meta },
   });
   await logActivity({ actorId: ctx.userId, organizationId: ctx.organizationId, type: "quota.comic_images", payload: { comicId: r.comicId ?? null, kind: r.kind, model: model.id } });
 

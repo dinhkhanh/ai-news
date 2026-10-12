@@ -1,6 +1,7 @@
 import { Composition } from "remotion";
 import { sampleComicPage } from "./comic-sample";
 import { ComicPageStill, type ComicPageStillProps } from "./compositions/ComicPage";
+import { ComicStripStill, type ComicStripStillProps } from "./compositions/ComicStrip";
 import { News } from "./compositions/News";
 import { TestCard } from "./compositions/TestCard";
 import { OUTPUT, testCardSchema, timelineSchema, type Timeline } from "./schema";
@@ -64,6 +65,17 @@ export const RemotionRoot: React.FC = () => (
       durationInFrames={1}
       defaultProps={sampleComicPage as ComicPageStillProps}
       calculateMetadata={({ props }) => ({ width: Math.round(props.format.width), height: Math.round(props.page.height), durationInFrames: 1, fps: 1 })}
+    />
+    {/* One file of the webtoon export: slices of pages at the strip width (planStrip in comic.ts). */}
+    <Composition
+      id="ComicStrip"
+      component={ComicStripStill}
+      width={sampleComicPage.format.width}
+      height={sampleComicPage.page.height}
+      fps={1}
+      durationInFrames={1}
+      defaultProps={{ format: sampleComicPage.format, font: sampleComicPage.font, width: sampleComicPage.format.width, height: sampleComicPage.page.height, srcs: sampleComicPage.srcs, pieces: [{ page: sampleComicPage.page, srcTop: 0, dstTop: 0, dstHeight: sampleComicPage.page.height, credit: null }] } as ComicStripStillProps}
+      calculateMetadata={({ props }) => ({ width: Math.round(props.width), height: Math.round(props.height), durationInFrames: 1, fps: 1 })}
     />
   </>
 );

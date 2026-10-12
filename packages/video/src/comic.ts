@@ -185,3 +185,88 @@ export function pictureToPage(frame: Rect, img: { width: number; height: number 
 export const BALLOON_LINE_HEIGHT = 1.2;
 /** Inner padding of a balloon, as a multiple of the font size. */
 export const BALLOON_PADDING = 0.7;
+
+/** Webtoon export (docs/COMIC.md §2.7): one column this wide, cut into files no taller than this. */
+export const STRIP_WIDTH = 800;
+export const STRIP_MAX_HEIGHT = 8000;
+
+/** A slice of a page drawn into a strip file: `src*` in page px, `dst*` in px of the file. */
+export type StripPiece = { page: number; srcTop: number; srcHeight: number; dstTop: number; dstHeight: number };
+export type StripPart = { height: number; pieces: StripPiece[] };
+
+/**
+ * Plans the webtoon strip: every page scaled to `width`, stacked with a white gap between pages (none for the
+ * webtoon format, whose pages already run on), cut into parts of at most `maxHeight`. Cuts fall where no panel,
+ * balloon or tail is (between pages, or in a gutter), as low as possible; only a single panel taller than a part
+ * is cut through.
+ */
+export function planStrip(doc: Pick<ComicDoc, "format" | "pages">, opts: { width?: number; maxHeight?: number } = {}): StripPart[] {
+  const width = opts.width ?? STRIP_WIDTH;
+  const maxHeight = opts.maxHeight ?? STRIP_MAX_HEIGHT;
+  if (!doc.pages.length) return [];
+  const s = width / doc.format.width;
+  const gap = doc.format.scroll ? 0 : Math.round(width * 0.05);
+  const pad = pageGeometry(doc.format).border * 2;
+  const tops: number[] = [];
+  const heights: number[] = [];
+  const busy: [number, number][] = [];
+  let y = 0;
+  doc.pages.forEach((page, i) => {
+    if (i) y += gap;
+    const h = Math.round(page.height * s);
+    tops.push(y);
+    heights.push(h);
+    // What must not be cut through (page px), padded for borders and strokes, mapped to strip px.
+    const ranges: [number, number][] = [];
+    for (const panel of page.panels) {
+      ranges.push([panel.rect.y, panel.rect.y + panel.rect.h]);
+      for (const b of panel.lettering) {
+        if (!b.rect) continue;
+        const ys = [b.rect.y, b.rect.y + b.rect.h, ...(b.tail ? [b.tail.y] : [])];
+        ranges.push([Math.min(...ys), Math.max(...ys)]);
+      }
+    }
+    for (const [a, b] of ranges) busy.push([y + Math.max(0, (a - pad) * s), y + Math.min(h, (b + pad) * s)]);
+    y += h;
+  });
+  const total = y;
+  busy.sort((a, b) => a[0] - b[0]);
+  // Free ranges = the complement of the merged busy ranges.
+  const free: [number, number][] = [];
+  let cursor = 0;
+  for (const [a, b] of busy) {
+    if (a > cursor) free.push([cursor, a]);
+    cursor = Math.max(cursor, b);
+  }
+  if (cursor < total) free.push([cursor, total]);
+
+  const cuts: number[] = [];
+  let start = 0;
+  const minPart = maxHeight / 4;
+  while (total - start > maxHeight) {
+    const limit = start + maxHeight;
+    let best = -1;
+    for (const [a, b] of free) {
+      if (a > limit) break;
+      const c = b <= limit ? (a + b) / 2 : limit;
+      if (c > start + minPart && c > best) best = c;
+    }
+    const cut = Math.round(best > 0 ? best : limit);
+    cuts.push(cut);
+    start = cut;
+  }
+  const bounds = [0, ...cuts, total];
+  const parts: StripPart[] = [];
+  for (let p = 0; p < bounds.length - 1; p++) {
+    const [from, to] = [bounds[p], bounds[p + 1]];
+    const pieces: StripPiece[] = [];
+    doc.pages.forEach((_, i) => {
+      const a = Math.max(from, tops[i]);
+      const b = Math.min(to, tops[i] + heights[i]);
+      if (b - a < 1) return;
+      pieces.push({ page: i, srcTop: (a - tops[i]) / s, srcHeight: (b - a) / s, dstTop: a - from, dstHeight: b - a });
+    });
+    parts.push({ height: to - from, pieces });
+  }
+  return parts;
+}

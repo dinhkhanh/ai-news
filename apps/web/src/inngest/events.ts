@@ -185,5 +185,7 @@ export const comicExportRequested = eventType("comic/export.requested", {
     organizationId: z.string(),
     requestedBy: z.string(),
     exportId: z.string(),
+    /** Every export row of this request, one per kind (M3: png / pdf / webtoon / zip share one page render); default `[exportId]`. */
+    exportIds: z.array(z.string()).max(4).optional(),
   }),
 });

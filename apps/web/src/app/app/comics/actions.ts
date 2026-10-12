@@ -15,7 +15,7 @@ import { pageFormat } from "@/lib/comic/layout";
 import { DEFAULT_IMAGE_MODEL, DEFAULT_TEXT_MODEL, isImageModel, isTextModel } from "@/lib/comic/models";
 import type { ComicStyle } from "@/lib/comic/prompts";
 import { STORY_LIMITS } from "@/lib/comic/script";
-import { claimBusy, clearBusy, comicDrawAccess, loadComic, updateDoc } from "@/lib/comic/service";
+import { claimBusy, clearBusy, comicDrawAccess, loadComic, optionsOf, updateDoc } from "@/lib/comic/service";
 import { flagEnabled } from "@/lib/flags";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 
@@ -65,11 +65,11 @@ export async function createComic(_: ActionState, fd: FormData): Promise<ActionS
     const direction = pick(str(fd, "readingDirection"), ["ltr", "rtl", "style"] as const, "style");
     const readingDirection = direction === "style" ? (style.readingDirection === "rtl" ? "rtl" : "ltr") : direction;
     const review = fd.get("review") === "on";
-    const options = { dialogue, free: fd.get("free") === "on", review, castIds: cast.map((c) => c.id), font: style.font, credit: true };
+    const options = { dialogue, free: fd.get("free") === "on", review, castIds: cast.map((c) => c.id), font: style.font, credit: true, qualityGate: fd.get("qualityGate") === "on" };
 
     // Without review the drawing follows at once: refuse now rather than after the script was paid for.
     if (!review) {
-      const access = await comicDrawAccess(ws.userId);
+      const access = await comicDrawAccess(ws.userId, imageModel);
       if (!access.ok) throw new Error(access.reason);
     }
     const [comic] = await withOrgContext(ws, (tx) =>
@@ -82,7 +82,7 @@ export async function createComic(_: ActionState, fd: FormData): Promise<ActionS
         .returning({ id: schema.comics.id }),
     );
     await claimBusy(ws, comic.id, "adapt");
-    await log("comic.created", { comicId: comic.id, chars: story.length, pages, format, style: style.name, textModel, imageModel, audience, dialogue, review, cast: cast.length });
+    await log("comic.created", { comicId: comic.id, chars: story.length, pages, format, style: style.name, textModel, imageModel, audience, dialogue, review, qualityGate: options.qualityGate, cast: cast.length });
     await inngest.send(comicAdaptRequested.create({ comicId: comic.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
     target = comicPath(comic.id);
     return review ? "Đã tạo truyện; Claude đang viết kịch bản…" : "Đã tạo truyện; viết kịch bản rồi vẽ luôn…";
@@ -92,15 +92,34 @@ export async function createComic(_: ActionState, fd: FormData): Promise<ActionS
 }
 
 /** Runs `fn` on a comic of the workspace (with its row loaded), then refreshes its page. */
-async function onComic(fd: FormData, fn: (w: Awaited<ReturnType<typeof writer>>, comicId: string) => Promise<string>) {
+async function onComic(fd: FormData, fn: (w: Awaited<ReturnType<typeof writer>>, comicId: string, loaded: NonNullable<Awaited<ReturnType<typeof loadComic>>>) => Promise<string>) {
   return run(async () => {
     const w = await writer();
     const comicId = str(fd, "comicId");
     const loaded = await loadComic(w.ws, comicId);
     if (!loaded) throw new Error("Không tìm thấy truyện này");
-    const message = await fn(w, comicId);
+    const message = await fn(w, comicId, loaded);
     revalidatePath(`/app/comics/${comicId}`);
     return message;
+  });
+}
+
+/** The comic's models and quality gate (M3): the next drawings and adaptations use them; pictures already drawn stay. */
+export async function saveComicSettings(_: ActionState, fd: FormData) {
+  return onComic(fd, async ({ ws, log }, comicId, { comic }) => {
+    if (comic.busyStep) throw new Error("Đợi bước đang chạy xong rồi đổi mô hình");
+    const textModel = isTextModel(str(fd, "textModel")) ? str(fd, "textModel") : comic.textModel;
+    const imageModel = isImageModel(str(fd, "imageModel")) ? str(fd, "imageModel") : comic.imageModel;
+    const qualityGate = fd.get("qualityGate") === "on";
+    const before = { textModel: comic.textModel, imageModel: comic.imageModel, qualityGate: Boolean(optionsOf(comic).qualityGate) };
+    await withOrgContext(ws, (tx) =>
+      tx
+        .update(schema.comics)
+        .set({ textModel, imageModel, options: { ...optionsOf(comic), qualityGate } })
+        .where(and(eq(schema.comics.id, comicId), eq(schema.comics.organizationId, ws.organizationId))),
+    );
+    await log("comic.settings_changed", { comicId, before, after: { textModel, imageModel, qualityGate } });
+    return imageModel !== before.imageModel ? "Đã đổi mô hình: các khung vẽ sau dùng mô hình mới" : "Đã lưu";
   });
 }
 
@@ -224,8 +243,8 @@ export async function castAction(_: ActionState, fd: FormData) {
 
 /** "Duyệt & vẽ": the script is final, new characters join the library, the sheets and panels are drawn. */
 export async function approveAndDraw(_: ActionState, fd: FormData) {
-  return onComic(fd, async ({ ws, log }, comicId) => {
-    const access = await comicDrawAccess(ws.userId);
+  return onComic(fd, async ({ ws, log }, comicId, { comic }) => {
+    const access = await comicDrawAccess(ws.userId, comic.imageModel);
     if (!access.ok) throw new Error(access.reason);
     const { newCharacters } = await approveScript(ws, comicId);
     await claimBusy(ws, comicId, "draw");
@@ -236,8 +255,8 @@ export async function approveAndDraw(_: ActionState, fd: FormData) {
 }
 
 export async function drawPanels(_: ActionState, fd: FormData) {
-  return onComic(fd, async ({ ws, log }, comicId) => {
-    const access = await comicDrawAccess(ws.userId);
+  return onComic(fd, async ({ ws, log }, comicId, { comic }) => {
+    const access = await comicDrawAccess(ws.userId, comic.imageModel);
     if (!access.ok) throw new Error(access.reason);
     const panelId = str(fd, "panelId");
     const instruction = str(fd, "instruction").slice(0, 1000) || undefined;
@@ -251,8 +270,8 @@ export async function drawPanels(_: ActionState, fd: FormData) {
 }
 
 export async function drawSheets(_: ActionState, fd: FormData) {
-  return onComic(fd, async ({ ws, log }, comicId) => {
-    const access = await comicDrawAccess(ws.userId);
+  return onComic(fd, async ({ ws, log }, comicId, { comic }) => {
+    const access = await comicDrawAccess(ws.userId, comic.imageModel);
     if (!access.ok) throw new Error(access.reason);
     const ref = str(fd, "ref");
     const instruction = str(fd, "instruction").slice(0, 1000) || undefined;
@@ -273,24 +292,36 @@ export async function acceptSheet(_: ActionState, fd: FormData) {
   });
 }
 
-export async function exportPng(_: ActionState, fd: FormData) {
+const EXPORT_KINDS = ["png", "pdf", "webtoon", "zip"] as const;
+
+/** Export (docs/COMIC.md §2.7): the kinds ticked, one row each; "zip" means all of them in one archive too. */
+export async function exportComic(_: ActionState, fd: FormData) {
   return onComic(fd, async ({ ws, log }, comicId) => {
+    const picked = fd.getAll("kind").map(String);
+    const kinds = picked.includes("zip") ? [...EXPORT_KINDS] : EXPORT_KINDS.filter((k) => picked.includes(k));
+    if (!kinds.length) throw new Error("Chọn ít nhất một định dạng");
     const loaded = await loadComic(ws, comicId);
     if (!loaded?.version) throw new Error("Truyện chưa có trang nào");
-    await claimBusy(ws, comicId, "export", "Đang xuất trang…");
+    await claimBusy(ws, comicId, "export", "Đang xuất…");
     try {
-      const [exp] = await withOrgContext(ws, (tx) =>
-        tx.insert(schema.comicExports).values({ organizationId: ws.organizationId, comicId, versionId: loaded.version!.id, kind: "png", createdBy: ws.userId }).returning({ id: schema.comicExports.id }),
+      const rows = await withOrgContext(ws, (tx) =>
+        tx
+          .insert(schema.comicExports)
+          .values(kinds.map((kind) => ({ organizationId: ws.organizationId, comicId, versionId: loaded.version!.id, kind, createdBy: ws.userId })))
+          .returning({ id: schema.comicExports.id, kind: schema.comicExports.kind }),
       );
-      await inngest.send(comicExportRequested.create({ comicId, organizationId: ws.organizationId, requestedBy: ws.userId, exportId: exp.id }));
-      await log("comic.export_requested", { comicId, exportId: exp.id, kind: "png", versionId: loaded.version.id });
+      const ids = [...rows].sort((a, b) => kinds.indexOf(a.kind as (typeof kinds)[number]) - kinds.indexOf(b.kind as (typeof kinds)[number])).map((r) => r.id);
+      await inngest.send(comicExportRequested.create({ comicId, organizationId: ws.organizationId, requestedBy: ws.userId, exportId: ids[0], exportIds: ids }));
+      await log("comic.export_requested", { comicId, exportIds: ids, kinds, versionId: loaded.version.id });
     } catch (e) {
       await clearBusy(ws, comicId, (e as Error).message);
       throw e;
     }
-    return "Đang xuất các trang thành PNG…";
+    return `Đang xuất: ${kinds.map((k) => EXPORT_LABEL[k]).join(", ")}`;
   });
 }
+
+const EXPORT_LABEL: Record<(typeof EXPORT_KINDS)[number], string> = { png: "PNG từng trang", pdf: "PDF", webtoon: "webtoon", zip: "zip" };
 
 /** Clears a busy flag that went stale (a job that died without reporting), so the comic can be worked on again. */
 export async function unstickComic(_: ActionState, fd: FormData) {

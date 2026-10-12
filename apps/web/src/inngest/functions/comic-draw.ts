@@ -9,9 +9,10 @@ import { logActivity } from "@/lib/activity";
 import { applyPanelImage, docStats, findPanel, panelsToDraw, setPanelError } from "@/lib/comic/doc";
 import { panelRequest, sheetRequest } from "@/lib/comic/drawing";
 import { drawComicImage } from "@/lib/comic/images";
-import { addComicCost, clearBusy, comicDrawAccess, loadComic, reportComicProgress, sheetsFor, styleOf, updateDoc, type Ctx } from "@/lib/comic/service";
+import { checkPanel } from "@/lib/comic/quality";
+import { addComicCost, clearBusy, comicDrawAccess, loadComic, optionsOf, reportComicProgress, sheetsFor, styleOf, updateDoc, type Ctx } from "@/lib/comic/service";
 
-/** Parallel image requests per comic (Vertex rate limits, docs/COMIC.md §8). */
+/** Parallel image requests per comic (provider rate limits, docs/COMIC.md §8). */
 const BATCH = 4;
 
 type SheetTarget = { ref: string; characterId: string; name: string; visual: string; referenceKeys: string[] };
@@ -32,7 +33,7 @@ async function sheetTargets(ctx: Ctx, members: CastMember[]): Promise<SheetTarge
   });
 }
 
-async function drawSheet(ctx: Ctx, comicId: string, t: SheetTarget, projectId: string, instruction?: string | null): Promise<SheetResult> {
+async function drawSheet(ctx: Ctx, comicId: string, t: SheetTarget, projectId: string | null, instruction?: string | null): Promise<SheetResult> {
   const loaded = await loadComic(ctx, comicId);
   if (!loaded) return { ref: t.ref, key: null, error: "comic gone" };
   const style = styleOf(loaded.comic);
@@ -67,7 +68,7 @@ export const comicCastFn = inngest.createFunction(
       const loaded = await loadComic(ctx, comicId);
       if (!loaded?.version) throw new NonRetriableError("Comic or script not found");
       if (loaded.comic.busyStep !== "cast") return { skipped: true as const };
-      const access = await comicDrawAccess(requestedBy);
+      const access = await comicDrawAccess(requestedBy, loaded.comic.imageModel);
       if (!access.ok) throw new NonRetriableError(access.reason);
       const members = await sheetTargets(ctx, loaded.version.doc.cast);
       const have = await sheetsFor(ctx, members.map((m) => m.characterId), loaded.comic.styleId);
@@ -122,7 +123,7 @@ export const comicDrawFn = inngest.createFunction(
       const loaded = await loadComic(ctx, comicId);
       if (!loaded?.version) throw new NonRetriableError("Comic or script not found");
       if (loaded.comic.busyStep !== "draw") return { skipped: true as const };
-      const access = await comicDrawAccess(requestedBy);
+      const access = await comicDrawAccess(requestedBy, loaded.comic.imageModel);
       if (!access.ok) throw new NonRetriableError(access.reason);
       const doc = loaded.version.doc;
       const wanted = panelIds?.length ? panelIds.filter((id) => findPanel(doc, id)) : panelsToDraw(doc).map((k) => k.id);
@@ -145,29 +146,59 @@ export const comicDrawFn = inngest.createFunction(
       for (const r of done) if (r.key) sheetKeys.set(r.ref, r.key);
     }
 
+    /** Draws one panel (with `instruction`), puts it in the document and, with the quality gate on, checks it. */
+    const drawPanel = async (panelId: string, direction: string | undefined, gate: boolean) => {
+      const loaded = await loadComic(ctx, comicId);
+      const hit = loaded?.version ? findPanel(loaded.version.doc, panelId) : null;
+      if (!loaded?.version || !hit) return { panelId, ok: false, error: "panel removed", problems: [] as string[] };
+      const req = panelRequest(loaded.version.doc, hit.panel, styleOf(loaded.comic), sheetKeys, loaded.comic.imageModel, direction, Boolean(keepComposition && panelIds?.length));
+      try {
+        const img = await drawComicImage(ctx, { kind: "panel", modelId: loaded.comic.imageModel, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId: plan.projectId, comicId, panelId, styleId: loaded.comic.styleId, instruction: direction });
+        await updateDoc(ctx, comicId, "draw", (doc) => (findPanel(doc, panelId) ? { doc: applyPanelImage(doc, panelId, { id: img.id, key: img.key, width: img.width, height: img.height, faces: img.faces }), changes: { drewPanel: panelId } } : null));
+        await addComicCost(ctx, comicId, img.costUsd);
+        let problems: string[] = [];
+        if (gate && optionsOf(loaded.comic).qualityGate) {
+          try {
+            const doc = loaded.version.doc;
+            const sheets = hit.panel.script.characters.flatMap((c) => {
+              const key = sheetKeys.get(c.ref);
+              return key ? [{ name: doc.cast.find((m) => m.ref === c.ref)?.name ?? c.ref, key }] : [];
+            });
+            const check = await checkPanel({ ...ctx, comicId }, doc, hit.panel, img.key, sheets);
+            await addComicCost(ctx, comicId, check.costUsd);
+            await logActivity({ actorId: requestedBy, organizationId, type: "comic.panel_checked", payload: { comicId, panelId, ok: check.ok, problems: check.problems } });
+            problems = check.problems;
+          } catch (e) {
+            // A failed check never costs the panel its picture.
+            console.warn("[comic] quality check failed", (e as Error).message);
+          }
+        }
+        return { panelId, ok: true, error: null, problems };
+      } catch (e) {
+        const message = (e as Error).message.slice(0, 300);
+        await updateDoc(ctx, comicId, "draw", (doc) => (findPanel(doc, panelId) ? { doc: setPanelError(doc, panelId, message), changes: { panelError: panelId } } : null)).catch(() => undefined);
+        return { panelId, ok: false, error: message, problems: [] as string[] };
+      }
+    };
+
     let finished = 0;
+    let redrawn = 0;
     const outcomes: { panelId: string; ok: boolean; error: string | null }[] = [];
     for (let i = 0; i < plan.panels.length; i += BATCH) {
       const batch = plan.panels.slice(i, i + BATCH);
       const done = await Promise.all(
-        batch.map((panelId) =>
-          step.run(`panel-${panelId}`, async () => {
-            const loaded = await loadComic(ctx, comicId);
-            const hit = loaded?.version ? findPanel(loaded.version.doc, panelId) : null;
-            if (!loaded?.version || !hit) return { panelId, ok: false, error: "panel removed" };
-            const req = panelRequest(loaded.version.doc, hit.panel, styleOf(loaded.comic), sheetKeys, loaded.comic.imageModel, instruction, Boolean(keepComposition && panelIds?.length));
-            try {
-              const img = await drawComicImage(ctx, { kind: "panel", modelId: loaded.comic.imageModel, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId: plan.projectId, comicId, panelId, styleId: loaded.comic.styleId, instruction });
-              await updateDoc(ctx, comicId, "draw", (doc) => (findPanel(doc, panelId) ? { doc: applyPanelImage(doc, panelId, { id: img.id, key: img.key, width: img.width, height: img.height, faces: img.faces }), changes: { drewPanel: panelId } } : null));
-              await addComicCost(ctx, comicId, img.costUsd);
-              return { panelId, ok: true, error: null };
-            } catch (e) {
-              const message = (e as Error).message.slice(0, 300);
-              await updateDoc(ctx, comicId, "draw", (doc) => (findPanel(doc, panelId) ? { doc: setPanelError(doc, panelId, message), changes: { panelError: panelId } } : null)).catch(() => undefined);
-              return { panelId, ok: false, error: message };
-            }
-          }),
-        ),
+        batch.map(async (panelId) => {
+          const first = await step.run(`panel-${panelId}`, () => drawPanel(panelId, instruction, true));
+          if (!first.ok || !first.problems.length) return first;
+          // Failed the quality gate: one more drawing with the problems as directions, if today's quota allows it.
+          const fixed = await step.run(`panel-${panelId}-fix`, async () => {
+            const access = await comicDrawAccess(requestedBy, (await loadComic(ctx, comicId))?.comic.imageModel);
+            if (!access.ok) return null;
+            return drawPanel(panelId, [instruction, `Fix these problems of the previous drawing: ${first.problems.join("; ")}`].filter(Boolean).join("\n"), false);
+          });
+          if (fixed) redrawn++;
+          return fixed?.ok ? fixed : first;
+        }),
       );
       outcomes.push(...done);
       finished += batch.length;
@@ -180,7 +211,7 @@ export const comicDrawFn = inngest.createFunction(
       const failed = outcomes.filter((o) => !o.ok && o.error !== "panel removed");
       const notes = [failed.length ? `${failed.length} khung vẽ lỗi (bấm “Vẽ lại” ở khung đó)` : "", plan.cut ? `${plan.cut} khung chưa vẽ vì hết hạn mức hôm nay` : ""].filter(Boolean).join(" · ");
       await clearBusy(ctx, comicId, notes || null, stats && stats.drawn === stats.panels ? "drawn" : undefined);
-      await logActivity({ actorId: requestedBy, organizationId, type: panelIds?.length ? "comic.panel_redrawn" : "comic.panels_drawn", payload: { comicId, drawn: outcomes.length - failed.length, failed: failed.length, cut: plan.cut, sheets: plan.sheets.length, instruction: instruction ?? null, keepComposition: Boolean(keepComposition) } });
+      await logActivity({ actorId: requestedBy, organizationId, type: panelIds?.length ? "comic.panel_redrawn" : "comic.panels_drawn", payload: { comicId, drawn: outcomes.length - failed.length, failed: failed.length, cut: plan.cut, sheets: plan.sheets.length, redrawnByGate: redrawn, instruction: instruction ?? null, keepComposition: Boolean(keepComposition) } });
       return { drawn: outcomes.length - failed.length, failed: failed.length, cut: plan.cut };
     });
   },

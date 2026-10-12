@@ -239,6 +239,12 @@ export default async function NewComicPage() {
                   <input type="checkbox" name="review" defaultChecked className="size-4" />
                   Duyệt kịch bản trước khi vẽ (bỏ chọn = «Vẽ luôn»)
                 </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" name="qualityGate" className="mt-0.5 size-4" />
+                  <span>
+                    Kiểm tra chất lượng: Claude so mỗi khung với bản mẫu nhân vật và kịch bản, khung lỗi được vẽ lại một lần (thêm ~$0.01–0.02 mỗi khung, cộng ảnh vẽ lại)
+                  </span>
+                </label>
                 <p className="text-xs text-muted-foreground">
                   Ước tính một truyện ~7 trang, ~33 ảnh: kịch bản ≈ {formatUsd(typical.adapt)}, vẽ ≈ {formatUsd(typical.flash)} (Flash) hoặc ≈ {formatUsd(typical.pro)} (Pro). Con số chính xác hiện khi duyệt kịch bản.
                 </p>

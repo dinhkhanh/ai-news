@@ -7,6 +7,8 @@ import { flagEnabled } from "@/lib/flags";
 import { vertexImageAccess } from "@/lib/media/generate";
 import { startProgress } from "@/lib/project-state";
 import { dailyLimit, usedToday } from "@/lib/quota";
+import { openaiImageAccess } from "./images";
+import { imageModel } from "./models";
 import type { ComicStyle } from "./prompts";
 
 /**
@@ -31,7 +33,7 @@ export async function loadComic(ctx: Ctx, comicId: string) {
 
 export const styleOf = (comic: Pick<ComicRow, "styleSnapshot">) => comic.styleSnapshot as unknown as ComicStyle;
 export const optionsOf = (comic: Pick<ComicRow, "options">) =>
-  comic.options as { dialogue?: "low" | "medium" | "high"; free?: boolean; review?: boolean; castIds?: string[]; font?: string; credit?: boolean };
+  comic.options as { dialogue?: "low" | "medium" | "high"; free?: boolean; review?: boolean; castIds?: string[]; font?: string; credit?: boolean; qualityGate?: boolean };
 
 async function lockedComic(tx: Tx, ctx: Ctx, comicId: string) {
   const [comic] = await tx
@@ -130,17 +132,21 @@ export async function addComicCost(ctx: Ctx, comicId: string, usd: number) {
   );
 }
 
-export type DrawAccess = { ok: true; projectId: string; remaining: number } | { ok: false; reason: string };
+export type DrawAccess = { ok: true; projectId: string | null; remaining: number } | { ok: false; reason: string };
 
-/** Whether this member may draw pictures now: flag `comics`, the Vertex integration and its cap, the daily quota. */
-export async function comicDrawAccess(userId: string): Promise<DrawAccess> {
+/**
+ * Whether this member may draw pictures with `modelId` now: flag `comics`, the model's integration and its cap
+ * (`google_veo` for Gemini, `openai` for GPT Image), the daily quota. `projectId` is the Vertex project (null for OpenAI).
+ */
+export async function comicDrawAccess(userId: string, modelId: string | null | undefined): Promise<DrawAccess> {
   if (!(await flagEnabled("comics"))) return { ok: false, reason: "Truyện tranh đang tắt (cờ comics)" };
-  const access = await vertexImageAccess();
-  if (!access.ok) return { ok: false, reason: access.reason };
+  const model = imageModel(modelId);
+  const access = model.provider === "openai" ? await openaiImageAccess() : await vertexImageAccess();
+  if (!access.ok) return { ok: false, reason: `${model.label}: ${access.reason}` };
   const [limit, used] = await Promise.all([dailyLimit(userId, "comic_images"), usedToday(userId, "comic_images")]);
   const remaining = limit > 0 ? Math.max(0, limit - used) : Number.POSITIVE_INFINITY;
   if (remaining === 0) return { ok: false, reason: `Hết hạn mức ảnh truyện tranh hôm nay (${used}/${limit})` };
-  return { ok: true, projectId: access.projectId, remaining };
+  return { ok: true, projectId: "projectId" in access ? access.projectId : null, remaining };
 }
 
 /** Latest sheet per character for a style: an accepted one wins over drafts. */

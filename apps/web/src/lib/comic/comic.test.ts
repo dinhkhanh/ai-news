@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { comicDocSchema, pictureToPage, type Panel, type Rect } from "@ai-news/video/comic";
+import { comicDocSchema, pictureToPage, planStrip, STRIP_MAX_HEIGHT, type Panel, type Rect } from "@ai-news/video/comic";
 import { tailGeometry } from "@ai-news/video/comic-view";
 import {
   addBalloon,
@@ -25,10 +25,12 @@ import {
   type DocOptions,
 } from "./doc";
 import { applyEditorOp, editorOpSchema } from "./editor-ops";
+import { crc32, jpegPdf, pdfPageSize, zipStore } from "./files";
 import { formatOf, layoutPage, rowsFor, snapAspect } from "./layout";
 import { balloonBox, baseFontSize, facesOnPage, letterPanel, MIN_FONT_SCALE, segmentHits, speakerPoint, wrapWords } from "./lettering";
-import { estimateAdaptUsd, estimateDrawUsd, IMAGE_MODELS, imageModel, textModel } from "./models";
-import { adaptUser, panelPrompt, pickRefs, refsNote, sheetPrompt, shortenUser, type ComicStyle } from "./prompts";
+import { estimateAdaptUsd, estimateDrawUsd, IMAGE_MODELS, imageModel, openaiImageCostUsd, openaiSize, textModel } from "./models";
+import { classifyOpenAiError } from "./openai-image";
+import { adaptUser, panelPrompt, pickRefs, qualityBrief, refsNote, sheetPrompt, shortenUser, type ComicStyle } from "./prompts";
 import { normaliseComicScript, slug, type ComicScript } from "./script";
 
 const ids = () => {
@@ -73,6 +75,32 @@ describe("models", () => {
     expect(estimateDrawUsd("gemini-3-pro-image", 10)).toBeGreaterThan(estimateDrawUsd("gemini-3.1-flash-image", 10));
     expect(estimateAdaptUsd("claude-opus-5-5", 20000)).toBeGreaterThan(estimateAdaptUsd("claude-haiku-5-5", 20000));
     for (const m of IMAGE_MODELS) expect(m.aspectRatios).toContain("3:4");
+  });
+
+  it("sizes, prices and reads the errors of GPT Image", () => {
+    expect(imageModel("gpt-image-2").provider).toBe("openai");
+    expect(openaiSize("1:1")).toBe("1024x1024");
+    expect(openaiSize("2:3")).toBe("1024x1536");
+    for (const ratio of imageModel("gpt-image-2").aspectRatios) {
+      const [w, h] = openaiSize(ratio).split("x").map(Number);
+      expect(w % 16 + (h % 16)).toBe(0);
+      expect(Math.max(w, h)).toBeLessThanOrEqual(3840);
+      expect(w * h).toBeGreaterThanOrEqual(655_360);
+      expect(Math.max(w / h, h / w)).toBeLessThanOrEqual(3);
+      const [a, b] = ratio.split(":").map(Number);
+      expect(Math.abs(w / h - a / b)).toBeLessThan(0.03);
+    }
+    // 100 text + 2 000 image tokens in, 1 600 out: $0.0005 + $0.016 + $0.048.
+    expect(openaiImageCostUsd("gpt-image-2", { input_tokens: 2100, output_tokens: 1600, input_tokens_details: { text_tokens: 100, image_tokens: 2000 } }, 2)).toBeCloseTo(0.0645, 6);
+    expect(openaiImageCostUsd("gpt-image-2", null, 2)).toBeCloseTo(0.05 + 2 * 0.006, 6);
+    const err = (code: string, type = "invalid_request_error") => JSON.stringify({ error: { message: "m", type, code } });
+    expect(classifyOpenAiError(400, err("moderation_blocked", "image_generation_user_error")).permanent).toBe(true);
+    expect(classifyOpenAiError(429, err("project_spend_limit_exceeded")).permanent).toBe(true);
+    expect(classifyOpenAiError(429, err("insufficient_quota", "insufficient_quota")).permanent).toBe(true);
+    expect(classifyOpenAiError(429, err("rate_limit_exceeded", "requests")).permanent).toBe(false);
+    expect(classifyOpenAiError(503, "<html>busy</html>").permanent).toBe(false);
+    expect(classifyOpenAiError(401, err("invalid_api_key")).message).toContain("API key");
+    expect(classifyOpenAiError(400, err("invalid_value")).permanent).toBe(true);
   });
 });
 
@@ -407,6 +435,16 @@ describe("prompts", () => {
     expect(sheetPrompt(doc.cast[0], { ...style, colourMode: "bw" })).toContain("Black and white only");
   });
 
+  it("briefs the quality gate with the script, the characters and their sheets", () => {
+    const k = doc.pages[0].panels[0];
+    const b = qualityBrief(doc, k, ["Lan"]);
+    expect(b).toContain("Reference sheets above, in order: Lan");
+    expect(b).toContain("Lan: girl, 8, black bob, pink shirt");
+    expect(b).toContain(`Scene: ${k.script.description}`);
+    expect(b).toMatch(/speech bubbles/);
+    expect(qualityBrief(doc, k, [])).toContain("The picture above is the panel to check.");
+  });
+
   it("puts the story, the length and the cast in the adaptation request", () => {
     const u = adaptUser({ story: "Ngày xưa…", language: "vi", pages: null, audience: "kids", dialogue: "low", free: false, readingDirection: "rtl", style: { name: "Manga", storytellingNotes: "silent panels", colourMode: "bw" }, cast: [{ id: "c1", name: "Lan", role: "", visual: "", personality: "" }], title: null });
     expect(u).toContain("<story>\nNgày xưa…\n</story>");
@@ -414,5 +452,56 @@ describe("prompts", () => {
     expect(u).toContain('id "c1"');
     expect(u).toContain("right to left");
     expect(u).toContain("faithful");
+  });
+});
+
+describe("exports", () => {
+  const base = buildDoc(normaliseComicScript(script, ["char-lan"]), opts, ids());
+  const many = { ...base, pages: Array.from({ length: 10 }, (_, i) => ({ ...base.pages[i % base.pages.length], id: `p${i}` })) };
+
+  it("cuts the webtoon strip between panels, never through one", () => {
+    const parts = planStrip(many);
+    expect(parts.length).toBeGreaterThan(1);
+    const s = 800 / many.format.width;
+    for (const part of parts) {
+      expect(part.height).toBeLessThanOrEqual(STRIP_MAX_HEIGHT);
+      for (const piece of part.pieces) {
+        expect(piece.dstHeight).toBeCloseTo(piece.srcHeight * s, 3);
+        const page = many.pages[piece.page];
+        // A slice that starts or ends inside a page does so in a gutter.
+        for (const y of [piece.srcTop, piece.srcTop + piece.srcHeight]) {
+          if (y <= 0.5 || y >= page.height - 0.5) continue;
+          for (const panel of page.panels) expect(y > panel.rect.y && y < panel.rect.y + panel.rect.h).toBe(false);
+        }
+      }
+    }
+    const pageHeights = many.pages.reduce((n, p) => n + Math.round(p.height * s), 0);
+    expect(parts.reduce((n, p) => n + p.height, 0)).toBe(pageHeights + 40 * (many.pages.length - 1));
+    expect(planStrip({ ...many, pages: [] })).toEqual([]);
+  });
+
+  it("cuts through a panel only when it is taller than a file", () => {
+    const tall = { format: formatOf("webtoon"), pages: [{ id: "w", number: 1, layout: "auto" as const, beat: "", height: 20000, panels: [{ ...base.pages[0].panels[0], rect: { x: 40, y: 40, w: 720, h: 19920 }, lettering: [] }] }] };
+    const parts = planStrip(tall as never);
+    expect(parts.map((p) => p.height)).toEqual([8000, 8000, 4000]);
+  });
+
+  it("writes a stored zip and a PDF of JPEG pages", () => {
+    expect(crc32(new TextEncoder().encode("123456789"))).toBe(0xcbf43926);
+    const zip = zipStore([{ name: "trang-01.png", data: new Uint8Array([1, 2, 3]) }, { name: "đèn.txt", data: new Uint8Array([4]) }]);
+    const view = new DataView(zip.buffer);
+    expect(view.getUint32(0, true)).toBe(0x04034b50);
+    const end = zip.length - 22;
+    expect(view.getUint32(end, true)).toBe(0x06054b50);
+    expect(view.getUint16(end + 10, true)).toBe(2);
+    expect(view.getUint32(view.getUint32(end + 16, true), true)).toBe(0x02014b50);
+    expect(pdfPageSize("a4", 1240, 1754)).toEqual({ w: 595.28, h: 842.03 });
+    expect(pdfPageSize("square", 1440, 1440)).toEqual({ w: 1080, h: 1080 });
+    const pdf = new TextDecoder("latin1").decode(jpegPdf([{ jpeg: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), width: 10, height: 20, w: 100, h: 200 }], { title: "Đèn lồng" }));
+    expect(pdf.startsWith("%PDF-1.4")).toBe(true);
+    expect(pdf).toContain("/Count 1");
+    expect(pdf).toContain("/Title <FEFF");
+    const xref = Number(/startxref\n(\d+)/.exec(pdf)![1]);
+    expect(pdf.slice(xref, xref + 4)).toBe("xref");
   });
 });

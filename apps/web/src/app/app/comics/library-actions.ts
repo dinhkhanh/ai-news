@@ -142,9 +142,9 @@ export async function drawStyleSample(_: ActionState, fd: FormData): Promise<Act
     const { ws, log } = await writer();
     const style = await loadStyle(ws, str(fd, "id"));
     if (!style) throw new Error("Không tìm thấy phong cách");
-    const access = await comicDrawAccess(ws.userId);
-    if (!access.ok) throw new Error(access.reason);
     const modelId = isImageModel(str(fd, "imageModel")) ? str(fd, "imageModel") : DEFAULT_IMAGE_MODEL;
+    const access = await comicDrawAccess(ws.userId, modelId);
+    if (!access.ok) throw new Error(access.reason);
     const snap = snapshotOf(style);
     const img = await drawComicImage(ws, { kind: "sample", modelId, prompt: stylePreviewPrompt(snap), refKeys: snap.referenceKeys.slice(0, MAX_REFS), aspect: "3:4", projectId: access.projectId, styleId: style.id });
     await log("comic_style.sample_drawn", { styleId: style.id, imageId: img.id, model: modelId, costUsd: img.costUsd });
@@ -203,9 +203,9 @@ export async function drawCharacterSheet(_: ActionState, fd: FormData): Promise<
     const c = await ownCharacter(ws, str(fd, "id"));
     const style = await loadStyle(ws, str(fd, "styleId"));
     if (!style) throw new Error("Chọn một phong cách");
-    const access = await comicDrawAccess(ws.userId);
-    if (!access.ok) throw new Error(access.reason);
     const modelId = isImageModel(str(fd, "imageModel")) ? str(fd, "imageModel") : DEFAULT_IMAGE_MODEL;
+    const access = await comicDrawAccess(ws.userId, modelId);
+    if (!access.ok) throw new Error(access.reason);
     const instruction = str(fd, "instruction").slice(0, 1000) || null;
     const req = sheetRequest(c, snapshotOf(style), c.referenceKeys, modelId, instruction);
     const img = await drawComicImage(ws, { kind: "sheet", modelId, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId: access.projectId, characterId: c.id, styleId: style.id, instruction });

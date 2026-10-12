@@ -108,7 +108,7 @@ export async function getRenderStatus(h: RenderHandle) {
  * One still (a comic page, docs/COMIC.md §3) rendered on the Remotion Lambda straight to R2 as a PNG. Waits for the
  * result: a page takes a few seconds. Returns the cost Remotion estimates for the invocation.
  */
-export async function renderStill(opts: { composition: string; inputProps: Record<string, unknown>; outKey: string }) {
+export async function renderStill(opts: { composition: string; inputProps: Record<string, unknown>; outKey: string; imageFormat?: "png" | "jpeg"; jpegQuality?: number }) {
   const e = env();
   const { region } = awsCreds();
   if (!e.REMOTION_FUNCTION_NAME || !e.REMOTION_SERVE_URL) {
@@ -122,7 +122,8 @@ export async function renderStill(opts: { composition: string; inputProps: Recor
         serveUrl: e.REMOTION_SERVE_URL!,
         composition: opts.composition,
         inputProps: opts.inputProps,
-        imageFormat: "png",
+        imageFormat: opts.imageFormat ?? "png",
+        ...(opts.imageFormat === "jpeg" ? { jpegQuality: opts.jpegQuality ?? 90 } : {}),
         privacy: "no-acl",
         maxRetries: 2,
         timeoutInMilliseconds: 120_000,

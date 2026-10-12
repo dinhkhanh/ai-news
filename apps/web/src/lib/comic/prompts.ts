@@ -129,6 +129,25 @@ export function panelPrompt(doc: ComicDoc, panel: Panel, style: ComicStyle, opts
     .join("\n");
 }
 
+/**
+ * What the quality gate (docs/COMIC.md §6) checks a drawn panel against: the panel's script and the characters in it,
+ * whose reference sheets come with it in the same order. Problems come back as short directions for a redraw.
+ */
+export function qualityBrief(doc: ComicDoc, panel: Panel, sheetNames: string[]) {
+  const inPanel = panel.script.characters.map((c) => ({ c, m: doc.cast.find((x) => x.ref === c.ref) })).filter((x) => x.m);
+  const setting = doc.settings.find((s) => s.id === panel.script.settingId);
+  return [
+    sheetNames.length ? `Reference sheets above, in order: ${sheetNames.join(", ")}. The last picture is the panel to check.` : "The picture above is the panel to check.",
+    `Scene: ${panel.script.description}`,
+    `Shot: ${panel.script.shot}.${setting ? ` Setting: ${setting.name}: ${setting.visual}` : ""}`,
+    inPanel.length
+      ? `Characters who must appear (${inPanel.length}):\n${inPanel.map((x) => `- ${characterBlock(x.m!)}. Here: ${x.c.position === "background" ? "in the background" : `on the ${x.c.position}`}, ${x.c.action}, ${x.c.expression}`).join("\n")}`
+      : "No named character has to appear.",
+    "Report only problems a reader would notice: a character missing, extra or not matching their sheet or description (hair, face, clothes, colours, age), broken anatomy (extra or missing limbs or fingers, merged bodies, distorted faces), any text, letters, speech bubbles or watermark drawn in the picture, or the scene's main action not shown.",
+    "Ignore small style differences, framing choices and details the script does not mention. Each problem is one short English direction for the artist, such as \"Give Lan her red scarf as on her sheet\".",
+  ].join("\n");
+}
+
 /** Image prompt of a character sheet: turnaround + expressions on a plain background, in the comic's style. */
 export function sheetPrompt(member: Pick<CastMember, "name" | "visual">, style: ComicStyle, instruction?: string | null) {
   return [

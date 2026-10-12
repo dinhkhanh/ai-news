@@ -8,7 +8,7 @@ loadItim("normal", { weights: ["400"], subsets: ["latin", "latin-ext", "vietname
 loadBeVietnamPro("normal", { weights: ["400", "700"], subsets: ["latin", "latin-ext", "vietnamese"] });
 
 /** Remotion's `<Img>` holds the frame until the picture has loaded. */
-const RemotionImg = (p: { src: string; alt: string; style?: CSSProperties }) => <Img {...p} />;
+export const RemotionImg = (p: { src: string; alt: string; style?: CSSProperties }) => <Img {...p} />;
 
 export type ComicPageStillProps = Omit<ComicPageViewProps, "placeholders" | "ImageComponent">;
 

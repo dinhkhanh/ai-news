@@ -153,7 +153,7 @@ export default async function ComicPage({ params, searchParams }: { params: Prom
       ) : tab === "read" ? (
         <ReadTab doc={doc} srcs={srcs} families={comicFamilies} />
       ) : (
-        <ExportTab comicId={comic.id} writer={writer} busy={running} drawn={stats ? stats.drawn : 0} panels={stats ? stats.panels : 0} exports={exportLinks.map((e) => ({ id: e.id, kind: e.kind, status: e.status, error: e.error, createdAt: e.createdAt, urls: e.urls }))} />
+        <ExportTab comicId={comic.id} writer={writer} busy={running} drawn={stats ? stats.drawn : 0} panels={stats ? stats.panels : 0} exports={exportLinks.map((e) => ({ id: e.id, kind: e.kind, status: e.status, error: e.error, createdAt: e.createdAt, files: e.urls.map((url, i) => ({ url, name: e.keys[i].split("/").slice(-2).join("/").replace(/^[0-9a-f-]{36}\//, "") })) }))} />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 # Comic studio: design
 
-Status: **accepted** 2026-10-12 (decisions in §13). M1 and M2 built (§11.2, §11.3); M3 next.
+Status: **accepted** 2026-10-12 (decisions in §13). M1, M2 and M3 built (§11.2–§11.4); M4 (motion comic) next.
 
 A standalone feature: a member pastes a story (plain text), picks or defines a style, a cast and the AI models,
 and the app produces a short comic, 5–10 pages by default or as many as asked. It shares the app's infrastructure
@@ -165,7 +165,7 @@ The member picks two models per comic; workspace defaults in `/app/comics/settin
 |---|---|---|---|---|
 | Gemini 3.1 Flash Image (mặc định) | `gemini-3.1-flash-image` | 0.067 (1K) | several | yes, already used by `media/generate.ts` |
 | Gemini 3 Pro Image | `gemini-3-pro-image` | 0.134 (1K/2K), 0.24 (4K) | more, best consistency | yes, same Vertex auth |
-| GPT Image 2 (OpenAI) | `gpt-image-2` | ~0.03–0.08 | up to 16 | phase 3, needs an `openai` integration |
+| GPT Image 2 (OpenAI) | `gpt-image-2` | ~0.03–0.08 | up to 16 | M3 (§11.4), `openai` integration |
 | FLUX Kontext / others | — | — | — | later, via the same adapter |
 
 Exact ids, reference-image limits, supported aspect ratios and prices are verified against the provider docs at
@@ -430,6 +430,46 @@ approval, render, QA, multi-channel logos, publishing) is reused unchanged and t
 
 ---
 
+### 11.4 M3 as built (2026-10-12)
+
+- **Exports** (`comic-export`, one request = one `comic_exports` row per kind, all of the same version; event field
+  `exportIds`): `png` (each page by `ComicPage` on Lambda, `trang-NN.png`; the pages of an earlier finished PNG export
+  of the same version are reused instead of rendered again), `pdf` (the pages again as JPEG 90 under `tmp/`, then
+  `lib/comic/files.ts` `jpegPdf`: PDF 1.4, one DCTDecode image per page, A4 / US comic / B6 pages at their print size,
+  the others at px × 0.75 pt, UTF-16 title), `webtoon` (`planStrip` in `packages/video/src/comic.ts`: the pages one
+  under another at 800 px wide, cut into files of at most 8 000 px, each cut in a gutter between panels and balloons
+  when one lies in the last three quarters of the part, else a hard cut; each part rendered as JPEG by the new
+  `ComicStrip` composition, which places slices of `ComicPageView`), `zip` (all of the above, stored, UTF-8 names;
+  choosing zip renders every kind). Files live under `renders/comics/<org>/<comic>/<export>/`, named after the title
+  slug. Tab Xuất: checkboxes (PNG + PDF by default), a download link per file. No new npm dependency (the zip and PDF
+  writers are ~150 lines, tested with `unzip -t`, `pdfinfo` and `pdftoppm`). `packages/video` **0.20.0** (ComicStrip).
+- **Models**: `ImageModel` has `provider` (`vertex` | `openai`) and `apiId`; `drawComicImage` dispatches on it and
+  records the cost under the provider's name (`google_vertex` / `openai`, resource = the provider's model id).
+  GPT Image 2 (`lib/comic/openai-image.ts`, raw fetch, no SDK): `/v1/images/edits` multipart with the references as
+  `image[]`, `/v1/images/generations` without references; `quality` medium, PNG; sizes from `openaiSize` (1024², 1024 ×
+  1536, 1536 × 1024 where they fit, otherwise ~1.5 MP with edges a multiple of 16); no `input_fidelity` (GPT Image 2
+  rejects it). Cost from the response's `usage` (text in $5, image in $8, image out $30 per MTok), the catalogue
+  estimate ($0.05 + $0.006 per reference) when it has none. Moderation blocks, billing / spend-limit codes, 401 / 403
+  and other 4xx are permanent (the panel keeps the message); 429 and 5xx are tried again twice within the first
+  minute. The `openai` integration (/admin/integrations: API key in Vault, monthly spend cap over `usage_costs`
+  provider `openai`) is read at draw time, so the key never goes through step state. `comicDrawAccess(userId,
+  modelId)` checks the model's integration. Adding GPT Image 2.5 (or another provider) is a catalogue entry (+ an
+  adapter for a new provider).
+- **Switching models per comic**: card "Mô hình" on the Kịch bản tab (`saveComicSettings`, refused while a step runs,
+  `comic.settings_changed` with before / after): image model, script model and the quality gate. Later drawings,
+  redraws, sheets and re-adaptations use the new models; pictures already drawn stay (and stay as variants).
+- **Quality gate** (option `qualityGate` in `comics.options`, a checkbox on the new-comic form and the Mô hình card, off
+  by default): after a panel is drawn, `lib/comic/quality.ts` sends Claude Sonnet 5.5 (`MODELS.comicCheck`, effort
+  low) the sheets of the panel's characters, the panel and `qualityBrief` (script, characters, what counts as a
+  problem) and gets `{ ok, problems[] }` (cost recorded, `comic.panel_checked`). A failed panel is redrawn once in its
+  own step (`panel-<id>-fix`) with the problems appended to the direction, if the daily quota still allows; the first
+  picture stays as a variant. A failed check never fails the panel.
+- To switch it on after M2: deploy `packages/video` **0.20.0**; for GPT Image, add the `openai` integration (key,
+  spend cap; the OpenAI organisation may need verification for image models). No migration.
+- Not tested against the live services here: OpenAI, Claude vision, Remotion Lambda (ComicStrip, JPEG stills), R2.
+
+---
+
 ## 12. Risks
 
 | Risk | Mitigation |
@@ -451,7 +491,7 @@ All six questions are settled; the recommendations were taken.
 1. **Panel-by-panel generation**, composed by the app: cheaper redraws, exact layouts, editable lettering, any page
    format. Whole-page generation may come back later as a style option.
 2. **Script review on by default**, with a "Vẽ luôn" (skip review) checkbox.
-3. **Image models in v1: Gemini 3.1 Flash Image + Gemini 3 Pro Image** (Vertex). OpenAI / others in M3.
+3. **Image models in v1: Gemini 3.1 Flash Image + Gemini 3 Pro Image** (Vertex). GPT Image 2 (OpenAI) added in M3 (§11.4).
 4. **Any workspace writer** can use it while flag `comics` is on; admins tune the `comic_images` quota.
 5. **Page formats**: `A4 dọc`, `Truyện tranh Mỹ (6.625×10.25")`, `Manga B6`, `Webtoon (cuộn dọc)`, `Vuông 1:1`, `9:16`.
    No print bleed / CMYK.
