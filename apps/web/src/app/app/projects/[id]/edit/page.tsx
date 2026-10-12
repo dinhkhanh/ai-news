@@ -5,12 +5,14 @@ import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { PipelineStatus } from "@/components/pipeline-status";
 import { EditorLoader } from "@/components/editor/editor-loader";
-import type { EditorProps, VisualOption } from "@/components/editor/types";
+import type { EditorProps, MusicOption, VisualOption } from "@/components/editor/types";
 import { Badge } from "@/components/ui/badge";
 import { canManagePlugins, disabledPlugins } from "@/lib/editor-plugins";
 import { brandFromRow, listBrandKits } from "@/lib/media/brand";
 import { docKeys } from "@/lib/media/editor";
 import { channelLogo } from "@/lib/media/logo";
+import { listSoundCollections } from "@/lib/media/sound-collections";
+import { licenceInfo } from "@/lib/media/sound-library";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { storedFrame, storedSection } from "@/lib/media/framing";
 import type { PendingCapture } from "@/lib/media/visual-plan";
@@ -83,6 +85,11 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const script = selected.scriptId ? await withOrgContext(ws, (tx) => tx.query.scripts.findFirst({ where: eq(schema.scripts.id, selected.scriptId!) })) : null;
   const verdicts = verdictsOfScript(script);
   const music = await withOrgContext(ws, (tx) => tx.select().from(schema.musicLibrary).orderBy(schema.musicLibrary.title).limit(50));
+  // Sounds from the collections this member can see (/app/sounds), offered as background music after the library.
+  // A deploy that lands before migration 0029 has no sound tables: the editor opens with the library only.
+  const soundOptions: MusicOption[] = (await listSoundCollections(ws).catch(() => [])).flatMap((c) =>
+    c.items.map((i) => ({ id: i.id, title: i.title, key: i.key, moodTags: [], durationSec: i.durationSec, licence: licenceInfo(i.licence, i.licenceVersion).label, group: c.name, credit: i.credit })),
+  );
 
   // Every visual asset of the project is a swap option; stock rows remember the scene they were fetched for.
   const options: VisualOption[] = assets
@@ -108,7 +115,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const brandKits = (await listBrandKits(ws)).map((k) => ({ id: k.id, name: k.name, isDefault: k.isDefault, brand: brandFromRow(k).brand }));
   const kitKeys = brandKits.flatMap((k) => [k.brand.logoSrc, k.brand.overlaySrc]).filter((k): k is string => Boolean(k));
   const logoChannel = await channelLogo(ws, project.logoChannelId);
-  const keys = new Set<string>([...(logoChannel ? [logoChannel.logoPath] : []), ...docKeys(doc), ...options.map((o) => o.key), ...music.map((m) => m.r2Path), ...kitKeys]);
+  const keys = new Set<string>([...(logoChannel ? [logoChannel.logoPath] : []), ...docKeys(doc), ...options.map((o) => o.key), ...music.map((m) => m.r2Path), ...soundOptions.map((m) => m.key), ...kitKeys]);
   if (mix?.mixKey) keys.add(mix.mixKey);
   // Article images have no remote thumbnail in R2; presign the key itself for the thumbnail grid.
   const urls = await presignMap(keys, 3600);
@@ -138,7 +145,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     urls,
     options,
     captures: selected.id === timelines[0].id ? captures : [],
-    music: music.map((m) => ({ id: m.id, title: m.title, key: m.r2Path, moodTags: m.moodTags, durationSec: m.durationSec ? Number(m.durationSec) : null, licence: m.licence })),
+    music: [...music.map((m) => ({ id: m.id, title: m.title, key: m.r2Path, moodTags: m.moodTags, durationSec: m.durationSec ? Number(m.durationSec) : null, licence: m.licence })), ...soundOptions],
     previewLogo: logoChannel && urls[logoChannel.logoPath] ? { url: urls[logoChannel.logoPath], channelName: logoChannel.name } : null,
     brandKits,
     verdicts: verdicts?.verdicts ?? null,

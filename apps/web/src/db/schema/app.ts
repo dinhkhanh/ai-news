@@ -719,3 +719,66 @@ export const editorPluginSettings = pgTable("editor_plugin_settings", {
   updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
   updatedAt: updatedAt(),
 });
+
+/**
+ * Sound collections (/app/sounds, migration 0029): a member's named set of sounds from the public library
+ * (Openverse: Jamendo, Wikimedia Commons, Freesound), Pixabay Music imports and their own files. Private to
+ * the creator unless `shared` with the workspace (`canSeeCollection` in `media/sound-library.ts`).
+ */
+export const soundCollections = pgTable(
+  "sound_collections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    name: text("name").notNull(),
+    shared: boolean("shared").notNull().default(true),
+    colour: text("colour").notNull().default("#2563eb"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("sound_collections_org_idx").on(t.organizationId, t.createdAt)],
+);
+
+/**
+ * One sound in a collection. The audio is copied to R2 when it is added (`library/sounds/<org>/…`, never expires),
+ * so a collection keeps working when the source changes and the mix Lambda reads it like a music-library track.
+ */
+export const soundCollectionItems = pgTable(
+  "sound_collection_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: orgId(),
+    collectionId: uuid("collection_id")
+      .notNull()
+      .references(() => soundCollections.id, { onDelete: "cascade" }),
+    /** openverse | pixabay | upload (`SOUND_PROVIDERS`) */
+    provider: text("provider").notNull(),
+    /** Openverse audio id; Pixabay page URL; null for an upload. */
+    providerId: text("provider_id"),
+    /** jamendo | freesound | wikimedia_audio | pixabay | upload */
+    source: text("source").notNull(),
+    title: text("title").notNull(),
+    creator: text("creator"),
+    creatorUrl: text("creator_url"),
+    landingUrl: text("landing_url"),
+    /** Openverse licence code (`cc0`, `by`, `by-sa`, …), `pixabay` or `own`. */
+    licence: text("licence").notNull(),
+    licenceVersion: text("licence_version"),
+    licenceUrl: text("licence_url"),
+    /** music | sfx | other (`SOUND_KINDS`) */
+    kind: text("kind").notNull().default("other"),
+    durationSec: numeric("duration_sec", { precision: 8, scale: 2 }),
+    r2Path: text("r2_path").notNull(),
+    mime: text("mime"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    position: integer("position").notNull().default(0),
+    addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("sound_collection_items_collection_idx").on(t.collectionId, t.position),
+    index("sound_collection_items_org_provider_idx").on(t.organizationId, t.provider, t.providerId),
+    uniqueIndex("sound_collection_items_unique_idx").on(t.collectionId, t.provider, t.providerId),
+  ],
+);

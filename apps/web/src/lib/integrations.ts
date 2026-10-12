@@ -3,6 +3,7 @@ export const INTEGRATIONS = [
   { provider: "anthropic", label: "Anthropic (Claude)", secretLabel: "API key", hasSpendCap: true, hasCredits: false },
   { provider: "pexels", label: "Pexels", secretLabel: "API key", hasSpendCap: false, hasCredits: false },
   { provider: "pixabay", label: "Pixabay", secretLabel: "API key", hasSpendCap: false, hasCredits: false },
+  { provider: "openverse", label: "Openverse (sound library; optional, raises the anonymous rate limit)", secretLabel: "CLIENT_ID:CLIENT_SECRET", hasSpendCap: false, hasCredits: false },
   { provider: "mubert", label: "Mubert (API v3)", secretLabel: "CUSTOMER_ID:ACCESS_TOKEN", hasSpendCap: true, hasCredits: false },
   { provider: "firecrawl", label: "Firecrawl (fallback fetch)", secretLabel: "API key", hasSpendCap: false, hasCredits: true },
   { provider: "cloudflare_browser", label: "Cloudflare Browser Rendering", secretLabel: "API token", hasSpendCap: false, hasCredits: false },
