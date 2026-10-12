@@ -26,7 +26,8 @@ Open questions that change the build are at the end (§13), each with a recommen
 
 **Non-goals (v1)**
 
-- Publishing to social channels (a later "motion comic" export can feed the existing video pipeline, §11).
+- Publishing a comic itself to social channels. Comics reach the channels as motion comics: a 9:16 video project made
+  from the comic, which goes through the normal review / render / publish flow (M4, §11.1).
 - Multi-user real-time co-editing.
 - Training or fine-tuning a model per character (LoRA). Consistency comes from reference images (§6).
 - Image models the app cannot reach today without a new contract (only Vertex Gemini in v1, §5).
@@ -327,7 +328,45 @@ reuse `media/editor-history.ts` (pure, generic), but the timeline-centric shell 
 | **M1 — Script to pages** | migration, flag, quota, presets, `/new`, adaptation, script review, sheets, drawing with Gemini Flash / Pro, auto lettering, reader, PNG export | A 6-page Vietnamese story becomes a readable comic with consistent main characters in < 10 min for < $5. |
 | **M2 — Editing** | page editor (redraw with instruction, variants, crop, balloon editing, layout templates), style + character libraries, "Vẽ thử", Claude page rewrite | A member fixes a bad panel and a misplaced balloon without leaving the page. |
 | **M3 — Export + models** | PDF, webtoon strip, zip; `openai` integration + GPT Image 2 adapter; optional vision quality gate | Same comic exported in three formats; switching image model per comic works. |
-| **M4 — Motion comic (optional)** | turn a comic into a 9:16 video project: one scene per panel (pan / zoom over the art), balloons as captions, voice-over per speaker with workspace voices; enters the normal review / render / publish flow | A comic becomes a publishable short. |
+| **M4 — Motion comic** | turn a comic into a 9:16 video project (§11.1): one scene per lettering beat over its panel (pan / zoom over the art), voice-over per speaker with workspace voices, lettering as word-timed captions; enters the normal editor / review / render / publish flow | A 7-page comic becomes a publishable short with one click and no script call. |
+
+### 11.1 Motion comic (M4)
+
+Decided 2026-10-12: in scope. The comic is turned into an ordinary video project, so everything downstream (editor,
+approval, render, QA, multi-channel logos, publishing) is reused unchanged and the output spec stays 1080×1920 / 30 fps /
+-14 LUFS.
+
+- **Entry point**: "Làm video" on the comic's Xuất tab: pick the pages (default all), the brand kit, the channel logo,
+  narrator voice, music. It creates a `projects` row with a new `source_kind = 'comic'` (CHECK extended; `url` null like
+  `text` / `topic`, so `projects_url_check` allows it), `comic_id` and `comic_version_id` (the version is frozen: later
+  comic edits do not change the video; "Làm lại từ bản mới" creates a new build).
+- **No script call**: `comic/motion.ts` (pure, tested) builds the script directly from the document. One scene per
+  lettering beat in reading order: speech / thought / whisper / shout → a line in the speaker's voice, caption → the
+  narrator, a silent panel → a 2–3 s beat with no voice-over, `sfx` → the scene's on-screen text (headline card) plus an
+  optional sound from the library. A panel with three lines gives three consecutive scenes over the same art. The
+  hook is the first page's first beat; the outro credits the comic ("Truyện: <title>") instead of a source link.
+  Fetch, faithfulness and topic research are skipped for this kind (the text is the member's own fiction).
+- **Voices per character**: `comic_characters.voice_preset_id` (nullable, migration with M4) picks a workspace voice
+  for each character; unset characters and the narrator fall back to the project's voice. TTS runs per scene as today,
+  so a scene has exactly one speaker. Word timings drive the captions as for any project, using the lettering text.
+- **Visuals**: each scene's visual is its panel image (`comic_images` copied as an `assets` row, origin `upload`,
+  provider `comic`, credit "Minh hoạ AI (Gemini)"). Panels are rarely 9:16, so the existing framing does the work:
+  a wide panel is a landscape still (full width on its blurred copy, composition 0.12.0), a tall or square one is
+  cover-cropped with `focus` set on the speaker's face box from `comic_images.meta.faces` and a slow Ken Burns towards
+  it; consecutive scenes on the same panel continue the move instead of restarting it. The rule "a picture must not
+  repeat within a video" and the ≤ 5 s shot cadence check are relaxed for `source_kind = 'comic'` (the same panel over
+  several beats is the format), in `prepare-assets` and in `media/editor-checks.ts`.
+- **Balloons**: not drawn in the video. The lettering text becomes the voice-over and the captions; a balloon burned
+  into a 1080×1920 frame would be unreadable and would duplicate the captions. A per-project switch "Giữ bóng thoại"
+  renders each panel with its balloons as the still instead (a single-panel `renderStillOnLambda` of `ComicPage`), for
+  silent / music-only cuts.
+- **Length**: ~4 s per spoken beat, so a 30-panel comic runs about 2 minutes. The new-video form shows the estimate
+  per platform and warns past the platform limits (the editor's existing duration check); picking fewer pages is the
+  lever. Long comics can be cut into parts: "Chia thành tập" makes one project per page range.
+- **Originality and disclosure**: the art is our own generated media, so it does not count against the third-party
+  footage limits (`media/originality.ts`); `projects.ai_disclosure` is set, as for any AI still.
+- **Composition**: no new visual kind is needed for v1 of M4 (stills + Ken Burns + captions already exist). A later
+  "panel reveal" transition (the next panel slides in along the page's reading order) would be a composition bump.
 
 ---
 
@@ -359,5 +398,4 @@ reuse `media/editor-history.ts` (pure, generic), but the timeline-centric shell 
    the quota.
 5. **Page formats to offer.** Recommended: `A4 dọc`, `Truyện tranh Mỹ (6.625×10.25")`, `Manga B6`, `Webtoon (cuộn dọc)`,
    `Vuông 1:1` (social carousel), `9:16` (stories). Print-ready bleed / CMYK is out of scope.
-6. **Motion comic (M4)** — wanted at all? It is what ties the feature back to the app's purpose (short videos), and
-   most of the pieces exist (voices, Remotion, publishing).
+6. ~~**Motion comic (M4)** — wanted at all?~~ **Decided: yes**, phase M4 (§11.1).
