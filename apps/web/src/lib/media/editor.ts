@@ -7,6 +7,7 @@
  * before phase 4 are reconstructed from their JSON (`docFromTimeline`).
  * Pure module (client + server + tests): R2 keys only, never URLs.
  */
+import { cartoonSceneSchema, cartoonSchema } from "@ai-news/video/cartoon";
 import { HYPERFRAMES_MAX_CHARS, motionSpecSchema } from "@ai-news/video/motion";
 import { brandSchema, focusSchema, isGraphicVisual, sketchSchema, type SketchStyle, type Timeline } from "@ai-news/video/schema";
 import { z } from "zod";
@@ -117,6 +118,8 @@ export const editorSceneSchema = z.object({
   overlay: z.boolean().default(true),
   /** Caption chunks relative to the scene's voice start; null = automatic chunking of voice.words. */
   captions: z.array(captionChunkSchema).nullable().default(null),
+  /** Motion comic: the panel, balloon and speaker of this beat (`@ai-news/video/cartoon`); null = a news scene. */
+  cartoon: cartoonSceneSchema.nullable().default(null),
 });
 export type EditorScene = z.infer<typeof editorSceneSchema>;
 
@@ -130,15 +133,23 @@ export const editorMusicSchema = z.object({
 });
 export type EditorMusic = z.infer<typeof editorMusicSchema>;
 
+/**
+ * Most scenes a document holds. A news script has a handful, but a motion comic makes one scene per line of
+ * dialogue (`comic/motion.ts`), so a 40-panel comic is easily 60+; 400 covers a 10 min video at ~1.5 s a line.
+ */
+export const MAX_SCENES = 400;
+
 export const editorDocSchema = z.object({
   v: z.literal(1).default(1),
   title: z.string().max(200),
   language: z.enum(["vi", "en"]),
   source: z.object({ name: z.string().nullable(), url: z.string() }),
   brand: brandSchema,
-  scenes: z.array(editorSceneSchema).min(1).max(30),
+  scenes: z.array(editorSceneSchema).min(1).max(MAX_SCENES),
   music: editorMusicSchema.nullable(),
   coverAtSec: z.number().nonnegative().nullable().default(null),
+  /** Motion comic drawn as a cartoon (composition 0.21.0): its panels; null = a news video. */
+  cartoon: cartoonSchema.nullable().default(null),
 });
 export type EditorDoc = z.infer<typeof editorDocSchema>;
 
@@ -246,10 +257,12 @@ export function buildFromDoc(doc: EditorDoc, audio: { mixKey: string; voiceKey: 
       holdMs: s.holdMs,
       overlay: s.overlay,
       captions: s.captions ?? undefined,
+      cartoon: s.cartoon,
     })),
     music: doc.music ? { key: doc.music.key, gainDb: doc.music.gainDb, attribution: doc.music.attribution } : null,
     audio: { mixKey: audio?.mixKey ?? null, voiceKey: audio?.voiceKey ?? null },
     coverAtSec: doc.coverAtSec,
+    cartoon: doc.cartoon,
     leadMs: LEAD_MS,
     gapMs: GAP_MS,
     tailMs: TAIL_MS,
@@ -282,6 +295,7 @@ export function docKeys(doc: EditorDoc): string[] {
   if (doc.music) keys.add(doc.music.key);
   if (doc.brand.logoSrc) keys.add(doc.brand.logoSrc);
   if (doc.brand.overlaySrc) keys.add(doc.brand.overlaySrc);
+  for (const p of Object.values(doc.cartoon?.panels ?? {})) keys.add(p.src);
   return [...keys];
 }
 
@@ -355,12 +369,13 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
       holdMs: 0,
       overlay: sc.overlay ?? true,
       captions: null,
+      cartoon: sc.cartoon ?? null,
     };
   });
   const music = t.audio.musicSrc
     ? { key: t.audio.musicSrc, gainDb: t.audio.musicGainDb, attribution: t.attribution.find((a) => a.startsWith("Nhạc")) ?? "Nhạc", title: b.music?.title ?? "Nhạc nền", source: (b.music?.source === "mubert" ? "mubert" : "library") as "mubert" | "library", licence: b.music?.licence ?? "" }
     : null;
-  return editorDocSchema.parse({ v: 1, title: t.title, language: t.language, source: t.source, brand: t.brand, scenes, music, coverAtSec: t.coverAtSec ?? null });
+  return editorDocSchema.parse({ v: 1, title: t.title, language: t.language, source: t.source, brand: t.brand, scenes, music, coverAtSec: t.coverAtSec ?? null, cartoon: t.cartoon ?? null });
 }
 
 /** Vietnamese names of the hand-drawn styles (editor, build forms, version history). */

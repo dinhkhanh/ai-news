@@ -4,6 +4,7 @@ import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPr
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
 import { boxShadowCss, captionLines, CREDIT_MAX_WIDTH, isGraphicVisual, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type SketchStyle, type Visual } from "../schema";
 
+import { Cartoon } from "./Cartoon";
 import { HyperFramesShot } from "./HyperFramesShot";
 import { MotionVisual } from "./Motion";
 import { Picture, SketchReveal } from "./Sketch";
@@ -452,6 +453,16 @@ const PreviewAudio: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
 export const News: React.FC<Timeline> = (timeline) => {
   const { brand, scenes, captions, audio } = timeline;
   const last = useMemo(() => scenes[scenes.length - 1], [scenes]);
+  // Motion comic: drawn as a cartoon, with none of the news layers but the logo (timelines before 0.21.0 have no `cartoon`).
+  if (timeline.cartoon) {
+    return (
+      <AbsoluteFill style={{ backgroundColor: "#111113" }}>
+        <Cartoon timeline={{ ...timeline, cartoon: timeline.cartoon }} />
+        <Logo brand={brand} />
+        {audio.mixSrc ? <Audio src={audio.mixSrc} /> : <PreviewAudio timeline={timeline} />}
+      </AbsoluteFill>
+    );
+  }
   return (
     <AbsoluteFill style={{ backgroundColor: brand.colours.background, color: brand.colours.text }}>
       {scenes.map((scene) => (

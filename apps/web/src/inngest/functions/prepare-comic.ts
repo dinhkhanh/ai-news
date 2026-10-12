@@ -9,6 +9,7 @@ import { eventSuperseded } from "@/lib/project-state";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
+import { comicDocSchema } from "@ai-news/video/comic";
 import { imageModel } from "@/lib/comic/models";
 import type { ComicScript, ComicSceneMeta } from "@/lib/comic/motion";
 import { composeComicDoc } from "@/lib/comic/motion-doc";
@@ -176,10 +177,14 @@ export const prepareComicFn = inngest.createFunction(
       return pickMusic({ tone: input.tone, durationSec: preTiming.durationSec, r2Key: media(`music/${input.buildId}.mp3`) }, pctx);
     });
 
-    /* ---- editor document: one shot per beat, the panel framed on whoever speaks (`motion-doc.ts`) ---- */
+    /* ---- editor document: one beat per scene, drawn as a cartoon from the comic version (`motion-doc.ts`) ---- */
     const doc: EditorDoc = await step.run("compose-doc", async () => {
       await reportProgress(pctx, { label: "Ghép cảnh theo từng lời thoại", pct: 78 });
-      return composeComicDoc({ title: input.title, language: input.language, comic: input.comic, scenes: input.scenes, brand: brand.brand, hasChannelLogo: input.hasChannelLogo, voices, panels, music: music.pick });
+      // The version the video was made from (immutable); loaded here so the whole comic never goes through step state.
+      // Gone with its comic = the panels are drawn the news way (still the copied pictures).
+      const version = await withOrgContext(ctx, (tx) => tx.query.comicVersions.findFirst({ where: eq(schema.comicVersions.id, input.comic.versionId), columns: { doc: true } }));
+      const parsed = version ? comicDocSchema.safeParse(version.doc) : null;
+      return composeComicDoc({ title: input.title, language: input.language, comic: input.comic, scenes: input.scenes, brand: brand.brand, hasChannelLogo: input.hasChannelLogo, voices, panels, music: music.pick, source: parsed?.success ? parsed.data : null });
     });
 
     const mix = await step.run("mix", async () => {
@@ -211,6 +216,7 @@ export const prepareComicFn = inngest.createFunction(
           panels: Object.keys(panels).length,
           silent: input.scenes.length - spoken.length,
           framed: doc.scenes.filter((s) => s.visual.kind === "image" && s.visual.focus).length,
+          cartoon: Boolean(doc.cartoon),
         },
         music: music.pick ? { source: music.pick.source, title: music.pick.title, licence: music.pick.licence, key: music.pick.key } : null,
         musicError: music.error,

@@ -142,6 +142,7 @@ describe("motion shots in the editor document", () => {
     holdMs: 0,
     overlay: true,
     captions: null,
+    cartoon: null,
   };
   const doc = editorDocSchema.parse({ v: 1, title: "t", language: "vi", source: { name: null, url: "" }, brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {} }), scenes: [motionScene], music: null, coverAtSec: null });
 

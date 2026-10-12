@@ -39,6 +39,8 @@ function resolveForPlayer(t: Timeline, urls: Record<string, string>, logoUrl: st
       return { ...s, voiceSrc: u(s.voiceSrc), visual: visual(s.visual), shots: s.shots.map((sh) => ({ ...sh, visual: visual(sh.visual) })) };
     }),
     audio: { ...t.audio, mixSrc: u(t.audio.mixSrc), voiceSrc: u(t.audio.voiceSrc), musicSrc: u(t.audio.musicSrc) },
+    // Motion comic: a panel without a URL (yet) shows as an empty frame.
+    cartoon: t.cartoon ? { ...t.cartoon, panels: Object.fromEntries(Object.entries(t.cartoon.panels).map(([id, p]) => [id, { ...p, src: u(p.src) ?? "" }])) } : null,
   };
 }
 

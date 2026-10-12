@@ -1,4 +1,5 @@
 import { Composition } from "remotion";
+import { sampleCartoonTimeline } from "./cartoon-sample";
 import { sampleComicPage } from "./comic-sample";
 import { ComicPageStill, type ComicPageStillProps } from "./compositions/ComicPage";
 import { ComicStripStill, type ComicStripStillProps } from "./compositions/ComicStrip";
@@ -53,6 +54,18 @@ export const RemotionRoot: React.FC = () => (
       fps={OUTPUT.fps}
       durationInFrames={sampleSketchTimeline.durationFrames}
       defaultProps={sampleSketchTimeline}
+      calculateMetadata={({ props }) => ({ durationInFrames: props.durationFrames, fps: OUTPUT.fps })}
+    />
+    {/* Studio only: a motion comic drawn as a cartoon (0.21.0, `Cartoon.tsx`). */}
+    <Composition
+      id="NewsCartoonSample"
+      component={News}
+      schema={timelineSchema}
+      width={OUTPUT.width}
+      height={OUTPUT.height}
+      fps={OUTPUT.fps}
+      durationInFrames={sampleCartoonTimeline.durationFrames}
+      defaultProps={sampleCartoonTimeline}
       calculateMetadata={({ props }) => ({ durationInFrames: props.durationFrames, fps: OUTPUT.fps })}
     />
     {/* A comic page as a still (renderStillOnLambda, docs/COMIC.md §3): size from the comic's format and the page height. */}

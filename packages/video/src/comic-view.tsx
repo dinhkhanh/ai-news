@@ -22,6 +22,13 @@ export type ComicPageViewProps = {
   ImageComponent?: Img | "img";
   /** CSS font-family per lettering font, when the host loads the faces under other names (next/font). */
   families?: Partial<Record<ComicDoc["font"], string>>;
+  /**
+   * Motion comic (`Cartoon.tsx`): how far each balloon has popped in, by id. When given, a balloon missing from
+   * it is not drawn; `opacity` 0..1 and `scale` (1 = in place) animate it and its tail.
+   */
+  reveal?: Record<string, { opacity: number; scale: number }>;
+  /** Page colour behind the panels (default white). */
+  background?: string;
 };
 
 const pct = (n: number, of: number) => `${(n / of) * 100}%`;
@@ -131,15 +138,24 @@ function balloonStyle(b: Balloon, width: number, height: number, family: string)
   }
 }
 
-export function ComicPageView({ format, font, page, srcs, credit, placeholders = false, ImageComponent = "img", families }: ComicPageViewProps) {
+export function ComicPageView({ format, font, page, srcs, credit, placeholders = false, ImageComponent = "img", families, reveal, background = "#FFFFFF" }: ComicPageViewProps) {
   const width = format.width;
   const height = page.height;
   const family = families?.[font] ?? `'${COMIC_FONTS[font]?.family ?? "Itim"}'`;
-  const balloons = page.panels.flatMap((p) => p.lettering).filter((b) => b.rect && b.text.trim());
+  const balloons = page.panels.flatMap((p) => p.lettering).filter((b) => b.rect && b.text.trim() && (!reveal || reveal[b.id]));
+  const shown = (b: Balloon) => reveal?.[b.id];
+  // The balloon and its tail grow from the tail's tip (where the speaker is), or from their centre.
+  const popStyle = (b: Balloon, base: CSSProperties): CSSProperties => {
+    const r = shown(b);
+    if (!r) return base;
+    const origin = b.tail && b.rect ? `${(((b.tail.x - b.rect.x) / b.rect.w) * 100).toFixed(1)}% ${(((b.tail.y - b.rect.y) / b.rect.h) * 100).toFixed(1)}%` : "50% 50%";
+    return { ...base, opacity: r.opacity, transform: `${base.transform ?? ""} scale(${r.scale})`.trim(), transformOrigin: origin };
+  };
+  const tailOpacity = (b: Balloon) => shown(b)?.opacity ?? 1;
   const tails = balloons.filter((b) => b.kind !== "caption" && b.kind !== "sfx").map((b) => ({ b, g: tailGeometry(b) }));
   const stroke = (b: Balloon) => Math.max(2, b.fontSize * (b.kind === "shout" ? 0.16 : 0.09));
   return (
-    <div style={{ position: "relative", width: "100%", aspectRatio: `${width} / ${height}`, containerType: "inline-size", background: "#FFFFFF", overflow: "hidden" }}>
+    <div style={{ position: "relative", width: "100%", aspectRatio: `${width} / ${height}`, containerType: "inline-size", background, overflow: "hidden" }}>
       {page.panels.map((p) => (
         <PanelBox key={p.id} panel={p} width={width} height={height} srcs={srcs} placeholders={placeholders} ImageComponent={ImageComponent} />
       ))}
@@ -147,12 +163,12 @@ export function ComicPageView({ format, font, page, srcs, credit, placeholders =
       <svg viewBox={`0 0 ${width} ${height}`} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} aria-hidden>
         {tails.map(({ b, g }) =>
           g && b.kind !== "thought" ? (
-            <polygon key={b.id} points={`${g.base[0]},${g.base[1]} ${g.tip[0]},${g.tip[1]} ${g.base[2]},${g.base[3]}`} fill="#FFFFFF" stroke="#111113" strokeWidth={stroke(b) * 2} strokeLinejoin="round" strokeDasharray={b.kind === "whisper" ? `${b.fontSize * 0.3} ${b.fontSize * 0.2}` : undefined} />
+            <polygon key={b.id} opacity={tailOpacity(b)} points={`${g.base[0]},${g.base[1]} ${g.tip[0]},${g.tip[1]} ${g.base[2]},${g.base[3]}`} fill="#FFFFFF" stroke="#111113" strokeWidth={stroke(b) * 2} strokeLinejoin="round" strokeDasharray={b.kind === "whisper" ? `${b.fontSize * 0.3} ${b.fontSize * 0.2}` : undefined} />
           ) : null,
         )}
       </svg>
       {balloons.map((b) => (
-        <div key={b.id} style={balloonStyle(b, width, height, family)}>
+        <div key={b.id} style={popStyle(b, balloonStyle(b, width, height, family))}>
           <span style={{ whiteSpace: "pre-line" }}>{b.text}</span>
         </div>
       ))}
@@ -165,7 +181,7 @@ export function ComicPageView({ format, font, page, srcs, credit, placeholders =
             const startX = g.centre[0] + g.ux * g.exit;
             const startY = g.centre[1] + g.uy * g.exit;
             return (
-              <g key={b.id}>
+              <g key={b.id} opacity={tailOpacity(b)}>
                 {steps.map((s, i) => (
                   <circle key={i} cx={startX + (g.tip[0] - startX) * s} cy={startY + (g.tip[1] - startY) * s} r={b.fontSize * (0.42 - i * 0.12)} fill="#FFFFFF" stroke="#111113" strokeWidth={stroke(b)} />
                 ))}
@@ -178,7 +194,7 @@ export function ComicPageView({ format, font, page, srcs, credit, placeholders =
           const shrink = (x: number, y: number) => `${mx + (x - mx) * k},${my + (y - my) * k}`;
           const tipX = mx + (g.tip[0] - mx) * 0.9;
           const tipY = my + (g.tip[1] - my) * 0.9;
-          return <polygon key={b.id} points={`${shrink(g.base[0], g.base[1])} ${tipX},${tipY} ${shrink(g.base[2], g.base[3])}`} fill="#FFFFFF" />;
+          return <polygon key={b.id} opacity={tailOpacity(b)} points={`${shrink(g.base[0], g.base[1])} ${tipX},${tipY} ${shrink(g.base[2], g.base[3])}`} fill="#FFFFFF" />;
         })}
       </svg>
       {credit ? (

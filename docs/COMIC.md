@@ -511,6 +511,34 @@ approval, render, QA, multi-channel logos, publishing) is reused unchanged and t
   run migration 0032.
 - Not tested against the live services here: Google TTS, the media Lambda mix, R2 copies.
 
+### 11.6 Cartoon render (2026-10-12)
+
+The M4 video went through the news layers (headline card, karaoke captions, a credit line per shot, the
+"Nguồn: …" outro, a Ken Burns crop of each panel), so it read as a news short. It is now drawn as a cartoon
+(composition **0.21.0**, `packages/video/src/cartoon.ts` pure + tested from `apps/web/src/lib/media/cartoon.test.ts`,
+`compositions/Cartoon.tsx`):
+
+- **Data**: `timeline.cartoon` = lettering font, reading direction and the panels shown (size, the project's copy of
+  the picture, crop, the panel's balloons in panel coordinates); `scenes[].cartoon` = the beat's panel, the balloon
+  it reads (`ComicSceneMeta.balloonId`, new; older scripts get the n-th spoken balloon for the n-th spoken beat) and
+  the speaker's face. Built by `cartoonFromComic` (`lib/comic/motion-doc.ts`) from the comic version the project was
+  made from, which `prepare-comic` loads in its `compose-doc` step; carried by the editor document
+  (`EditorDoc.cartoon`, `EditorScene.cartoon`) so saved versions keep it. A version that is gone (comic deleted)
+  falls back to the news look. `build_json.comic.cartoon` says which one was built.
+- **Look**: `News` hands a timeline with `cartoon` to `Cartoon` and keeps only the channel logo and the audio. Each
+  run of scenes on one panel is one layer: the panel whole (with every balloon and tail sticking out of it) over a
+  blurred, halftoned copy of itself, drawn by `ComicPageView` (new optional `reveal` / `background` props) so it
+  matches the reader. A balloon pops in when its line starts and stays for the rest of the panel; sound effects pop
+  as the panel arrives. The camera opens on the panel as a whole (`overviewCamera`: a wide panel is enlarged and read
+  across in the reading direction, a tall one read downwards, a narrated caption held in view), glides to the
+  speaker's balloon and face for each line (`beatCamera`, ≤ 1.7×) and keeps pushing in slowly (`cameraAt`). The next
+  panel slides in over the previous one (same page) or turns in like a page (new page). The opening beat carries the
+  title card, the closing one the "Hết" / "Còn tiếp…" card with the picture and music credits.
+- **Limits**: one scene per line means a long comic has many scenes: `MAX_SCENES` (400, `media/editor.ts`, was 30,
+  which made a 43-panel comic fail with "Too big: expected array to have <=30 items"); "Làm video" refuses a range
+  above it and asks to split into episodes. Swapping a scene's picture in the editor does not change the cartoon
+  (it draws the panel). `NewsCartoonSample` is the Studio preview.
+
 ---
 
 ## 12. Risks

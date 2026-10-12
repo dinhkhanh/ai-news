@@ -29,8 +29,8 @@ import { crc32, jpegPdf, pdfPageSize, zipStore } from "./files";
 import { formatOf, layoutPage, rowsFor, snapAspect } from "./layout";
 import { balloonBox, baseFontSize, facesOnPage, letterPanel, MIN_FONT_SCALE, segmentHits, speakerPoint, wrapWords } from "./lettering";
 import { brandSchema } from "@ai-news/video/schema";
-import { buildFromDoc } from "@/lib/media/editor";
-import { composeComicDoc } from "./motion-doc";
+import { buildFromDoc, docKeys, MAX_SCENES } from "@/lib/media/editor";
+import { cartoonFromComic, composeComicDoc } from "./motion-doc";
 import { comicBeats, comicToScript, episodeRanges, estimateMotionSec, pageRange, speakerFace } from "./motion";
 import { estimateAdaptUsd, estimateDrawUsd, IMAGE_MODELS, imageModel, openaiImageCostUsd, openaiSize, textModel } from "./models";
 import { classifyOpenAiError } from "./openai-image";
@@ -612,6 +612,56 @@ describe("motion comic", () => {
     // A silent beat lasts its 2.5 s, a spoken one its recording.
     expect(durationSec).toBeGreaterThan(6 * 2 + 2.5);
     expect(() => composeComicDoc({ title: s.title, language: "vi", comic: s.comic, scenes: s.scenes, brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {} }), hasChannelLogo: false, voices, panels: {}, music: null })).toThrow(/not copied/);
+  });
+
+  it("composes a long comic: one scene per line is far more than a news video's handful", () => {
+    const s = comicToScript(doc, { comicId: "c1", versionId: "v1" })!.script;
+    // 43 panels of a real comic made 60+ beats; the document refused more than 30 scenes.
+    const n = 64;
+    const scenes = Array.from({ length: n }, (_, i) => ({ ...s.scenes[1], id: `s${i + 1}`, kind: i === 0 ? ("hook" as const) : i === n - 1 ? ("cta" as const) : ("body" as const) }));
+    const comic = { ...s.comic, scenes: Object.fromEntries(scenes.map((x) => [x.id, s.comic.scenes.s2])) };
+    const m = s.comic.scenes.s2;
+    const panels = { [m.imageId]: { assetId: "a", key: `media/o/p/comic/${m.imageId}.png`, credit: "Minh hoạ AI (Gemini)" } };
+    const d = composeComicDoc({ title: s.title, language: "vi", comic, scenes, brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {} }), hasChannelLogo: false, voices: [], panels, music: null });
+    expect(d.scenes).toHaveLength(n);
+    expect(MAX_SCENES).toBeGreaterThanOrEqual(n);
+  });
+
+  it("draws the video as a cartoon from the comic version: each beat's panel, balloon and speaker", () => {
+    const s = comicToScript(doc, { comicId: "c1", versionId: "v1" })!.script;
+    const panels = Object.fromEntries(Object.values(s.comic.scenes).map((m) => [m.imageId, { assetId: `asset-${m.imageId}`, key: `media/o/p/comic/${m.imageId}.png`, credit: "Minh hoạ AI (Gemini)" }]));
+    const ids = s.scenes.map((x) => x.id);
+    const out = cartoonFromComic(doc, s.comic, ids, panels)!;
+    expect(Object.keys(out.cartoon.panels)).toEqual(["k1", "k2", "k3", "k4"]);
+    expect(out.cartoon.panels.k1.src).toBe("media/o/p/comic/img-k1.png");
+    expect(out.cartoon.panels.k4.page).toBe(2);
+    expect(out.cartoon).toMatchObject({ font: "itim", readingDirection: "ltr" });
+    expect(ids.map((id) => [out.scenes[id].panel, out.scenes[id].balloon])).toEqual([
+      ["k1", "b1"],
+      ["k1", "b2"],
+      ["k1", "b3"],
+      ["k2", null],
+      ["k3", null],
+      ["k4", "b5"],
+      ["k4", null],
+    ]);
+    expect(out.scenes.s2.face?.x).toBe(0.1);
+    // Scripts made before beats named their balloon: the n-th spoken beat of a panel reads its n-th spoken balloon.
+    const old = { ...s.comic, scenes: Object.fromEntries(Object.entries(s.comic.scenes).map(([k, m]) => [k, { ...m, balloonId: undefined }])) };
+    expect(cartoonFromComic(doc, old, ids, panels)!.scenes).toEqual(out.scenes);
+    // A panel the version no longer has: no cartoon (the news look).
+    expect(cartoonFromComic({ ...doc, pages: doc.pages.slice(1) }, s.comic, ids, panels)).toBeNull();
+
+    const brand = brandSchema.parse({ colours: {}, fonts: {}, caption: {} });
+    const d = composeComicDoc({ title: s.title, language: "vi", comic: s.comic, scenes: s.scenes, brand, hasChannelLogo: false, voices: [], panels, music: null, source: doc });
+    expect(d.cartoon?.panels.k1.src).toBe("media/o/p/comic/img-k1.png");
+    expect(d.scenes.every((x) => x.cartoon && x.overlay === false)).toBe(true);
+    expect(docKeys(d)).toContain("media/o/p/comic/img-k4.png");
+    const { timeline } = buildFromDoc(d, null);
+    expect(timeline.cartoon?.panels.k3.balloons.map((b) => b.id)).toEqual(["b4"]);
+    expect(timeline.scenes[1].cartoon).toMatchObject({ panel: "k1", balloon: "b2" });
+    // Without the version, the news look as before.
+    expect(composeComicDoc({ title: s.title, language: "vi", comic: s.comic, scenes: s.scenes, brand, hasChannelLogo: false, voices: [], panels, music: null }).cartoon).toBeNull();
   });
 
   it("covers a page range, splits episodes and says when the story goes on", () => {

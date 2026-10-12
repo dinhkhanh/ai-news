@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cartoonSceneSchema, cartoonSchema } from "./cartoon";
 import { motionSpecSchema } from "./motion";
 
 /** Output spec (docs/PLAN.md §1). */
@@ -367,6 +368,8 @@ export const sceneSchema = z.object({
   voiceSrc: z.string().nullable().default(null),
   /** Show the brand overlay PNG (`brand.overlaySrc`) on this scene; switched per scene in the editor. */
   overlay: z.boolean().default(true),
+  /** Motion comic (0.21.0): the panel, balloon and speaker of this beat; null = a news scene. */
+  cartoon: cartoonSceneSchema.nullable().default(null),
 });
 export type TimelineScene = z.infer<typeof sceneSchema>;
 
@@ -443,5 +446,7 @@ export const timelineSchema = z.object({
   attribution: z.array(z.string()).default([]),
   /** Cover frame chosen in the editor (seconds); null = automatic (~1.2 s in). */
   coverAtSec: z.number().nonnegative().nullable().default(null),
+  /** Motion comic (0.21.0, `cartoon.ts`): set = the whole video is drawn as a cartoon by `Cartoon.tsx`. */
+  cartoon: cartoonSchema.nullable().default(null),
 });
 export type Timeline = z.infer<typeof timelineSchema>;

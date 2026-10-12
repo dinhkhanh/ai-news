@@ -603,6 +603,7 @@ export const prepareAssetsFn = inngest.createFunction(
           holdMs: 0,
           overlay: true,
           captions: null,
+          cartoon: null,
         };
       });
       return editorDocSchema.parse({

@@ -17,9 +17,9 @@ export const sampleTimeline: Timeline = {
   source: { name: "VnExpress", url: "https://vnexpress.net/metro-so-1-keo-dai-them-12-km-4712345.html" },
   brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {}, outroText: "Theo dõi để cập nhật tin mới" }),
   scenes: [
-    { id: "s1", kind: "hook", from: 0, durationFrames: 120, headline: "Metro số 1 kéo dài thêm 12 km", visual: { kind: "solid" }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true },
-    { id: "s2", kind: "body", from: 120, durationFrames: 150, headline: "Khởi công quý ba năm 2027", visual: { kind: "image", src: LANDSCAPE_PHOTO, kenBurns: true, focus: null, sketch: null }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true },
-    { id: "s3", kind: "cta", from: 270, durationFrames: 90, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
+    { id: "s1", kind: "hook", from: 0, durationFrames: 120, headline: "Metro số 1 kéo dài thêm 12 km", visual: { kind: "solid" }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true, cartoon: null },
+    { id: "s2", kind: "body", from: 120, durationFrames: 150, headline: "Khởi công quý ba năm 2027", visual: { kind: "image", src: LANDSCAPE_PHOTO, kenBurns: true, focus: null, sketch: null }, shots: [], credit: "Ảnh: VnExpress", voiceSrc: null, overlay: true, cartoon: null },
+    { id: "s3", kind: "cta", from: 270, durationFrames: 90, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true, cartoon: null },
   ],
   captions: [
     { text: "Sáng nay, Thành phố Hồ Chí Minh", startMs: 200, endMs: 2200, words: [{ w: "Sáng", s: 200, e: 600 }, { w: "nay,", s: 600, e: 1000 }, { w: "Thành", s: 1000, e: 1300, j: true }, { w: "phố", s: 1300, e: 1600 }, { w: "Hồ", s: 1600, e: 1900, j: true }, { w: "Chí", s: 1900, e: 2050, j: true }, { w: "Minh", s: 2050, e: 2200 }] },
@@ -28,6 +28,7 @@ export const sampleTimeline: Timeline = {
   audio: { mixSrc: null, voiceSrc: null, musicSrc: null, musicGainDb: -12 },
   attribution: ["Nhạc: Mubert"],
   coverAtSec: null,
+  cartoon: null,
 };
 
 /** Studio preview of the motion graphics (0.15.0): a `remotion` spec scene, a `hyperframes` scene, then the CTA. */
@@ -97,6 +98,7 @@ export const sampleMotionTimeline: Timeline = {
       credit: null,
       voiceSrc: null,
       overlay: true,
+      cartoon: null,
     },
     {
       id: "s2",
@@ -129,8 +131,9 @@ window.__timelines=window.__timelines||{};window.__timelines.shot=tl;</script></
       credit: null,
       voiceSrc: null,
       overlay: true,
+      cartoon: null,
     },
-    { id: "s3", kind: "cta", from: 420, durationFrames: 120, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true },
+    { id: "s3", kind: "cta", from: 420, durationFrames: 120, headline: "", visual: { kind: "solid" }, shots: [], credit: null, voiceSrc: null, overlay: true, cartoon: null },
   ],
 };
 
@@ -154,5 +157,6 @@ export const sampleSketchTimeline: Timeline = {
     credit: "Ảnh: VnExpress",
     voiceSrc: null,
     overlay: true,
+    cartoon: null,
   })),
 };

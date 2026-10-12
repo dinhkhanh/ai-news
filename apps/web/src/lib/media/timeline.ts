@@ -5,6 +5,7 @@
  * timeline-resolve.ts right before a render.
  */
 import { MAX_SHOT_SEC, timelineSchema, type Brand, type Focus, type Shot, type Sketch, type Timeline, type Visual } from "@ai-news/video/schema";
+import type { Cartoon, CartoonScene } from "@ai-news/video/cartoon";
 import type { MotionSpec } from "@ai-news/video/motion";
 import type { TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
@@ -49,11 +50,15 @@ export type BuildInput = {
     overlay?: boolean;
     /** Caption chunks relative to this scene's voice start; default = automatic chunking of `voice.words`. */
     captions?: CaptionChunk[];
+    /** Motion comic: this beat's panel, balloon and speaker. */
+    cartoon?: CartoonScene | null;
   }>;
   music: { key: string; gainDb?: number; attribution: string } | null;
   audio: { mixKey: string | null; voiceKey: string | null };
   /** Cover frame chosen in the editor; null = automatic. */
   coverAtSec?: number | null;
+  /** Motion comic drawn as a cartoon (composition 0.21.0); null = a news video. */
+  cartoon?: Cartoon | null;
   /** Silence between scenes and after the last one. */
   gapMs?: number;
   tailMs?: number;
@@ -115,7 +120,7 @@ export function buildTimeline(input: BuildInput): { timeline: Timeline; duration
   const scenes = input.scenes.map((s, i) => {
     const t = timings[i];
     const shots = layoutShots([s.visual, ...(s.shots ?? [])], t.durationFrames);
-    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual: shots[0].visual, shots, credit: shots[0].credit, voiceSrc: s.voice?.key ?? null, overlay: s.overlay ?? true };
+    return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual: shots[0].visual, shots, credit: shots[0].credit, voiceSrc: s.voice?.key ?? null, overlay: s.overlay ?? true, cartoon: s.cartoon ?? null };
   });
   const captions = input.scenes.flatMap((s, i) => {
     if (!s.voice) return [];
@@ -140,6 +145,7 @@ export function buildTimeline(input: BuildInput): { timeline: Timeline; duration
     audio: { mixSrc: input.audio.mixKey, voiceSrc: input.audio.voiceKey, musicSrc: input.music?.key ?? null, musicGainDb: input.music?.gainDb ?? -12 },
     attribution: [...credits],
     coverAtSec: input.coverAtSec ?? null,
+    cartoon: input.cartoon ?? null,
   });
   return { timeline, durationSec, timings };
 }

@@ -23,7 +23,11 @@ export async function resolveTimelineSrcs(t: Timeline, expiresIn = 3 * 3600): Pr
     })),
   );
   const [mixSrc, voiceSrc, musicSrc, logoSrc, overlaySrc] = await Promise.all([r(t.audio.mixSrc), r(t.audio.voiceSrc), r(t.audio.musicSrc), r(t.brand.logoSrc), r(t.brand.overlaySrc)]);
-  return { ...t, scenes, brand: { ...t.brand, logoSrc, overlaySrc }, audio: { ...t.audio, mixSrc, voiceSrc, musicSrc } };
+  // Motion comic: the panels' pictures (timelines before 0.21.0 have no `cartoon`).
+  const cartoon = t.cartoon
+    ? { ...t.cartoon, panels: Object.fromEntries(await Promise.all(Object.entries(t.cartoon.panels).map(async ([id, p]) => [id, { ...p, src: await resolveSrc(p.src, expiresIn) }] as const))) }
+    : (t.cartoon ?? null);
+  return { ...t, scenes, brand: { ...t.brand, logoSrc, overlaySrc }, audio: { ...t.audio, mixSrc, voiceSrc, musicSrc }, cartoon };
 }
 
 /** Presign a set of keys for browser playback (editor preview). Failures are skipped. */

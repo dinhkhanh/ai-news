@@ -11,6 +11,7 @@ import { comicToScript, episodeRanges, pageRange } from "@/lib/comic/motion";
 import { loadComic } from "@/lib/comic/service";
 import { countWords } from "@/lib/fetch/readability";
 import { flagEnabled } from "@/lib/flags";
+import { MAX_SCENES } from "@/lib/media/editor";
 import { channelLogo } from "@/lib/media/logo";
 import { findVoice } from "@/lib/media/tts";
 import { startProgress } from "@/lib/project-state";
@@ -56,6 +57,8 @@ export async function makeComicVideo(_: ActionState, fd: FormData): Promise<Acti
     const usable = built.filter((b): b is typeof b & { out: NonNullable<typeof b.out> } => Boolean(b.out));
     if (!usable.length) throw new Error("Các trang đã chọn chưa có khung nào được vẽ");
     const skipped = usable.reduce((a, b) => a + b.out.skipped, 0);
+    const tooLong = usable.find((b) => b.out.script.scenes.length > MAX_SCENES);
+    if (tooLong) throw new Error(`Trang ${tooLong.range.from}–${tooLong.range.to} có ${tooLong.out.script.scenes.length} lời thoại, một video tối đa ${MAX_SCENES}: chia thành tập`);
 
     const created = await withOrgContext(ws, async (tx) => {
       const out: { projectId: string; scriptId: string; title: string; pages: { from: number; to: number }; scenes: number; durationSec: number }[] = [];

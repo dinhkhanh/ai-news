@@ -1,8 +1,57 @@
+import type { Cartoon, CartoonScene } from "@ai-news/video/cartoon";
+import type { ComicDoc, Panel } from "@ai-news/video/comic";
 import type { Brand } from "@ai-news/video/schema";
 import type { TimedWord } from "@/lib/media/align";
 import { editorDocSchema, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { frameStill, overlayZones } from "@/lib/media/framing";
 import type { ComicScriptMeta } from "./motion";
+
+/**
+ * The cartoon layer of a motion comic (composition 0.21.0, `@ai-news/video/cartoon`): every panel the scenes show,
+ * from the comic version the video was made from, with its lettering moved to the panel's own coordinates and the
+ * project's copy of its picture; per scene, the panel, the balloon it reads and the speaker's face. Scripts made
+ * before beats carried `balloonId` get the n-th spoken balloon of the panel for its n-th spoken beat, which is how
+ * `comicBeats` made them. Null when a panel is missing from the version (the video is then drawn the news way).
+ */
+export function cartoonFromComic(
+  source: Pick<ComicDoc, "font" | "readingDirection" | "pages">,
+  comic: ComicScriptMeta,
+  sceneIds: string[],
+  panels: Record<string, { key: string }>,
+): { cartoon: Cartoon; scenes: Record<string, CartoonScene> } | null {
+  const byId = new Map<string, Panel>(source.pages.flatMap((p) => p.panels.map((x) => [x.id, x] as const)));
+  const out: Cartoon["panels"] = {};
+  const scenes: Record<string, CartoonScene> = {};
+  const spokenSeen = new Map<string, number>();
+  for (const id of sceneIds) {
+    const m = comic.scenes[id];
+    const panel = m ? byId.get(m.panelId) : undefined;
+    const picture = m ? panels[m.imageId] : undefined;
+    if (!m || !panel || !picture) return null;
+    const lettering = panel.lettering.filter((b) => b.text.trim());
+    if (!out[panel.id]) {
+      const { x, y } = panel.rect;
+      out[panel.id] = {
+        page: m.page,
+        w: panel.rect.w,
+        h: panel.rect.h,
+        src: picture.key,
+        imgW: m.width,
+        imgH: m.height,
+        crop: panel.crop ?? null,
+        balloons: lettering.map((b) => ({ ...b, rect: b.rect ? { ...b.rect, x: b.rect.x - x, y: b.rect.y - y } : null, tail: b.tail ? { x: b.tail.x - x, y: b.tail.y - y } : null })),
+      };
+    }
+    let balloon = m.balloonId ?? null;
+    if (m.balloonId === undefined && m.lettering && m.lettering !== "sfx") {
+      const n = spokenSeen.get(panel.id) ?? 0;
+      spokenSeen.set(panel.id, n + 1);
+      balloon = lettering.filter((b) => b.kind !== "sfx")[n]?.id ?? null;
+    }
+    scenes[id] = { panel: panel.id, balloon, face: m.face };
+  }
+  return { cartoon: { font: source.font, readingDirection: source.readingDirection, panels: out }, scenes };
+}
 
 /**
  * The editor document of a motion comic (docs/COMIC.md §11.1): one shot per beat, the beat's panel (copied into the
@@ -21,7 +70,10 @@ export function composeComicDoc(input: {
   /** comic_images.id → the project's copy of the picture. */
   panels: Record<string, { assetId: string; key: string; credit: string }>;
   music: { key: string; attribution: string; title: string; source: "mubert" | "library"; licence: string } | null;
+  /** The comic version the video was made from: drawn as a cartoon (`cartoonFromComic`); null = the news look. */
+  source?: Pick<ComicDoc, "font" | "readingDirection" | "pages"> | null;
 }): EditorDoc {
+  const cartoon = input.source ? cartoonFromComic(input.source, input.comic, input.scenes.map((s) => s.id), input.panels) : null;
   const scenes: EditorScene[] = input.scenes.map((sc) => {
     const m = input.comic.scenes[sc.id];
     if (!m) throw new Error(`Scene ${sc.id} has no panel`);
@@ -43,8 +95,9 @@ export function composeComicDoc(input: {
       visual: { kind: "image", key: p.key, kenBurns: f.kenBurns, focus: f.focus, sketch: null, credit: p.credit, assetId: p.assetId, thumbnailUrl: null },
       shots: [],
       holdMs: 0,
-      overlay: true,
+      overlay: !cartoon,
       captions: null,
+      cartoon: cartoon?.scenes[sc.id] ?? null,
     };
   });
   return editorDocSchema.parse({
@@ -57,5 +110,6 @@ export function composeComicDoc(input: {
     scenes,
     music: input.music ? { key: input.music.key, gainDb: -12, attribution: input.music.attribution, title: input.music.title, source: input.music.source, licence: input.music.licence } : null,
     coverAtSec: null,
+    cartoon: cartoon?.cartoon ?? null,
   });
 }

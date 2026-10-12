@@ -28,6 +28,8 @@ export type ComicSceneMeta = {
   face: Box | null;
   reader: BeatReader;
   lettering: LetteringKind | null;
+  /** The balloon this beat reads (cartoon render); absent in scripts made before it, null for silent beats. */
+  balloonId?: string | null;
 };
 
 /** `scripts.scenes_json.comic` of a motion comic. */
@@ -106,7 +108,7 @@ export function comicBeats(doc: ComicDoc, opts: MotionOptions = {}): { beats: Mo
         skipped += 1;
         continue;
       }
-      const meta = (reader: BeatReader, lettering: LetteringKind | null, speaker: string | null): ComicSceneMeta => ({
+      const meta = (reader: BeatReader, lettering: LetteringKind | null, speaker: string | null, balloonId: string | null = null): ComicSceneMeta => ({
         page: range.from + pi,
         panelId: panel.id,
         imageId: panel.image!.id,
@@ -117,6 +119,7 @@ export function comicBeats(doc: ComicDoc, opts: MotionOptions = {}): { beats: Mo
         face: speakerFace(panel, speaker),
         reader,
         lettering,
+        balloonId,
       });
       const sfx = panel.lettering
         .filter((b) => b.kind === "sfx" && b.text.trim())
@@ -130,7 +133,7 @@ export function comicBeats(doc: ComicDoc, opts: MotionOptions = {}): { beats: Mo
       spoken.forEach((b, i) => {
         const cast = b.kind !== "caption" && b.speaker ? castById.get(b.speaker) : undefined;
         const reader: BeatReader = cast ? { kind: "character", ref: cast.ref, characterId: cast.characterId } : { kind: "narrator" };
-        beats.push({ id: "", kind: "body", voiceover: b.text.trim(), onScreenText: i === 0 ? sfx : "", brollTerms: [], newsTerms: [], durationSec: spokenSec(b.text), meta: meta(reader, b.kind, cast ? cast.ref : null) });
+        beats.push({ id: "", kind: "body", voiceover: b.text.trim(), onScreenText: i === 0 ? sfx : "", brollTerms: [], newsTerms: [], durationSec: spokenSec(b.text), meta: meta(reader, b.kind, cast ? cast.ref : null, b.id) });
       });
     }
   });
@@ -164,7 +167,7 @@ export function comicToScript(doc: ComicDoc, ids: { comicId: string; versionId: 
   const last = beats[beats.length - 1];
   const all: MotionBeat[] = [
     ...beats.map((b, i) => (i === 0 ? { ...b, kind: "hook" as const, onScreenText: motionTitle(title, episode, language) } : b)),
-    { id: "", kind: "cta" as const, voiceover: end.voiceover, onScreenText: end.onScreenText, brollTerms: [], newsTerms: [], durationSec: spokenSec(end.voiceover), meta: { ...last.meta, face: null, reader: { kind: "narrator" as const }, lettering: null } },
+    { id: "", kind: "cta" as const, voiceover: end.voiceover, onScreenText: end.onScreenText, brollTerms: [], newsTerms: [], durationSec: spokenSec(end.voiceover), meta: { ...last.meta, face: null, reader: { kind: "narrator" as const }, lettering: null, balloonId: null } },
   ].map((b, i) => ({ ...b, id: `s${i + 1}` }));
   const videoTitle = motionTitle(title, episode, language);
   const tags = language === "en" ? ["comic", "shortstory", "webcomic", "motioncomic"] : ["truyentranh", "truyenngan", "comic", "motioncomic"];
