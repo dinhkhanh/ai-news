@@ -48,6 +48,7 @@ describe("migrations", () => {
       "publications", "brand_kits", "voice_presets", "pronunciations", "prompt_templates", "music_library",
       "integrations", "quotas", "activity_events", "usage_costs", "allowed_domains", "feature_flags",
       "eval_articles", "prompt_evals", "comments", "project_reviews", "editor_plugin_settings",
+      "sound_collections", "sound_collection_items",
     ]) {
       expect(names, `missing table ${t}`).toContain(t);
     }

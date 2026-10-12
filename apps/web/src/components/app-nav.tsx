@@ -1,19 +1,21 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AudioLines, FolderKanban, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
+import { AudioLines, FolderKanban, Music, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
 import { NavRail } from "@/components/nav-rail";
 import { cn } from "@/lib/utils";
 
-type Item = { href: string; label: string; icon: LucideIcon; exact?: boolean };
+/** `short`: the label under the phone tab bar's icon, where seven tabs share the width. */
+type Item = { href: string; label: string; short?: string; icon: LucideIcon; exact?: boolean };
 
 export function appNavItems(admin: boolean): Item[] {
   return [
     { href: "/app", label: "Dự án", icon: FolderKanban },
     { href: "/app/publications", label: "Đã đăng", icon: Send },
     { href: "/app/channels", label: "Kênh", icon: Radio },
-    { href: "/app/brand", label: "Bộ nhận diện", icon: Palette },
-    { href: "/app/voices", label: "Giọng đọc", icon: AudioLines },
+    { href: "/app/brand", label: "Bộ nhận diện", short: "Nhận diện", icon: Palette },
+    { href: "/app/voices", label: "Giọng đọc", short: "Giọng", icon: AudioLines },
+    { href: "/app/sounds", label: "Âm thanh", icon: Music },
     ...(admin ? [{ href: "/admin", label: "Admin", icon: ShieldCheck }] : []),
   ];
 }
@@ -31,8 +33,8 @@ export function currentAppItem(pathname: string, admin: boolean) {
 /** Icon rail (`sm` and up). The admin area is reached from the top bar's segmented control, so it has no tile here. */
 export function AppNav() {
   const pathname = usePathname();
-  const [projects, publications, channels, brand, voices] = appNavItems(false);
-  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand, voices]]} isActive={(item) => isActive(pathname, item)} />;
+  const [projects, publications, channels, brand, voices, sounds] = appNavItems(false);
+  return <NavRail label="Chính" homeHref="/app" groups={[[projects], [publications, channels], [brand, voices, sounds]]} isActive={(item) => isActive(pathname, item)} />;
 }
 
 /**
@@ -58,7 +60,7 @@ export function MobileNav({ admin }: { admin: boolean }) {
                 <span className={cn("flex h-8 w-11 items-center justify-center rounded-lg transition-colors", active && "bg-sidebar-accent shadow-xs ring-1 ring-sidebar-border")}>
                   <item.icon className="size-[18px]" strokeWidth={1.75} aria-hidden />
                 </span>
-                {item.label}
+                {item.short ?? item.label}
               </Link>
             </li>
           );

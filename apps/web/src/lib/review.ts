@@ -35,6 +35,9 @@ async function assertKeysAllowed(tx: Tx, ctx: { organizationId: string; projectI
   // Brand files (logo, overlay PNG) sit under library/brand/<org>/; the editor can swap kits, so another workspace's must not pass as "library".
   const otherBrand = keys.find((k) => k.startsWith("library/brand/") && !k.startsWith(`library/brand/${ctx.organizationId}/`));
   if (otherBrand) throw new Error(`Tệp không thuộc workspace này: ${otherBrand}`);
+  // Sound collections copy their files under library/sounds/<org>/ (app/app/sounds/actions.ts): same rule.
+  const otherSound = keys.find((k) => k.startsWith("library/sounds/") && !k.startsWith(`library/sounds/${ctx.organizationId}/`));
+  if (otherSound) throw new Error(`Tệp không thuộc workspace này: ${otherSound}`);
   const foreign = keys.filter((k) => !k.startsWith(`media/${ctx.organizationId}/`) && !k.startsWith("library/") && !k.startsWith(`candidates/${ctx.organizationId}/`));
   if (foreign.length === 0) return;
   const rows = await tx.select({ r2Path: schema.assets.r2Path }).from(schema.assets).where(and(eq(schema.assets.organizationId, ctx.organizationId), inArray(schema.assets.r2Path, foreign)));

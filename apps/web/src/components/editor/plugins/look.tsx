@@ -9,6 +9,14 @@ import { setSceneSketch, SKETCH_LABEL, sketchCount } from "@/lib/media/editor";
 import { useEditor } from "../core/context";
 import { definePlugin } from "../core/plugin";
 import { PanelHeader, Section, timecode } from "../shell/ui";
+import type { MusicOption } from "../types";
+
+/** Library tracks first (`group` null), then one group per sound collection, in the order they came. */
+function musicGroups(music: MusicOption[]): [string | null, MusicOption[]][] {
+  const groups = new Map<string | null, MusicOption[]>();
+  for (const m of music) groups.set(m.group ?? null, [...(groups.get(m.group ?? null) ?? []), m]);
+  return [...groups.entries()].sort(([a], [b]) => (a === null ? -1 : b === null ? 1 : 0));
+}
 
 function LookPanel() {
   const ctx = useEditor();
@@ -102,19 +110,31 @@ function LookPanel() {
               const key = e.target.value;
               if (!key) return ctx.update("Bỏ nhạc nền", (d) => ({ ...d, music: null }));
               const m = props.music.find((x) => x.key === key);
-              if (m) ctx.update(`Đổi nhạc: ${m.title}`, (d) => ({ ...d, music: { key: m.key, gainDb: d.music?.gainDb ?? -12, attribution: `Nhạc: ${m.title}`, title: m.title, source: "library", licence: m.licence } }));
+              if (m) ctx.update(`Đổi nhạc: ${m.title}`, (d) => ({ ...d, music: { key: m.key, gainDb: d.music?.gainDb ?? -12, attribution: m.credit ?? `Nhạc: ${m.title}`, title: m.title, source: "library", licence: m.licence } }));
             }}
             className="w-full"
           >
             <option value="">— không nhạc —</option>
             {doc.music && !props.music.some((m) => m.key === doc.music!.key) ? <option value={doc.music.key}>{doc.music.title} (hiện tại)</option> : null}
-            {props.music.map((m) => (
-              <option key={m.id} value={m.key}>
-                {m.title}
-                {m.durationSec ? ` · ${m.durationSec.toFixed(0)} s` : ""}
-                {m.moodTags.length ? ` · ${m.moodTags.slice(0, 3).join(", ")}` : ""}
-              </option>
-            ))}
+            {musicGroups(props.music).map(([group, list]) => {
+              const options = list.map((m) => (
+                <option key={`${group ?? ""}:${m.id}`} value={m.key}>
+                  {m.title}
+                  {m.durationSec ? ` · ${m.durationSec.toFixed(0)} s` : ""}
+                  {m.moodTags.length ? ` · ${m.moodTags.slice(0, 3).join(", ")}` : ""}
+                  {group ? ` · ${m.licence}` : ""}
+                </option>
+              ));
+              return group ? (
+                <optgroup key={group} label={`Bộ sưu tập: ${group}`}>
+                  {options}
+                </optgroup>
+              ) : (
+                <optgroup key="" label="Thư viện nhạc">
+                  {options}
+                </optgroup>
+              );
+            })}
           </NativeSelect>
           {doc.music ? (
             <label className="flex items-center gap-2 text-xs">
@@ -126,6 +146,9 @@ function LookPanel() {
           <Button size="sm" variant="outline" disabled={!ctx.canRegenerate} title={ctx.regenerateHint ?? undefined} onClick={() => ctx.services.regenerate("music")}>
             Nhạc mới (Mubert / thư viện)
           </Button>
+          <Link href="/app/sounds?tab=collections" target="_blank" className="text-xs text-primary hover:underline">
+            Thêm nhạc vào bộ sưu tập (thư viện âm thanh)
+          </Link>
         </Section>
 
         <Section title="Ảnh bìa">

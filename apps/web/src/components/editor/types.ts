@@ -27,7 +27,8 @@ export type VisualOption = {
   section: [number, number] | null;
 };
 
-export type MusicOption = { id: string; title: string; key: string; moodTags: string[]; durationSec: number | null; licence: string };
+/** A background-music choice: a platform music-library track (`group` null) or a sound from one of the member's collections. */
+export type MusicOption = { id: string; title: string; key: string; moodTags: string[]; durationSec: number | null; licence: string; group?: string | null; credit?: string | null };
 
 export type CommentRow = { id: string; body: string; sceneId: string | null; atMs: number | null; createdAt: string; resolvedAt: string | null; authorName: string | null; authorId: string };
 

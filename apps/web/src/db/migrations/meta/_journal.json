@@ -204,6 +204,13 @@
       "when": 1791773411258,
       "tag": "0028_editor_plugins",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791777677609,
+      "tag": "0029_sound_library",
+      "breakpoints": true
     }
   ]
 }
