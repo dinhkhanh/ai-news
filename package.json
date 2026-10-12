@@ -1,7 +1,7 @@
 {
   "name": "ai-news",
   "private": true,
-  "packageManager": "pnpm@11.13.1",
+  "packageManager": "pnpm@12.11.2",
   "engines": {
     "node": ">=22"
   },

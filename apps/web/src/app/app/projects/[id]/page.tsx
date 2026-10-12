@@ -129,75 +129,86 @@ export default async function ProjectPage({
     if (!project) return null;
     // One round trip to the pooler is ~60 ms; issue the independent queries together so the
     // connection pipelines them instead of paying that ten times in a row.
-    const [article, scripts, timelines, renders, reviews, [{ openComments }], channels, grants, publications, kits, sourceVideo] =
-      await Promise.all([
-        tx.query.articles.findFirst({
-          where: eq(schema.articles.projectId, id),
-          orderBy: desc(schema.articles.createdAt),
-        }),
-        tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) }),
-        tx.query.timelines.findMany({
-          where: eq(schema.timelines.projectId, id),
-          orderBy: desc(schema.timelines.version),
-        }),
-        tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) }),
-        tx
-          .select({
-            id: schema.projectReviews.id,
-            action: schema.projectReviews.action,
-            note: schema.projectReviews.note,
-            timelineVersion: schema.projectReviews.timelineVersion,
-            faithfulnessOverride: schema.projectReviews.faithfulnessOverride,
-            createdAt: schema.projectReviews.createdAt,
-            actorName: schema.user.name,
+    const [
+      article,
+      scripts,
+      timelines,
+      renders,
+      reviews,
+      [{ openComments }],
+      channels,
+      grants,
+      publications,
+      kits,
+      sourceVideo,
+    ] = await Promise.all([
+      tx.query.articles.findFirst({
+        where: eq(schema.articles.projectId, id),
+        orderBy: desc(schema.articles.createdAt),
+      }),
+      tx.query.scripts.findMany({ where: eq(schema.scripts.projectId, id), orderBy: desc(schema.scripts.version) }),
+      tx.query.timelines.findMany({
+        where: eq(schema.timelines.projectId, id),
+        orderBy: desc(schema.timelines.version),
+      }),
+      tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt) }),
+      tx
+        .select({
+          id: schema.projectReviews.id,
+          action: schema.projectReviews.action,
+          note: schema.projectReviews.note,
+          timelineVersion: schema.projectReviews.timelineVersion,
+          faithfulnessOverride: schema.projectReviews.faithfulnessOverride,
+          createdAt: schema.projectReviews.createdAt,
+          actorName: schema.user.name,
+        })
+        .from(schema.projectReviews)
+        .leftJoin(schema.user, eq(schema.user.id, schema.projectReviews.actorId))
+        .where(eq(schema.projectReviews.projectId, id))
+        .orderBy(desc(schema.projectReviews.createdAt))
+        .limit(10),
+      tx
+        .select({ openComments: count() })
+        .from(schema.comments)
+        .where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt))),
+      tx.query.channels.findMany({
+        where: eq(schema.channels.organizationId, project.organizationId),
+        orderBy: [schema.channels.platform, schema.channels.name],
+      }),
+      tx.query.channelGrants.findMany({ where: eq(schema.channelGrants.userId, ws.userId) }),
+      tx
+        .select({
+          id: schema.publications.id,
+          platform: schema.publications.platform,
+          channelId: schema.publications.channelId,
+          status: schema.publications.status,
+          attempts: schema.publications.attempts,
+          scheduledAt: schema.publications.scheduledAt,
+          publishedAt: schema.publications.publishedAt,
+          platformUrl: schema.publications.platformUrl,
+          privacy: schema.publications.privacy,
+          aiDisclosure: schema.publications.aiDisclosure,
+          error: schema.publications.error,
+          analyticsJson: schema.publications.analyticsJson,
+          renderId: schema.publications.renderId,
+          createdByName: schema.user.name,
+        })
+        .from(schema.publications)
+        .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
+        .where(eq(schema.publications.projectId, id))
+        .orderBy(desc(schema.publications.createdAt)),
+      tx
+        .select({ id: schema.brandKits.id, name: schema.brandKits.name, isDefault: schema.brandKits.isDefault })
+        .from(schema.brandKits)
+        .where(eq(schema.brandKits.organizationId, ws.organizationId))
+        .orderBy(desc(schema.brandKits.isDefault), schema.brandKits.name),
+      project.sourceVideoAssetId
+        ? tx.query.assets.findFirst({
+            where: eq(schema.assets.id, project.sourceVideoAssetId),
+            columns: { r2Path: true, durationSec: true, attribution: true },
           })
-          .from(schema.projectReviews)
-          .leftJoin(schema.user, eq(schema.user.id, schema.projectReviews.actorId))
-          .where(eq(schema.projectReviews.projectId, id))
-          .orderBy(desc(schema.projectReviews.createdAt))
-          .limit(10),
-        tx
-          .select({ openComments: count() })
-          .from(schema.comments)
-          .where(and(eq(schema.comments.projectId, id), isNull(schema.comments.resolvedAt))),
-        tx.query.channels.findMany({
-          where: eq(schema.channels.organizationId, project.organizationId),
-          orderBy: [schema.channels.platform, schema.channels.name],
-        }),
-        tx.query.channelGrants.findMany({ where: eq(schema.channelGrants.userId, ws.userId) }),
-        tx
-          .select({
-            id: schema.publications.id,
-            platform: schema.publications.platform,
-            channelId: schema.publications.channelId,
-            status: schema.publications.status,
-            attempts: schema.publications.attempts,
-            scheduledAt: schema.publications.scheduledAt,
-            publishedAt: schema.publications.publishedAt,
-            platformUrl: schema.publications.platformUrl,
-            privacy: schema.publications.privacy,
-            aiDisclosure: schema.publications.aiDisclosure,
-            error: schema.publications.error,
-            analyticsJson: schema.publications.analyticsJson,
-            renderId: schema.publications.renderId,
-            createdByName: schema.user.name,
-          })
-          .from(schema.publications)
-          .leftJoin(schema.user, eq(schema.user.id, schema.publications.createdBy))
-          .where(eq(schema.publications.projectId, id))
-          .orderBy(desc(schema.publications.createdAt)),
-        tx
-          .select({ id: schema.brandKits.id, name: schema.brandKits.name, isDefault: schema.brandKits.isDefault })
-          .from(schema.brandKits)
-          .where(eq(schema.brandKits.organizationId, ws.organizationId))
-          .orderBy(desc(schema.brandKits.isDefault), schema.brandKits.name),
-        project.sourceVideoAssetId
-          ? tx.query.assets.findFirst({
-              where: eq(schema.assets.id, project.sourceVideoAssetId),
-              columns: { r2Path: true, durationSec: true, attribution: true },
-            })
-          : undefined,
-      ]);
+        : undefined,
+    ]);
     return {
       project,
       article,
@@ -214,8 +225,20 @@ export default async function ProjectPage({
     };
   });
   if (!data) notFound();
-  const { project, article, sourceVideo, scripts, timelines, renders, reviews, openComments, channels, grants, publications, kits } =
-    data;
+  const {
+    project,
+    article,
+    sourceVideo,
+    scripts,
+    timelines,
+    renders,
+    reviews,
+    openComments,
+    channels,
+    grants,
+    publications,
+    kits,
+  } = data;
   const isVideo = project.sourceKind === "video";
   const projectKit = kits.find((k) => k.id === project.brandKitId) ?? null;
   // Brand kits are shared across channels; the logo is the channel's and can differ per render.
@@ -285,7 +308,10 @@ export default async function ProjectPage({
       : ({} as Record<string, boolean>),
     publisher ? Promise.all([dailyLimit(ws.userId, "publishes"), usedToday(ws.userId, "publishes")]) : [0, 0],
   ]);
-  const [sourceVideoUrl, voices] = await Promise.all([sign(sourceVideo?.r2Path, 3600), writer ? listVoiceOptions(ws) : []]);
+  const [sourceVideoUrl, voices] = await Promise.all([
+    sign(sourceVideo?.r2Path, 3600),
+    writer ? listVoiceOptions(ws) : [],
+  ]);
   const imageUrls: Record<string, string> = {};
   imageKeys.forEach((key, i) => {
     const u = imageSigned[i];
@@ -389,7 +415,9 @@ export default async function ProjectPage({
           ? { form: "build-form", label: "Dựng video", icon: <Clapperboard /> }
           : null;
   const tabs: SectionTab[] = [
-    ...(article && !confirmed ? [{ id: "article", label: project.sourceKind === "article" ? "Bài báo" : "Nội dung", icon: <Newspaper /> }] : []),
+    ...(article && !confirmed
+      ? [{ id: "article", label: project.sourceKind === "article" ? "Bài báo" : "Nội dung", icon: <Newspaper /> }]
+      : []),
     ...(confirmed ? [{ id: "script", label: "Kịch bản", icon: <FileText /> }] : []),
     ...(scripts.length ? [{ id: "build", label: "Dựng", icon: <Clapperboard /> }] : []),
     ...(timelines.length ? [{ id: "review", label: "Duyệt", icon: <Eye /> }] : []),
@@ -568,9 +596,9 @@ export default async function ProjectPage({
                     <>
                       {article.siteName ?? "Video"}
                       {article.author ? ` · ${article.author}` : ""}
-                      {sourceVideo?.durationSec ? ` · đã tải ${Math.round(Number(sourceVideo.durationSec))} giây` : ""}. Ô nội dung
-                      đang là chú thích của video: viết lại điều video cần kể (có thể kèm chỉ dẫn cách viết kịch bản) rồi
-                      xác nhận. Mọi cảnh sẽ dùng chính video này làm hình.
+                      {sourceVideo?.durationSec ? ` · đã tải ${Math.round(Number(sourceVideo.durationSec))} giây` : ""}.
+                      Ô nội dung đang là chú thích của video: viết lại điều video cần kể (có thể kèm chỉ dẫn cách viết
+                      kịch bản) rồi xác nhận. Mọi cảnh sẽ dùng chính video này làm hình.
                     </>
                   ) : (
                     <>
@@ -760,8 +788,8 @@ export default async function ProjectPage({
           {scripts.length ? (
             <Card id="build" className="scroll-mt-3">
               <CardHeader>
+                <CardTitle>Dựng video</CardTitle>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <CardTitle>Dựng video</CardTitle>
                   {writer ? (
                     <ActionForm
                       id="build-form"
@@ -794,15 +822,38 @@ export default async function ProjectPage({
                       ) : null}
                       <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="build-voice">
                         giọng đọc
-                        <VoiceSelect id="build-voice" voices={voices} value={project.voicePresetId} size="sm" className="max-w-52 flex-1" />
+                        <VoiceSelect
+                          id="build-voice"
+                          voices={voices}
+                          value={project.voicePresetId}
+                          size="sm"
+                          className="max-w-52 flex-1"
+                        />
                       </label>
-                      <label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" htmlFor="build-motion-mode">
+                      <label
+                        className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+                        htmlFor="build-motion-mode"
+                      >
                         đồ hoạ chuyển động
-                        <MotionSelect idPrefix="build-motion" mode={project.motionMode} engine={project.motionEngine} size="sm" className="flex min-w-0 flex-1 flex-wrap gap-2" />
+                        <MotionSelect
+                          idPrefix="build-motion"
+                          mode={project.motionMode}
+                          engine={project.motionEngine}
+                          size="sm"
+                          className="flex min-w-0 flex-1 flex-wrap gap-2"
+                        />
                       </label>
-                      <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="build-photo-sketch">
+                      <label
+                        className="flex items-center gap-2 text-xs text-muted-foreground"
+                        htmlFor="build-photo-sketch"
+                      >
                         ảnh vẽ tay
-                        <SketchSelect id="build-photo-sketch" value={project.photoSketch} size="sm" className="max-w-64 flex-1" />
+                        <SketchSelect
+                          id="build-photo-sketch"
+                          value={project.photoSketch}
+                          size="sm"
+                          className="max-w-64 flex-1"
+                        />
                       </label>
                       <label className="flex min-h-9 items-center gap-2 text-xs text-muted-foreground">
                         <input type="checkbox" name="skipStock" /> bỏ qua stock
