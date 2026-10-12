@@ -59,11 +59,12 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     const renders = await tx.query.renders.findMany({ where: eq(schema.renders.projectId, id), orderBy: desc(schema.renders.createdAt), limit: 8 });
     const channels = await tx.query.channels.findMany({ where: eq(schema.channels.organizationId, project.organizationId), orderBy: [schema.channels.platform, schema.channels.name] });
     const authors = await tx.select({ id: schema.user.id, name: schema.user.name }).from(schema.user);
-    const pluginRow = await tx.query.editorPluginSettings.findFirst({ where: eq(schema.editorPluginSettings.organizationId, project.organizationId) });
-    return { project, timelines, assets, comments, reviews, renders, channels, pluginRow, authors: new Map(authors.map((a) => [a.id, a.name])) };
+    return { project, timelines, assets, comments, reviews, renders, channels, authors: new Map(authors.map((a) => [a.id, a.name])) };
   });
   if (!data) notFound();
-  const { project, timelines, assets, comments, reviews, renders, channels, pluginRow } = data;
+  const { project, timelines, assets, comments, reviews, renders, channels } = data;
+  // Own transaction and never fatal: before migration 0028 is applied the table is missing and every plugin stays on.
+  const pluginRow = await withOrgContext(ws, (tx) => tx.query.editorPluginSettings.findFirst({ where: eq(schema.editorPluginSettings.organizationId, project.organizationId) })).catch(() => null);
   const selected = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   if (!selected) {
     return (
