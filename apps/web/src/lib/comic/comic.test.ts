@@ -24,6 +24,7 @@ import {
   setPanelCrop,
   type DocOptions,
 } from "./doc";
+import { applyEditorOp, editorOpSchema } from "./editor-ops";
 import { formatOf, layoutPage, rowsFor, snapAspect } from "./layout";
 import { balloonBox, baseFontSize, facesOnPage, letterPanel, MIN_FONT_SCALE, segmentHits, speakerPoint, wrapWords } from "./lettering";
 import { estimateAdaptUsd, estimateDrawUsd, IMAGE_MODELS, imageModel, textModel } from "./models";
@@ -353,6 +354,21 @@ describe("page editor", () => {
     expect(panel(respeak).lettering[0].tail).not.toEqual(big.tail);
     expect(panel(deleteBalloon(doc, k.id, b.id)).lettering).toHaveLength(0);
     expect(panel(setBalloonTexts(doc, k.id, { [b.id]: " Ngắn thôi ", other: "x" })).lettering[0].text).toBe("Ngắn thôi");
+  });
+
+  it("applies editor operations the same way in the browser and on the server", () => {
+    expect(editorOpSchema.safeParse({ type: "addBalloon", panelId: k.id, balloonId: "../x", kind: "speech", speaker: null, text: "a" }).success).toBe(false);
+    expect(editorOpSchema.safeParse({ type: "crop", panelId: k.id, crop: { x: 0.5, y: 0.5, zoom: Infinity } }).success).toBe(false);
+    const add = editorOpSchema.parse({ type: "addBalloon", panelId: k.id, balloonId: "bnew01", kind: "speech", speaker: "someone-else", text: "Chào" });
+    const d1 = applyEditorOp(doc, add);
+    expect(panel(d1).lettering.find((b) => b.id === "bnew01")).toMatchObject({ text: "Chào", speaker: null });
+    // Replayed (a retry): the id is taken, nothing changes.
+    expect(applyEditorOp(d1, add)).toBe(d1);
+    // A panel or balloon that is gone leaves the document as it is.
+    expect(applyEditorOp(doc, { type: "crop", panelId: "gone", crop: null })).toBe(doc);
+    expect(applyEditorOp(doc, { type: "place", panelId: k.id, balloonId: "gone", rect: { x: 0, y: 0, w: 10, h: 10 }, tail: null })).toBe(doc);
+    const respeak = applyEditorOp(d1, { type: "balloon", panelId: k.id, balloonId: "bnew01", edit: { speaker: "char-lan" } });
+    expect(panel(respeak).lettering.find((b) => b.id === "bnew01")?.speaker).toBe("char-lan");
   });
 
   it("asks for shorter lines with a word budget", () => {
