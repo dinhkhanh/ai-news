@@ -11,6 +11,7 @@ import { putObject, r2Key } from "@/lib/r2";
 import { readSecret } from "@/lib/vault";
 import type { ChosenAsset } from "./broll";
 import { googleCredentials } from "./google";
+import { VERTEX_MAX_ATTEMPTS, vertexRetryDelayMs, vertexRetryable } from "./vertex-retry";
 
 /**
  * AI-generated stills, the last tier of the visual priority
@@ -114,22 +115,57 @@ export type VertexImageRequest = {
   aspectRatio: string;
   imageSize: "1K" | "2K";
   projectId: string;
+  /**
+   * How long after the first attempt a retry may still start (ms) for 429 / 5xx answers and network errors
+   * (`vertex-retry.ts`); 0 or absent = one attempt. A retry starting at the end of the window may run another
+   * `ATTEMPT_MS`, so window + `ATTEMPT_MS` must fit the caller's step.
+   */
+  retryWindowMs?: number;
 };
+
+/** One attempt may take this long. */
+const ATTEMPT_MS = 150_000;
+
+type Attempt = { ok: true; res: Response } | { ok: false; error: Error; retry: boolean; retryAfter: string | null };
+
+async function postOnce(url: string, body: string): Promise<Attempt> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await accessToken()}`, "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(ATTEMPT_MS),
+    });
+  } catch (e) {
+    // A timed-out attempt is not repeated: another one would not fit the step.
+    return { ok: false, error: new Error(`Vertex: ${(e as Error).message}`), retry: (e as Error).name !== "TimeoutError", retryAfter: null };
+  }
+  if (res.ok) return { ok: true, res };
+  const error = new Error(`Vertex HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  return { ok: false, error, retry: vertexRetryable(res.status), retryAfter: res.headers.get("retry-after") };
+}
 
 /** One image from a Gemini image model on Vertex AI (global endpoint); returns the bytes and the token usage. */
 export async function vertexGenerateImage(req: VertexImageRequest): Promise<{ bytes: Buffer; mime: string; promptTokens: number; tokens: number }> {
   const url = `https://aiplatform.googleapis.com/v1/projects/${req.projectId}/locations/global/publishers/google/models/${req.model}:generateContent`;
   const parts = [...(req.refs ?? []).map((r) => ({ inlineData: { mimeType: r.mime, data: r.bytes.toString("base64") } })), { text: req.prompt }];
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${await accessToken()}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts }],
-      generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: req.aspectRatio, imageSize: req.imageSize }, candidateCount: 1 },
-    }),
-    signal: AbortSignal.timeout(150_000),
+  const body = JSON.stringify({
+    contents: [{ role: "user", parts }],
+    generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: req.aspectRatio, imageSize: req.imageSize }, candidateCount: 1 },
   });
-  if (!res.ok) throw new Error(`Vertex HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const started = Date.now();
+  let res: Response;
+  for (let attempt = 1; ; attempt++) {
+    const r = await postOnce(url, body);
+    if (r.ok) {
+      res = r.res;
+      break;
+    }
+    const wait = vertexRetryDelayMs(attempt, r.retryAfter);
+    if (!r.retry || attempt >= VERTEX_MAX_ATTEMPTS || Date.now() - started + wait > (req.retryWindowMs ?? 0)) throw r.error;
+    await new Promise((done) => setTimeout(done, wait));
+  }
   const json = (await res.json()) as GenerateResponse;
   if (json.promptFeedback?.blockReason) throw new Error(`prompt blocked: ${json.promptFeedback.blockReason}`);
   const cand = json.candidates?.[0];

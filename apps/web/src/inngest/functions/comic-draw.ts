@@ -14,6 +14,11 @@ import { addComicCost, clearBusy, comicDrawAccess, loadComic, optionsOf, reportC
 
 /** Parallel image requests per comic (provider rate limits, docs/COMIC.md §8). */
 const BATCH = 4;
+/**
+ * Vertex 429 / 5xx are tried again for this long inside a step (`vertex-retry.ts`): a retry at the end of the window
+ * (+ one 150 s attempt + upload, faces and the quality check) stays under `checkpointing.maxRuntime` (250 s).
+ */
+const RETRY_WINDOW_MS = 75_000;
 
 type SheetTarget = { ref: string; characterId: string; name: string; visual: string; referenceKeys: string[] };
 type SheetResult = { ref: string; key: string | null; error: string | null };
@@ -39,7 +44,7 @@ async function drawSheet(ctx: Ctx, comicId: string, t: SheetTarget, projectId: s
   const style = styleOf(loaded.comic);
   const req = sheetRequest(t, style, t.referenceKeys, loaded.comic.imageModel, instruction);
   try {
-    const img = await drawComicImage(ctx, { kind: "sheet", modelId: loaded.comic.imageModel, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId, comicId, characterId: t.characterId, styleId: loaded.comic.styleId, instruction });
+    const img = await drawComicImage(ctx, { kind: "sheet", modelId: loaded.comic.imageModel, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId, comicId, characterId: t.characterId, styleId: loaded.comic.styleId, instruction, retryWindowMs: RETRY_WINDOW_MS });
     await addComicCost(ctx, comicId, img.costUsd);
     return { ref: t.ref, key: img.key, error: null };
   } catch (e) {
@@ -153,7 +158,7 @@ export const comicDrawFn = inngest.createFunction(
       if (!loaded?.version || !hit) return { panelId, ok: false, error: "panel removed", problems: [] as string[] };
       const req = panelRequest(loaded.version.doc, hit.panel, styleOf(loaded.comic), sheetKeys, loaded.comic.imageModel, direction, Boolean(keepComposition && panelIds?.length));
       try {
-        const img = await drawComicImage(ctx, { kind: "panel", modelId: loaded.comic.imageModel, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId: plan.projectId, comicId, panelId, styleId: loaded.comic.styleId, instruction: direction });
+        const img = await drawComicImage(ctx, { kind: "panel", modelId: loaded.comic.imageModel, prompt: req.prompt, refKeys: req.refKeys, aspect: req.aspect, projectId: plan.projectId, comicId, panelId, styleId: loaded.comic.styleId, instruction: direction, retryWindowMs: RETRY_WINDOW_MS });
         await updateDoc(ctx, comicId, "draw", (doc) => (findPanel(doc, panelId) ? { doc: applyPanelImage(doc, panelId, { id: img.id, key: img.key, width: img.width, height: img.height, faces: img.faces }), changes: { drewPanel: panelId } } : null));
         await addComicCost(ctx, comicId, img.costUsd);
         let problems: string[] = [];

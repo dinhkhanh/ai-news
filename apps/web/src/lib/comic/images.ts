@@ -38,6 +38,8 @@ export type DrawRequest = {
   characterId?: string | null;
   styleId?: string | null;
   instruction?: string | null;
+  /** Vertex only: how long rate limits / server errors are tried again (`VertexImageRequest.retryWindowMs`); jobs set it, requests do not. */
+  retryWindowMs?: number;
 };
 
 export type DrawnImage = { id: string; key: string; width: number; height: number; costUsd: number; faces?: { x: number; y: number; w: number; h: number }[] };
@@ -85,7 +87,7 @@ async function draw(r: DrawRequest, refs: { bytes: Buffer; mime: string }[]): Pr
     return { bytes: img.bytes, mime: img.mime, costUsd: openaiImageCostUsd(model.id, img.usage, refs.length), provider: "openai", meta: { size, quality: model.quality ?? "medium", usage: img.usage } };
   }
   if (!r.projectId) throw new Error("thiếu Project ID của Google Vertex");
-  const img = await vertexGenerateImage({ model: model.apiId, prompt: r.prompt, refs, aspectRatio: r.aspect, imageSize: model.imageSize ?? "1K", projectId: r.projectId });
+  const img = await vertexGenerateImage({ model: model.apiId, prompt: r.prompt, refs, aspectRatio: r.aspect, imageSize: model.imageSize ?? "1K", projectId: r.projectId, retryWindowMs: r.retryWindowMs });
   return { bytes: img.bytes, mime: img.mime, costUsd: imageCostUsd(model.id, img.promptTokens), provider: USAGE_PROVIDER, meta: { tokens: img.tokens } };
 }
 
