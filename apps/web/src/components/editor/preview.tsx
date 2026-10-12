@@ -2,7 +2,7 @@
 import { Player, type PlayerRef } from "@remotion/player";
 import { News } from "@ai-news/video/compositions";
 import type { Timeline } from "@ai-news/video/schema";
-import { forwardRef } from "react";
+import { forwardRef, type CSSProperties } from "react";
 
 /**
  * Remotion Player over the same `News` composition Lambda renders, fed a
@@ -10,7 +10,7 @@ import { forwardRef } from "react";
  * audio layout differs from the stored mix, `audio.mixSrc` is null and the
  * composition plays per-scene voice files instead.
  */
-export const Preview = forwardRef<PlayerRef, { timeline: Timeline; width?: number | string }>(function Preview({ timeline, width = 340 }, ref) {
+export const Preview = forwardRef<PlayerRef, { timeline: Timeline; controls?: boolean; width?: number | string; style?: CSSProperties }>(function Preview({ timeline, controls = true, width = "100%", style }, ref) {
   return (
     <Player
       ref={ref}
@@ -20,11 +20,11 @@ export const Preview = forwardRef<PlayerRef, { timeline: Timeline; width?: numbe
       fps={timeline.fps}
       compositionWidth={timeline.width}
       compositionHeight={timeline.height}
-      controls
+      controls={controls}
       spaceKeyToPlayOrPause={false}
       showVolumeControls
       clickToPlay
-      style={{ width, aspectRatio: "9 / 16", borderRadius: 12, overflow: "hidden", background: "#000" }}
+      style={{ width, aspectRatio: "9 / 16", borderRadius: 12, overflow: "hidden", background: "#000", ...style }}
       acknowledgeRemotionLicense
       errorFallback={({ error }) => <div className="p-3 text-xs text-red-400">Lỗi xem trước: {error.message}</div>}
     />

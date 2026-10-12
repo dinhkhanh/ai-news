@@ -4,7 +4,7 @@ import type { Timeline } from "@ai-news/video/schema";
 import { inngest } from "../client";
 import { projectRenderRequested } from "../events";
 import { reportProgress } from "@/lib/progress";
-import { eventSuperseded } from "@/lib/project-state";
+import { eventSuperseded, startProgress } from "@/lib/project-state";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity, recordUsageCost } from "@/lib/activity";
@@ -46,6 +46,8 @@ export const renderProjectFn = inngest.createFunction(
   async ({ event, step }) => {
     const { projectId, organizationId, requestedBy, timelineId, logoChannelId } = event.data;
     const skipQa = Boolean(event.data.skipQa);
+    /** Logos still to render after this one (multi-channel export from the editor). */
+    const thenLogos = event.data.thenLogoChannelIds ?? [];
     const ctx = { userId: requestedBy, organizationId };
     const pctx = { ...ctx, projectId };
 
@@ -139,7 +141,7 @@ export const renderProjectFn = inngest.createFunction(
       return { qa, coverOk: cover.ok, lambdaMs };
     });
 
-    await step.run("finalise", async () => {
+    const chained = await step.run("finalise", async () => {
       await reportProgress(pctx, { label: "Ghi kết quả", pct: 96 });
       const qaPassed = Boolean(post.qa.ok && post.qa.passed);
       // A forced render: the probe is kept for the record, the user's override decides.
@@ -165,7 +167,12 @@ export const renderProjectFn = inngest.createFunction(
           .where(eq(schema.renders.id, input.renderId));
         const project = await tx.query.projects.findFirst({ where: eq(schema.projects.id, projectId) });
         const state = passed && input.approved ? "rendered" : project?.state;
-        await tx.update(schema.projects).set({ state, busyStep: null, busyProgress: null, lastError: passed ? null : "Render QA failed; see the render row" }).where(eq(schema.projects.id, projectId));
+        // More logos queued: the project stays busy until the last render; a failed QA stops the chain (the next ones would fail the same way).
+        const next = passed && thenLogos.length > 0;
+        await tx
+          .update(schema.projects)
+          .set({ state, busyStep: next ? "render" : null, busyProgress: next ? startProgress(`Chờ kết xuất logo tiếp theo (${thenLogos.length})`) : null, lastError: passed ? null : "Render QA failed; see the render row" })
+          .where(eq(schema.projects.id, projectId));
       });
       await recordUsageCost({ provider: "remotion_lambda", resource: "News", units: durationSec, unitType: "render_seconds", costUsd: remotionCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId, meta: { renderSeconds, functionName: env().REMOTION_FUNCTION_NAME } });
       await recordUsageCost({ provider: "media_lambda", resource: "loudnorm+cover+probe", units: post.lambdaMs / 1000, unitType: "seconds", costUsd: mediaCost, userId: requestedBy, organizationId, projectId, renderId: input.renderId });
@@ -174,8 +181,18 @@ export const renderProjectFn = inngest.createFunction(
         payload: { renderId: input.renderId, timelineVersion: input.timelineVersion, approved: input.approved, durationSec: post.qa.probe?.durationSec ?? null, lufs: post.qa.probe?.integratedLufs ?? null, costUsd, renderSeconds, checks: post.qa.checks ?? null, ...(overridden ? { qaOverridden: true, qaError } : {}) },
       });
       await notifySlack(`${passed ? (input.approved ? ":clapper: Render done" : ":clapper: Preview render done") : ":warning: Render QA failed"}${overridden ? " (QA overridden)" : ""} — ${input.title} (${durationSec.toFixed(0)}s, $${costUsd.toFixed(3)}) ${env().APP_URL}/app/projects/${projectId}`);
+      if (!passed && thenLogos.length) await logActivity({ actorId: requestedBy, organizationId, projectId, type: "render.chain_stopped", payload: { renderId: input.renderId, skippedLogos: thenLogos } });
+      return passed && thenLogos.length > 0;
     });
 
-    return { renderId: input.renderId, outKey, passed: Boolean(post.qa.ok && post.qa.passed) || skipQa, qaSkipped: skipQa };
+    if (chained) {
+      const [next, ...rest] = thenLogos;
+      await step.sendEvent(
+        "next-logo",
+        projectRenderRequested.create({ projectId, organizationId, requestedBy, timelineId: input.timelineId, logoChannelId: next, ...(rest.length ? { thenLogoChannelIds: rest } : {}) }),
+      );
+    }
+
+    return { renderId: input.renderId, outKey, nextLogos: chained ? thenLogos.length : 0, passed: Boolean(post.qa.ok && post.qa.passed) || skipQa, qaSkipped: skipQa };
   },
 );

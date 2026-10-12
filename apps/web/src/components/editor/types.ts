@@ -4,6 +4,8 @@ import type { EditorDoc } from "@/lib/media/editor";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import type { FrameFaces } from "@/lib/media/framing";
 import type { PendingCapture } from "@/lib/media/visual-plan";
+import type { Platform } from "@/lib/publish/platforms";
+import type { ProjectStatus } from "@/lib/project-state";
 
 /** A visual the editor can swap into a scene (every stock clip / article image fetched for the project). */
 export type VisualOption = {
@@ -35,7 +37,7 @@ export type VersionRow = { id: string; version: number; kind: string; changes: s
 
 /** What the editor's export panel needs: logo choices, today's render quota and this project's latest renders. */
 export type ExportInfo = {
-  logoChannels: Array<{ id: string; name: string; platformLabel: string }>;
+  logoChannels: Array<{ id: string; name: string; platform: Platform; platformLabel: string }>;
   defaultLogoChannelId: string | null;
   quota: { used: number; limit: number };
   renders: Array<{
@@ -90,4 +92,8 @@ export type EditorProps = {
   comments: CommentRow[];
   reviews: ReviewRow[];
   exportInfo: ExportInfo;
+  /** Pipeline status for the header (progress of a running step; reloads the page when it ends). */
+  status: ProjectStatus | null;
+  /** Editor plugins this workspace switched off, and whether the viewer may change that (workspace admins). */
+  plugins: { disabled: string[]; canManage: boolean };
 };

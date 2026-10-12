@@ -13,6 +13,8 @@ export const MODELS = {
   classify: "claude-haiku-4-5",
   /** Motion graphics design (lib/llm/motion.ts): picks the scenes and writes each shot's spec / HyperFrames composition. */
   motion: "claude-opus-5-5",
+  /** Editor voice-over rewrites (lib/llm/rewrite.ts): shorter, faithful to the article, or as the editor asks. */
+  rewrite: "claude-opus-5-5",
 } as const;
 
 /** USD per million tokens (Anthropic first-party rates). Cache write = 1.25x input, cache read = 0.1x input. */
