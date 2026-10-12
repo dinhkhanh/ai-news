@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
-import { Clapperboard, ExternalLink, Eye, FileText, Film, Newspaper, PencilLine, Send, Trash2 } from "lucide-react";
+import { Clapperboard, ExternalLink, Eye, FileText, Film, Newspaper, PencilLine, Search, Send, Trash2 } from "lucide-react";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import type { StoredFaithfulness, StoredScript } from "@/lib/llm/schemas";
+import { BRIEF_MAX_CHARS, BRIEF_MIN_CHARS } from "@/lib/llm/research-sources";
 import { DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/defaults";
 import { flagsEnabled } from "@/lib/flags";
 import { buildStatus, busyStep, DIRECT_RUN_ID, projectLabel } from "@/lib/project-state";
@@ -240,6 +241,7 @@ export default async function ProjectPage({
     kits,
   } = data;
   const isVideo = project.sourceKind === "video";
+  const isTopic = project.sourceKind === "topic";
   const projectKit = kits.find((k) => k.id === project.brandKitId) ?? null;
   // Brand kits are shared across channels; the logo is the channel's and can differ per render.
   const logoChannels = channels.filter((c) => c.logoPath);
@@ -436,7 +438,7 @@ export default async function ProjectPage({
             <Link href="/app" className="hover:underline">
               Dự án
             </Link>{" "}
-            / {displayHost(project.url) || "nội dung tự nhập"}
+            / {displayHost(project.url) || (isTopic ? "nghiên cứu chủ đề" : "nội dung tự nhập")}
           </div>
           <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">{projectLabel(project)}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
@@ -523,7 +525,7 @@ export default async function ProjectPage({
         ) : null}
       </StickyToolbar>
 
-      <PipelineStatus initial={status} canRun={writer} />
+      <PipelineStatus initial={status} canRun={writer} topic={isTopic} />
       {sp.duplicate ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
           Bài này đã có dự án trong workspace; bạn đang xem dự án đó.
@@ -557,7 +559,11 @@ export default async function ProjectPage({
                       ? busy
                         ? "Đang lưu nội dung…"
                         : "Chưa lưu được nội dung"
-                      : busy
+                      : isTopic
+                        ? busy
+                          ? "Đang nghiên cứu chủ đề…"
+                          : "Chưa nghiên cứu được chủ đề"
+                        : busy
                         ? "Đang lấy bài báo…"
                         : "Chưa lấy được bài báo"}
                 </CardTitle>
@@ -570,7 +576,11 @@ export default async function ProjectPage({
                       ? busy
                         ? "Trang tự cập nhật khi xong."
                         : "Dán lại nội dung bên dưới."
-                      : busy
+                      : isTopic
+                        ? busy
+                          ? "Claude tìm và đọc các nguồn tin trên web, rồi viết bài tổng hợp có ghi nguồn. Thường mất 1–3 phút; trang tự cập nhật khi xong."
+                          : "Sửa từ khoá / chỉ dẫn rồi nghiên cứu lại, hoặc dán nội dung thủ công bên dưới."
+                        : busy
                         ? "Cloudflare Browser Rendering → HTTP → Firecrawl. Trang tự cập nhật khi xong."
                         : "Thử lấy lại, dùng Firecrawl, hoặc dán nội dung bài thủ công bên dưới."}
                 </CardDescription>
@@ -581,6 +591,17 @@ export default async function ProjectPage({
                     <div className="flex flex-wrap gap-2">{refetchButtons(project, false)}</div>
                   ) : project.sourceKind === "text" ? (
                     pasteForm(project.id, false)
+                  ) : isTopic ? (
+                    <div className="space-y-4">
+                      {briefForm(project, false)}
+                      {project.inngestRunId === DIRECT_RUN_ID ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs text-muted-foreground">Hàng đợi xử lý có thể vẫn đang chậm:</p>
+                          <DirectFetchButtons projectId={project.id} topic />
+                        </div>
+                      ) : null}
+                      {pasteForm(project.id, false)}
+                    </div>
                   ) : (
                     fallbackForms(project, project.inngestRunId === DIRECT_RUN_ID)
                   )}
@@ -599,6 +620,11 @@ export default async function ProjectPage({
                       {sourceVideo?.durationSec ? ` · đã tải ${Math.round(Number(sourceVideo.durationSec))} giây` : ""}.
                       Ô nội dung đang là chú thích của video: viết lại điều video cần kể (có thể kèm chỉ dẫn cách viết
                       kịch bản) rồi xác nhận. Mọi cảnh sẽ dùng chính video này làm hình.
+                    </>
+                  ) : isTopic ? (
+                    <>
+                      Bài tổng hợp từ {article.sources.length} nguồn trên web · {article.wordCount} từ. Kiểm tra lại dữ
+                      kiện với các nguồn bên dưới, sửa nếu cần rồi xác nhận; kịch bản chỉ được tạo từ văn bản đã xác nhận.
                     </>
                   ) : (
                     <>
@@ -621,6 +647,15 @@ export default async function ProjectPage({
                     className="max-h-80 rounded border bg-black"
                     aria-label="Video nguồn"
                   />
+                ) : isTopic ? (
+                  <div className="space-y-2 text-sm">
+                    {project.brief ? (
+                      <p className="whitespace-pre-line rounded-md bg-muted/60 px-3 py-2 text-muted-foreground">
+                        <span className="font-medium text-foreground">Yêu cầu:</span> {project.brief}
+                      </p>
+                    ) : null}
+                    {article.sources.length ? <SourceList sources={article.sources} /> : null}
+                  </div>
                 ) : article.images.length ? (
                   <div className="flex gap-2 overflow-x-auto">
                     {article.images.slice(0, 6).map((im) => (
@@ -672,7 +707,13 @@ export default async function ProjectPage({
                   </div>
                 </ActionForm>
                 {/* Separate forms: they must not nest inside the confirm form. */}
-                {writer ? <div className="flex flex-wrap gap-2">{refetchButtons(project, busy)}</div> : null}
+                {writer && isTopic ? (
+                  <CollapsibleSection variant="plain" defaultOpen={false} title="Sửa yêu cầu và nghiên cứu lại" className="text-sm">
+                    {briefForm(project, busy)}
+                  </CollapsibleSection>
+                ) : writer ? (
+                  <div className="flex flex-wrap gap-2">{refetchButtons(project, busy)}</div>
+                ) : null}
                 {writer && !isVideo ? (
                   <CollapsibleSection
                     variant="plain"
@@ -1195,6 +1236,39 @@ export default async function ProjectPage({
       );
     });
   }
+}
+
+/** The pages a topic project's article is based on, as links (only pages the web tools really returned). */
+function SourceList({ sources }: { sources: Array<{ url: string; title: string | null; siteName: string | null }> }) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium text-muted-foreground">Nguồn đã dùng</div>
+      <ol className="list-decimal space-y-0.5 pl-5 text-xs">
+        {sources.map((src) => (
+          <li key={src.url} className="break-words">
+            <a href={src.url} target="_blank" rel="noopener noreferrer nofollow" className="underline-offset-2 hover:underline">
+              {src.title ?? src.url}
+            </a>
+            <span className="text-muted-foreground"> · {src.siteName ?? displayHost(src.url)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** Topic projects: the brief, editable, and "research again" (replaces the article once the research is done). */
+function briefForm(project: { id: string; brief: string | null }, busy: boolean) {
+  return (
+    <ActionForm action={refetchArticle} className="space-y-2">
+      <input type="hidden" name="projectId" value={project.id} />
+      <Label htmlFor="brief">Từ khoá, chủ đề hoặc chỉ dẫn</Label>
+      <Textarea id="brief" name="brief" rows={4} required minLength={BRIEF_MIN_CHARS} maxLength={BRIEF_MAX_CHARS} defaultValue={project.brief ?? ""} className="text-sm" />
+      <Button type="submit" size="sm" variant="outline" disabled={busy}>
+        <Search /> Nghiên cứu lại
+      </Button>
+    </ActionForm>
+  );
 }
 
 /** Re-fetch: one "download again" for a video page, the provider choice for an article, nothing for typed content. */

@@ -28,7 +28,9 @@ export type ArticleInput = {
   url?: string | null;
   publishedAt?: Date | string | null;
   /** What the text is (`projects.source_kind`); the script request says so (`sourceNote` in script.ts). Default `article`. */
-  kind?: "article" | "video" | "text";
+  kind?: "article" | "video" | "text" | "topic";
+  /** `topic` projects: the user's brief (keywords, topic, directions); its directions apply to the script (`sourceNote`). */
+  brief?: string | null;
 };
 
 export function articleBlockText(a: ArticleInput) {

@@ -101,7 +101,7 @@ function useNow(active: boolean) {
  * Replaces the old "refresh the whole page every 4 s" loop: the page reloads
  * once, when the run has actually changed something.
  */
-export function PipelineStatus({ initial, variant = "card", canRun = true, className }: { initial: ProjectStatus; variant?: "card" | "inline"; /** Writers get the direct-run buttons when the queue is slow. */ canRun?: boolean; className?: string }) {
+export function PipelineStatus({ initial, variant = "card", canRun = true, topic, className }: { initial: ProjectStatus; variant?: "card" | "inline"; /** Writers get the direct-run buttons when the queue is slow. */ canRun?: boolean; /** A topic project (its fetch is web research). */ topic?: boolean; className?: string }) {
   const [status] = useProjectStatuses([initial]);
   const now = useNow(Boolean(status?.step));
   if (!status) return null;
@@ -124,7 +124,7 @@ export function PipelineStatus({ initial, variant = "card", canRun = true, class
             Bước <b>{STEP_LABEL[status.staleStep ?? ""] ?? status.staleStep ?? "đang chạy"}</b> không phản hồi hơn 15 phút. Bạn có thể chạy lại bước đó.
           </span>
         </div>
-        {variant === "card" && status.staleStep ? <QueueRescue projectId={status.id} step={status.staleStep} stale canRun={canRun} /> : null}
+        {variant === "card" && status.staleStep ? <QueueRescue projectId={status.id} step={status.staleStep} stale canRun={canRun} topic={topic} /> : null}
       </div>
     );
   }
@@ -166,7 +166,7 @@ export function PipelineStatus({ initial, variant = "card", canRun = true, class
         {pct != null ? <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span> : null}
       </div>
       <p className="text-xs text-muted-foreground">{progress?.label ?? "Đang xếp hàng…"}</p>
-      {queueSlow && step ? <QueueRescue projectId={status.id} step={step} canRun={canRun} /> : null}
+      {queueSlow && step ? <QueueRescue projectId={status.id} step={step} canRun={canRun} topic={topic} /> : null}
     </div>
   );
 }

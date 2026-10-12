@@ -15,6 +15,8 @@ export const MODELS = {
   motion: "claude-opus-5-5",
   /** Editor voice-over rewrites (lib/llm/rewrite.ts): shorter, faithful to the article, or as the editor asks. */
   rewrite: "claude-opus-5-5",
+  /** Topic projects (lib/llm/research.ts): researches the brief with web search + web fetch, then writes the article. */
+  research: "claude-opus-5-5",
 } as const;
 
 /** USD per million tokens (Anthropic first-party rates). Cache write = 1.25x input, cache read = 0.1x input. */

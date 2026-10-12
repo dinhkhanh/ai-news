@@ -5,7 +5,8 @@
  */
 import { WEB_VIDEO_PAGE } from "./media/visual-plan";
 
-export type SourceKind = "article" | "video" | "text";
+/** `projects.source_kind`; `topic` = a brief researched on the web (`llm/research.ts`, helpers in `llm/research-sources.ts`). */
+export type SourceKind = "article" | "video" | "text" | "topic";
 
 /** Longest part of a source video that is downloaded (from the start): the NAS API refuses longer sections. */
 export const SOURCE_VIDEO_MAX_SEC = 120;
@@ -14,7 +15,7 @@ export const SOURCE_VIDEO_MAX_SEC = 120;
  * Least content a script can be written from. An article needs some substance; a video's content is what the
  * user writes about it, and a video caption can be a single line, so one word is enough there.
  */
-export const MIN_CONTENT_WORDS: Record<SourceKind, number> = { article: 40, text: 40, video: 1 };
+export const MIN_CONTENT_WORDS: Record<SourceKind, number> = { article: 40, text: 40, topic: 40, video: 1 };
 
 /** Share links that redirect to a video page: TikTok app links, Facebook share links. */
 const SHORT_VIDEO_LINK = /^https?:\/\/(?:(?:vt|vm)\.tiktok\.com\/\w|(?:www\.|m\.)?tiktok\.com\/t\/\w|(?:www\.|m\.|web\.)?facebook\.com\/share\/(?:r|v)\/\w)/i;

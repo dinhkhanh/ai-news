@@ -1,10 +1,11 @@
 "use client";
 import { useState } from "react";
-import { Clapperboard, Plus } from "lucide-react";
+import { Clapperboard, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { BRIEF_MAX_CHARS, BRIEF_MIN_CHARS } from "@/lib/llm/research-sources";
 import { cn } from "@/lib/utils";
 import { MIN_CONTENT_WORDS, videoLinkKind } from "@/lib/video-source";
 
@@ -17,11 +18,12 @@ const SITE_NAME: Array<[RegExp, string]> = [
 ];
 
 /**
- * The source part of the new-project form: a link (a news article, or a video page, recognised as it is typed)
- * or content typed in. Posts `mode` = `link` | `text` with `url`, or `title` + `text` (see `createProject`).
+ * The source part of the new-project form: a link (a news article, or a video page, recognised as it is typed),
+ * content typed in, or a topic to research on the web. Posts `mode` = `link` | `text` | `topic` with `url`,
+ * `title` + `text`, or `brief` (see `createProject`).
  */
 export function NewProjectSource() {
-  const [mode, setMode] = useState<"link" | "text">("link");
+  const [mode, setMode] = useState<"link" | "text" | "topic">("link");
   const [url, setUrl] = useState("");
   const [words, setWords] = useState(0);
   const video = mode === "link" && url.trim() ? videoLinkKind(url) : null;
@@ -30,11 +32,12 @@ export function NewProjectSource() {
   return (
     <div className="space-y-2">
       <input type="hidden" name="mode" value={mode} />
-      <div role="radiogroup" aria-label="Nguồn nội dung" className="inline-flex h-8 items-stretch rounded-xl bg-sidebar pointer-coarse:h-10">
+      <div role="radiogroup" aria-label="Nguồn nội dung" className="inline-flex h-8 max-w-full items-stretch overflow-x-auto rounded-xl bg-sidebar pointer-coarse:h-10">
         {(
           [
             ["link", "Dán link"],
             ["text", "Tự nhập nội dung"],
+            ["topic", "Nghiên cứu chủ đề"],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -83,6 +86,32 @@ export function NewProjectSource() {
               "Bài báo: hệ thống lấy nội dung bài. Link YouTube, TikTok, Facebook reels… được nhận ra là video."
             )}
           </p>
+        </div>
+      ) : mode === "topic" ? (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label htmlFor="new-brief">Từ khoá, chủ đề hoặc chỉ dẫn</Label>
+            <Textarea
+              id="new-brief"
+              name="brief"
+              rows={5}
+              required
+              minLength={BRIEF_MIN_CHARS}
+              maxLength={BRIEF_MAX_CHARS}
+              className="text-sm leading-relaxed"
+              placeholder={"Ví dụ: giá vàng hôm nay\nhoặc: Metro số 2 TP.HCM khởi công, tiến độ và tổng vốn; giọng hào hứng, mở đầu bằng một câu hỏi"}
+            />
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Search className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              Claude tìm và đọc các nguồn tin mới nhất trên web, tổng hợp thành một bài có ghi nguồn; sau đó viết kịch bản
+              và dựng video như bình thường. Chỉ dẫn về giọng điệu, góc nhìn được áp dụng khi viết kịch bản.
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <Button type="submit" className="w-full sm:w-auto">
+              <Plus data-icon="inline-start" /> Tạo dự án
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-2">

@@ -7,6 +7,7 @@ import type { MotionEngine, MotionMode } from "@ai-news/video/motion";
 import type { PhotoSketch } from "@ai-news/video/schema";
 import type { LogoMotion } from "@ai-news/video/schema";
 import type { BusyProgress } from "@/lib/project-state";
+import type { SourceKind } from "@/lib/video-source";
 import {
   type AnyPgColumn,
   bigint,
@@ -220,14 +221,17 @@ export const projects = pgTable(
     ownerId: text("owner_id")
       .notNull()
       .references(() => user.id, { onDelete: "restrict" }),
-    /** The article or video page; null for a `text` project (content typed in by the user, no link). */
+    /** The article or video page; null for a `text` or `topic` project (no link). */
     url: text("url"),
     canonicalUrl: text("canonical_url"),
     /**
      * What the project is made from: `article` = a news page (fetch chain), `video` = a video page (YouTube, TikTok,
-     * Facebook…): its file is downloaded as the footage and the user writes the content, `text` = content typed in at creation.
+     * Facebook…): its file is downloaded as the footage and the user writes the content, `text` = content typed in at creation,
+     * `topic` = keywords / a topic / directions (`brief`) that the fetch step researches on the web (lib/llm/research.ts).
      */
-    sourceKind: text("source_kind").$type<"article" | "video" | "text">().notNull().default("article"),
+    sourceKind: text("source_kind").$type<SourceKind>().notNull().default("article"),
+    /** `topic` projects: what the user asked for (keywords, topic or directions); researched at fetch, followed by the script. */
+    brief: text("brief"),
     /** `video` projects: the downloaded source video (a `web_video` asset); every shot of the build is cut from it. */
     sourceVideoAssetId: uuid("source_video_asset_id").references((): AnyPgColumn => assets.id, { onDelete: "set null" }),
     title: text("title"),
@@ -311,7 +315,9 @@ export const articles = pgTable(
     images: jsonb("images").$type<Array<{ url: string; alt?: string; width?: number; height?: number }>>().notNull().default([]),
     snapshotPath: text("snapshot_path"),
     screenshotPath: text("screenshot_path"),
-    fetchMethod: text("fetch_method"), // browser_rendering | http | firecrawl | manual | video
+    fetchMethod: text("fetch_method"), // browser_rendering | http | firecrawl | manual | video | research
+    /** `topic` projects: the web pages the researched article is based on (only pages the web tools really returned). */
+    sources: jsonb("sources").$type<Array<{ url: string; title: string | null; siteName: string | null }>>().notNull().default([]),
     flags: jsonb("flags").$type<{ paywall?: boolean; liveBlog?: boolean; videoOnly?: boolean; short?: boolean }>().notNull().default({}),
     wordCount: integer("word_count").notNull().default(0),
     /** Set when the user confirms (or edits) the extracted text; scripts are generated from confirmed text only. */

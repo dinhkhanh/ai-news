@@ -28,7 +28,13 @@ export type GenerateScriptResult = {
  * tell, possibly with directions for the script), and its footage is that video; a `text` project is the user's
  * own writing. Kept in the user message so the cached system prefix stays the template + text.
  */
-function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language) {
+function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language, brief?: string | null) {
+  if (kind === "topic") {
+    const b = brief?.trim() ? (lang === "vi" ? ` Yêu cầu của biên tập viên: <brief>${brief.trim()}</brief>` : ` The editor's brief: <brief>${brief.trim()}</brief>`) : "";
+    return lang === "vi"
+      ? ` Lưu ý: văn bản ở trên do hệ thống tổng hợp từ các nguồn tin trên web theo yêu cầu của biên tập viên (không có một bài báo gốc); Source là các nguồn đã dùng. Chỉ dùng dữ kiện có trong văn bản; nếu yêu cầu có chỉ dẫn về giọng điệu, góc nhìn hay cách mở đầu thì làm theo, đừng đọc chỉ dẫn thành lời bình.${b}`
+      : ` Note: the text above was compiled from web sources at the editor's request (there is no single source article); Source lists the outlets used. Use only facts the text states; follow any directions the brief gives on tone, angle or opening, never read them out as voice-over.${b}`;
+  }
   if (kind === "video") {
     return lang === "vi"
       ? " Lưu ý: nguồn là một video (trang ghi ở Source), không phải bài báo. Văn bản ở trên do biên tập viên viết về video đó: đó là toàn bộ dữ kiện được dùng, và nếu có chỉ dẫn cách viết kịch bản thì làm theo chỉ dẫn, đừng đọc chỉ dẫn thành lời bình. Hình ảnh là các đoạn cắt từ chính video này, xen với hình khác; lời bình bình luận về video (bối cảnh, vì sao đáng chú ý, điều gì tiếp theo) chứ không thuật lại diễn biến trên màn hình; không bịa chi tiết ngoài văn bản."
@@ -56,7 +62,7 @@ const ORIGINALITY_NOTE = {
 function userMessage(input: GenerateScriptInput) {
   const lang = input.language;
   const tone = toneLabel(input.tone, lang);
-  const note = sourceNote(input.article.kind, lang) + ORIGINALITY_NOTE[lang];
+  const note = sourceNote(input.article.kind, lang, input.article.brief) + ORIGINALITY_NOTE[lang];
   return lang === "vi"
     ? `Viết kịch bản từ ${input.article.kind === "video" ? "nội dung" : "bài báo"} ở trên. Thời lượng mục tiêu: ${input.durationSec} giây. Giọng điệu: ${tone}. Ngôn ngữ đầu ra: tiếng Việt.${note}`
     : `Write the script from the ${input.article.kind === "video" ? "content" : "article"} above. Target length: ${input.durationSec} seconds. Tone: ${tone}. Output language: English.${note}`;
