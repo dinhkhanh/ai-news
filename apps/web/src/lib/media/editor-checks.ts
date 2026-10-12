@@ -9,6 +9,7 @@ import type { TextLayoutInput } from "@ai-news/video/schema";
 import { PLATFORM_SPEC, type Platform } from "@/lib/publish/platforms";
 import { sceneShots, sceneVoiceMs, setShot, shotsMissing, visualKey, type EditorDoc, type EditorScene, type EditorVisual } from "./editor";
 import { frameStill, overlayZones, FRAMING_ISSUE_LABEL, type FrameFaces } from "./framing";
+import { docShots, MAX_THIRD_PARTY_RUN_SEC, MAX_THIRD_PARTY_VIDEO_SHARE, originalityReport } from "./originality";
 
 export type IssueSeverity = "fix" | "should" | "info";
 
@@ -244,8 +245,46 @@ const audio: Check = {
   ],
 };
 
+/**
+ * Meta's original content rules (`originality.ts`): third-party video footage at most half of the running time and
+ * never more than 10 s in a row. A shot's source comes from its option's provider; a key with no option is not counted.
+ */
+const originality: Check = {
+  id: "checks.originality",
+  label: "Nội dung nguyên bản (Meta)",
+  run: ({ doc, options }) => {
+    const providers = new Map(options.map((o) => [o.key, o.provider]));
+    const shots = docShots(doc, (k) => providers.get(k));
+    const r = originalityReport(shots);
+    const out: Issue[] = [];
+    if (r.share > MAX_THIRD_PARTY_VIDEO_SHARE) {
+      const first = shots.find((s) => s.source === "third_party_video");
+      out.push({
+        id: "originality:share",
+        checkId: "checks.originality",
+        severity: "should",
+        sceneId: first?.sceneId ?? null,
+        title: `${Math.round(r.share * 100)} % thời lượng là video của người khác`,
+        detail: `Facebook / Instagram hạ phân phối và tắt kiếm tiền với video chủ yếu là cảnh quay lấy lại, kể cả khi có lời bình. Giữ dưới ${Math.round(MAX_THIRD_PARTY_VIDEO_SHARE * 100)} %: thay bớt clip bằng ảnh, đồ hoạ chuyển động hoặc stock.`,
+        fix: first ? { kind: "open", sceneId: first.sceneId, tab: "shots", shot: first.shot, label: "Đổi clip" } : null,
+      });
+    }
+    for (const run of r.longRuns)
+      out.push({
+        id: `originality:run:${shotName(run.from.sceneId, run.from.shot)}`,
+        checkId: "checks.originality",
+        severity: "should",
+        sceneId: run.to.sceneId,
+        title: `${fmt(run.sec)} liền video của người khác (${shotName(run.from.sceneId, run.from.shot)} → ${shotName(run.to.sceneId, run.to.shot)})`,
+        detail: `Xen ảnh, đồ hoạ hoặc stock vào giữa, tối đa ${MAX_THIRD_PARTY_RUN_SEC} s liền: Meta coi một chuỗi dài cảnh quay lấy lại là nội dung không nguyên bản.`,
+        fix: { kind: "open", sceneId: run.to.sceneId, tab: "shots", shot: run.to.shot, label: "Đổi cảnh quay" },
+      });
+    return out;
+  },
+};
+
 /** Every built-in check, in the order the panel lists them. */
-export const BUILTIN_CHECKS: Check[] = [faithfulness, duration, shotHold, solidShots, repeated, faces, hookText, audio];
+export const BUILTIN_CHECKS: Check[] = [faithfulness, duration, shotHold, solidShots, repeated, faces, originality, hookText, audio];
 
 /** Run checks and sort the issues: fix → should → info, then document order. */
 export function runChecks(checks: Check[], input: CheckInput): Issue[] {

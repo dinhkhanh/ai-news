@@ -22,6 +22,12 @@ export type PlatformSpec = {
   privacy: readonly string[];
   /** The platform exposes a machine-readable AI-disclosure flag; otherwise we add a text line. */
   disclosureFlag: boolean;
+  /**
+   * The source line may carry the article's URL. Meta's creator guidance (2025-07, unoriginal-content update):
+   * captions with no links and at most five hashtags reach furthest, so Facebook / Instagram name the outlet only
+   * (the video's outro still shows the link).
+   */
+  sourceLink: boolean;
   /** Feature flag key in /admin/integrations. */
   flag: "publish_youtube" | "publish_facebook" | "publish_instagram" | "publish_tiktok";
   /** OAuth provider that connects this platform's channels. */
@@ -38,6 +44,7 @@ export const PLATFORM_SPEC: Record<Platform, PlatformSpec> = {
     metadataKey: "youtube",
     privacy: ["public", "unlisted", "private"],
     disclosureFlag: true,
+    sourceLink: true,
     flag: "publish_youtube",
     oauth: "youtube",
   },
@@ -45,11 +52,12 @@ export const PLATFORM_SPEC: Record<Platform, PlatformSpec> = {
     label: "Facebook Reels",
     titleMax: 255,
     descriptionMax: 2200,
-    hashtagMax: 30,
+    hashtagMax: 5,
     maxDurationSec: 90,
     metadataKey: "facebook",
     privacy: ["public"],
     disclosureFlag: false,
+    sourceLink: false,
     flag: "publish_facebook",
     oauth: "meta",
   },
@@ -57,11 +65,12 @@ export const PLATFORM_SPEC: Record<Platform, PlatformSpec> = {
     label: "Instagram Reels",
     titleMax: 0,
     descriptionMax: 2200,
-    hashtagMax: 30,
+    hashtagMax: 5,
     maxDurationSec: 180,
     metadataKey: "facebook",
     privacy: ["public"],
     disclosureFlag: false,
+    sourceLink: false,
     flag: "publish_instagram",
     oauth: "meta",
   },
@@ -74,6 +83,7 @@ export const PLATFORM_SPEC: Record<Platform, PlatformSpec> = {
     metadataKey: "tiktok",
     privacy: ["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"],
     disclosureFlag: true,
+    sourceLink: true,
     flag: "publish_tiktok",
     oauth: "tiktok",
   },
@@ -104,6 +114,15 @@ export function normaliseHashtags(list: string[], platform: Platform) {
   return out;
 }
 
+/** Host of a URL without `www.` ("vnexpress.net"), null when unreadable. */
+function hostOf(url: string | null) {
+  try {
+    return url ? new URL(url).hostname.replace(/^www\./, "") : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Cut on a word boundary and add an ellipsis when over `max`. */
 export function truncate(s: string, max: number) {
   const t = s.trim();
@@ -127,13 +146,14 @@ export type BuildMetadataInput = {
  * Default title/description/hashtags for the publish form: script metadata
  * for the platform, then a source line (§8 attribution), an AI-disclosure line
  * on platforms without a machine flag, then the hashtags. Everything fits the
- * platform limits; the user may still edit before publishing.
+ * platform limits; the user may still edit before publishing. On Facebook /
+ * Instagram the source line names the outlet without a link (`sourceLink`).
  */
 export function buildMetadata(input: BuildMetadataInput): PublishMetadata {
   const spec = PLATFORM_SPEC[input.platform];
   const hashtags = normaliseHashtags(input.meta?.hashtags ?? [], input.platform);
   const title = truncate(input.meta?.title || input.fallbackTitle, spec.titleMax || 2200);
-  const credited = [input.source.siteName, input.source.url].filter(Boolean).join(" · ");
+  const credited = spec.sourceLink ? [input.source.siteName, input.source.url].filter(Boolean).join(" · ") : (input.source.siteName ?? hostOf(input.source.url) ?? "");
   const sourceLine = credited ? `${SOURCE_LABEL[input.language]}: ${credited}` : "";
   const body = (input.meta?.description ?? "").trim();
   const lines = sourceLine ? [body, "", sourceLine] : [body, ""];

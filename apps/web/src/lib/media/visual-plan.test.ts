@@ -56,6 +56,15 @@ describe("allocate", () => {
     expect(r.used).toBe(3);
   });
 
+  it("caps how many shots the limited members fill together (originality budget for footage)", () => {
+    // pool: 0 and 1 = web videos with 2 segments each, 2 and 3 = stills; at most 2 shots of web video in the whole video
+    const limit = { members: [true, true, false, false], max: 2 };
+    const r = allocate([{ id: "s1", want: 3 }, { id: "s2", want: 2 }], 4, { s1: [0, 2], s2: [1, 3] }, [2, 2, 1, 1], limit);
+    expect(r.perScene).toEqual({ s1: [{ index: 0, segment: 0 }, { index: 0, segment: 1 }, seg0(2)], s2: [seg0(3)] });
+    // Without the limit the second video fills s2.
+    expect(allocate([{ id: "s1", want: 3 }, { id: "s2", want: 2 }], 4, { s1: [0, 2], s2: [1, 3] }, [2, 2, 1, 1]).perScene.s2).toEqual([{ index: 1, segment: 0 }, { index: 1, segment: 1 }]);
+  });
+
   it("treats capacity 0 as unusable (e.g. a download that failed)", () => {
     const r = allocate([{ id: "s1", want: 2 }], 2, { s1: [0] }, [0, 1]);
     expect(r.perScene).toEqual({ s1: [seg0(1)] });

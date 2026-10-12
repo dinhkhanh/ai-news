@@ -31,8 +31,8 @@ export type GenerateScriptResult = {
 function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language) {
   if (kind === "video") {
     return lang === "vi"
-      ? " Lưu ý: nguồn là một video (trang ghi ở Source), không phải bài báo. Văn bản ở trên do biên tập viên viết về video đó: đó là toàn bộ dữ kiện được dùng, và nếu có chỉ dẫn cách viết kịch bản thì làm theo chỉ dẫn, đừng đọc chỉ dẫn thành lời bình. Hình ảnh của mọi cảnh là chính video này, nên lời bình kể và bình luận về nội dung video; không bịa chi tiết ngoài văn bản."
-      : " Note: the source is a video (the page under Source), not a news article. The text above was written by the editor about that video: it is all the facts there are, and any directions it gives for the script are to be followed, never read out as voice-over. Every scene's picture is this video itself, so the voice-over tells and comments on what the video shows; invent nothing beyond the text.";
+      ? " Lưu ý: nguồn là một video (trang ghi ở Source), không phải bài báo. Văn bản ở trên do biên tập viên viết về video đó: đó là toàn bộ dữ kiện được dùng, và nếu có chỉ dẫn cách viết kịch bản thì làm theo chỉ dẫn, đừng đọc chỉ dẫn thành lời bình. Hình ảnh là các đoạn cắt từ chính video này, xen với hình khác; lời bình bình luận về video (bối cảnh, vì sao đáng chú ý, điều gì tiếp theo) chứ không thuật lại diễn biến trên màn hình; không bịa chi tiết ngoài văn bản."
+      : " Note: the source is a video (the page under Source), not a news article. The text above was written by the editor about that video: it is all the facts there are, and any directions it gives for the script are to be followed, never read out as voice-over. The pictures are clips of this video interspersed with other pictures; the voice-over comments on it (context, why it matters, what comes next) rather than narrating what happens on screen; invent nothing beyond the text.";
   }
   if (kind === "text") {
     return lang === "vi"
@@ -42,10 +42,21 @@ function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language
   return "";
 }
 
+/**
+ * Platforms' originality rules (Meta's original content guidelines; TikTok and YouTube down-rank reused content too):
+ * a voice-over that only describes footage is a "minor edit" and the video counts as unoriginal. The voice-over is
+ * the part we make, so it has to add something; the faithfulness rules still hold. In code rather than in the
+ * templates so it applies to admin-edited templates as well.
+ */
+const ORIGINALITY_NOTE = {
+  vi: " Tính nguyên bản: Facebook, TikTok và YouTube hạ phân phối video chỉ thuật lại điều người xem đang thấy. Lời bình là phần của riêng kênh: mỗi cảnh thân bài phải đặt bối cảnh, giải thích vì sao điều đó quan trọng, nối các dữ kiện với nhau hoặc nêu hệ quả, chỉ bằng thông tin có trong văn bản; đừng mô tả hình ảnh.",
+  en: " Originality: Facebook, TikTok and YouTube demote videos that only narrate what the viewer is watching. The voice-over is the channel's own contribution: every body scene gives context, explains why it matters, connects facts or states a consequence, using only what the text says; never just describe the pictures.",
+} as const;
+
 function userMessage(input: GenerateScriptInput) {
   const lang = input.language;
   const tone = toneLabel(input.tone, lang);
-  const note = sourceNote(input.article.kind, lang);
+  const note = sourceNote(input.article.kind, lang) + ORIGINALITY_NOTE[lang];
   return lang === "vi"
     ? `Viết kịch bản từ ${input.article.kind === "video" ? "nội dung" : "bài báo"} ở trên. Thời lượng mục tiêu: ${input.durationSec} giây. Giọng điệu: ${tone}. Ngôn ngữ đầu ra: tiếng Việt.${note}`
     : `Write the script from the ${input.article.kind === "video" ? "content" : "article"} above. Target length: ${input.durationSec} seconds. Tone: ${tone}. Output language: English.${note}`;

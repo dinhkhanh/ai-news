@@ -87,3 +87,27 @@ describe("fixes", () => {
     expect(replaceWithUnused(doc, [opt("a.jpg"), opt("b.jpg")], "s3", 1)).toBeNull();
   });
 });
+
+describe("originality check", () => {
+  const clip = (key: string) => ({ kind: "video" as const, key, clipDurationSec: 5 });
+  const footageDoc = (shots: ReturnType<typeof clip>[]): EditorDoc =>
+    editorDocSchema.parse({ ...doc, scenes: [{ id: "s1", kind: "body", onScreenText: "x", voiceover: "a", durationSec: 20, voice: voice("s1", 20000), visual: shots[0], shots: shots.slice(1) }] });
+  const clips = [opt("w1.mp4", { kind: "video", provider: "yt-dlp" }), opt("w2.mp4", { kind: "video", provider: "yt-capture" }), opt("w3.mp4", { kind: "video", provider: "yt-dlp" }), opt("p.mp4", { kind: "video", provider: "pexels" })];
+  const originality = (d: EditorDoc) => runChecks(BUILTIN_CHECKS, input({ doc: d, options: [...options, ...clips] })).filter((i) => i.checkId === "checks.originality");
+
+  it("flags a cut that is mostly someone else's footage, and footage running past 10 s", () => {
+    const issues = originality(footageDoc([clip("w1.mp4"), clip("w2.mp4"), clip("w3.mp4"), clip("p.mp4")]));
+    expect(issues.map((i) => i.id)).toEqual(["originality:share", "originality:run:s1"]);
+    expect(issues[0].title).toContain("75 %");
+    expect(issues[1].title).toContain("s1 → s1 #3");
+    expect(issues[1].fix).toMatchObject({ kind: "open", tab: "shots", shot: 2 });
+  });
+
+  it("accepts footage interspersed with stock", () => {
+    expect(originality(footageDoc([clip("w1.mp4"), clip("p.mp4"), clip("w2.mp4"), clip("p.mp4")]))).toEqual([]);
+  });
+
+  it("does not count stills or media it cannot place", () => {
+    expect(originality(doc)).toEqual([]);
+  });
+});

@@ -127,7 +127,7 @@ Common: tokens in Vault, cron refresh, admin alert on failure; per-platform meta
 
 ## 8. Content rules
 
-Source attribution in video and caption. Licence stored per asset/track. AI-disclosure flag per project. Faithfulness gate with logged override. Sensitive-topic flag (elections, health, legal, minors) routed to publisher. Activity log retention 12 months, configurable.
+Source attribution in video and caption (Facebook / Instagram captions name the outlet without a link and carry at most five hashtags). Originality: a video is our commentary with third-party footage interspersed, never a re-upload of someone else's video – at most half of the running time and 10 s in a row of third-party footage (`media/originality.ts`, flag `originality_guard`, editor check), and a voice-over that adds context instead of narrating the pictures. Licence stored per asset/track. AI-disclosure flag per project. Faithfulness gate with logged override. Sensitive-topic flag (elections, health, legal, minors) routed to publisher. Activity log retention 12 months, configurable.
 
 ## 9. Operations
 
