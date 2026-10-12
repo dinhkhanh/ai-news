@@ -5,6 +5,7 @@ import { ChevronLeft } from "lucide-react";
 import { currentAdminItem } from "@/components/admin-nav";
 import { currentAppItem } from "@/components/app-nav";
 import { LogoMark } from "@/components/logo-mark";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { SegmentedLinks } from "@/components/ui/segmented";
 
 /** One level up from a nested page: the editor goes back to its project, everything else to its section. */
@@ -17,7 +18,7 @@ function parentOf(pathname: string, sectionHref: string) {
 /**
  * The bar at the top of the white panel, as in the reference: back chevron (on nested
  * pages), where you are, the area switch as a segmented control (platform admins),
- * and the account menu (`children`) on the right.
+ * the light / dark switch and the account menu (`children`) on the right.
  *
  * It sticks, except on pages that mount their own <StickyToolbar>, which flags
  * <html data-own-bar>. The wrapper is painted in the rail colour so nothing shows
@@ -49,7 +50,10 @@ export function TopBar({ area, admin, children }: { area: "app" | "admin"; admin
             ]}
           />
         ) : null}
-        <div className="ml-auto">{children}</div>
+        <div className="ml-auto flex items-center gap-1">
+          <ThemeToggle />
+          {children}
+        </div>
       </div>
     </header>
   );

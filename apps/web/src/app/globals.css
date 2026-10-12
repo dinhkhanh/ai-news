@@ -42,38 +42,41 @@
 }
 
 .dark {
-  --background: oklch(0.16 0.01 262);
-  --foreground: oklch(0.95 0.005 255);
-  --card: oklch(0.2 0.01 262);
-  --card-foreground: oklch(0.95 0.005 255);
-  --popover: oklch(0.2 0.01 262);
-  --popover-foreground: oklch(0.95 0.005 255);
-  --primary: oklch(0.7 0.16 255);
-  --primary-foreground: oklch(0.16 0.01 262);
-  --secondary: oklch(0.26 0.01 262);
-  --secondary-foreground: oklch(0.95 0.005 255);
-  --muted: oklch(0.26 0.01 262);
-  --muted-foreground: oklch(0.7 0.015 262);
-  --accent: oklch(0.26 0.01 262);
-  --accent-foreground: oklch(0.95 0.005 255);
-  --destructive: oklch(0.7 0.19 22);
-  --success: oklch(0.72 0.16 155);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.7 0.16 255);
-  --chart-1: oklch(0.7 0.16 255);
-  --chart-2: oklch(0.72 0.16 155);
-  --chart-3: oklch(0.77 0.19 70);
-  --chart-4: oklch(0.63 0.26 304);
-  --chart-5: oklch(0.7 0.19 22);
-  --sidebar: oklch(0.18 0.01 262);
-  --sidebar-foreground: oklch(0.95 0.005 255);
-  --sidebar-primary: oklch(0.7 0.16 255);
-  --sidebar-primary-foreground: oklch(0.16 0.01 262);
-  --sidebar-accent: oklch(0.26 0.01 262);
-  --sidebar-accent-foreground: oklch(0.95 0.005 255);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.7 0.16 255);
+  /* The same layering in the dark: the rail is the deepest (#0d0e11), the top-bar band and cards rise above
+     the content floor (#111215 → #18191d), hairlines do the work shadows do in light, one blue (#3d8bfd,
+     white text on buttons as in light, 5:1 as text on a card). Text #e7e8eb ≈ 14:1, labels #9b9da4 ≈ 6.5:1. */
+  --background: #111215;
+  --foreground: #e7e8eb;
+  --card: #18191d;
+  --card-foreground: #e7e8eb;
+  --popover: #1b1c21;
+  --popover-foreground: #e7e8eb;
+  --primary: #3d8bfd;
+  --primary-foreground: #ffffff;
+  --secondary: #222429;
+  --secondary-foreground: #e7e8eb;
+  --muted: #222429;
+  --muted-foreground: #9b9da4;
+  --accent: #222429;
+  --accent-foreground: #e7e8eb;
+  --destructive: #f0646a;
+  --success: #2fbf71;
+  --border: #25272d;
+  --input: #2e3036;
+  --ring: #3d8bfd;
+  --chart-1: #5ea2ff;
+  --chart-2: #2fbf71;
+  --chart-3: #f5b54a;
+  --chart-4: #a17cf8;
+  --chart-5: #f0646a;
+  --sidebar: #0d0e11;
+  --sidebar-foreground: #e7e8eb;
+  --sidebar-primary: #3d8bfd;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1f2025;
+  --sidebar-accent-foreground: #e7e8eb;
+  --sidebar-border: #2c2e34;
+  --sidebar-ring: #3d8bfd;
 }
 
 @theme inline {
