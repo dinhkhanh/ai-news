@@ -220,8 +220,8 @@ export function Editor(props: EditorProps) {
 
   const platforms = useMemo(() => [...new Set(props.exportInfo.logoChannels.map((c) => c.platform))], [props.exportInfo.logoChannels]);
   const issues = useMemo(
-    () => runChecks(contributions.checks, { doc, options, verdicts: props.verdicts, mixUsable, durationSec: built.durationSec, platforms, hasLogo }),
-    [contributions.checks, doc, options, props.verdicts, mixUsable, built.durationSec, platforms, hasLogo],
+    () => runChecks(contributions.checks, { doc, options, verdicts: props.verdicts, mixUsable, durationSec: built.durationSec, platforms, hasLogo, comic: props.comic }),
+    [contributions.checks, doc, options, props.verdicts, mixUsable, built.durationSec, platforms, hasLogo, props.comic],
   );
 
   /* ------------------------------------------------------------ services */

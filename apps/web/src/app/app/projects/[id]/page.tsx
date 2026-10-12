@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
-import { Clapperboard, ExternalLink, Eye, FileText, Film, Newspaper, PencilLine, Search, Send, Trash2 } from "lucide-react";
+import { BookOpen, Clapperboard, ExternalLink, Eye, FileText, Film, Newspaper, PencilLine, Search, Send, Trash2 } from "lucide-react";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
@@ -242,6 +242,7 @@ export default async function ProjectPage({
   } = data;
   const isVideo = project.sourceKind === "video";
   const isTopic = project.sourceKind === "topic";
+  const isComic = project.sourceKind === "comic";
   const projectKit = kits.find((k) => k.id === project.brandKitId) ?? null;
   // Brand kits are shared across channels; the logo is the channel's and can differ per render.
   const logoChannels = channels.filter((c) => c.logoPath);
@@ -438,7 +439,7 @@ export default async function ProjectPage({
             <Link href="/app" className="hover:underline">
               Dự án
             </Link>{" "}
-            / {displayHost(project.url) || (isTopic ? "nghiên cứu chủ đề" : "nội dung tự nhập")}
+            / {displayHost(project.url) || (isTopic ? "nghiên cứu chủ đề" : isComic ? "truyện tranh" : "nội dung tự nhập")}
           </div>
           <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">{projectLabel(project)}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
@@ -464,6 +465,15 @@ export default async function ProjectPage({
               </Badge>
             ) : null}
             {isVideo ? <Badge variant="outline">từ video</Badge> : null}
+            {isComic ? (
+              project.comicId ? (
+                <Link href={`/app/comics/${project.comicId}?tab=export`} className="inline-flex min-h-6 items-center gap-1 text-muted-foreground hover:text-foreground hover:underline">
+                  <BookOpen className="size-3" aria-hidden /> từ truyện tranh
+                </Link>
+              ) : (
+                <Badge variant="outline">từ truyện tranh (đã xoá)</Badge>
+              )
+            ) : null}
             {project.url ? (
               <a
                 href={project.url}
@@ -734,7 +744,7 @@ export default async function ProjectPage({
               <CardHeader>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <CardTitle>Kịch bản</CardTitle>
-                  {writer ? (
+                  {writer && !isComic ? (
                     <ActionForm
                       id="script-form"
                       action={requestScript}
@@ -749,8 +759,9 @@ export default async function ProjectPage({
                   ) : null}
                 </div>
                 <CardDescription>
-                  Claude Opus 5 viết kịch bản từ bài đã xác nhận, rồi kiểm chứng từng cảnh. Mỗi lần tạo là một phiên bản
-                  mới.
+                  {isComic
+                    ? "Dựng từ lời thoại của truyện, không gọi mô hình: mỗi lời một cảnh trên khung của nó. Muốn đổi lời, sửa truyện rồi làm video lại từ tab Xuất của truyện."
+                    : "Claude Opus 5 viết kịch bản từ bài đã xác nhận, rồi kiểm chứng từng cảnh. Mỗi lần tạo là một phiên bản mới."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

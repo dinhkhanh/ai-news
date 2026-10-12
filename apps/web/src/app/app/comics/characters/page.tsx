@@ -13,7 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { MAX_REFS, sheetsOfCharacters } from "@/lib/comic/library";
 import { formatUsd, IMAGE_MODELS } from "@/lib/comic/models";
 import { presignGet } from "@/lib/r2";
+import { listVoiceOptions, type VoiceOption } from "@/lib/media/tts";
 import { canWrite } from "@/lib/workspace";
+import { VoiceSelect } from "@/components/voice-select";
 import { ComicTabs } from "../comic-tabs";
 import { requireComicsWorkspace } from "../guard";
 import { acceptCharacterSheet, deleteCharacter, drawCharacterSheet, saveCharacter } from "../library-actions";
@@ -45,7 +47,7 @@ export default async function ComicCharactersPage({ searchParams }: { searchPara
         .orderBy(asc(schema.comicStyles.position), asc(schema.comicStyles.name)),
     ]),
   );
-  const sheets = await sheetsOfCharacters(ws, characters.map((c) => c.id));
+  const [sheets, voices] = await Promise.all([sheetsOfCharacters(ws, characters.map((c) => c.id)), writer ? listVoiceOptions(ws) : []]);
   const editing = sp.edit ? characters.find((c) => c.id === sp.edit) : undefined;
   const cover = (c: CharacterRow) => sheets.find((s) => s.characterId === c.id && s.status === "accepted")?.key ?? sheets.find((s) => s.characterId === c.id)?.key ?? c.referenceKeys[0] ?? null;
   const keys = new Set<string>([...characters.map(cover).filter((k): k is string => Boolean(k)), ...(editing ? [...editing.referenceKeys, ...sheets.filter((s) => s.characterId === editing.id).map((s) => s.key)] : [])]);
@@ -64,6 +66,7 @@ export default async function ComicCharactersPage({ searchParams }: { searchPara
           styles={styles}
           sheets={editing ? sheets.filter((s) => s.characterId === editing.id) : []}
           urls={urls}
+          voices={voices}
         />
       ) : null}
       {writer && !editing && !sp.new ? (
@@ -115,7 +118,7 @@ export default async function ComicCharactersPage({ searchParams }: { searchPara
   );
 }
 
-function CharacterEditor({ character, styles, sheets, urls }: { character?: CharacterRow; styles: { id: string; name: string; own: string | null }[]; sheets: Sheet[]; urls: Map<string, string> }) {
+function CharacterEditor({ character, styles, sheets, urls, voices }: { character?: CharacterRow; styles: { id: string; name: string; own: string | null }[]; sheets: Sheet[]; urls: Map<string, string>; voices: VoiceOption[] }) {
   const byStyle = styles.map((s) => ({ style: s, list: sheets.filter((x) => x.styleId === s.id).sort((a, b) => Number(b.status === "accepted") - Number(a.status === "accepted")).slice(0, 4) }));
   return (
     <Card id="editor">
@@ -141,6 +144,10 @@ function CharacterEditor({ character, styles, sheets, urls }: { character?: Char
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="ch-pers">Tính cách, cách nói (Claude dùng khi viết lời thoại)</Label>
             <Input id="ch-pers" name="personality" maxLength={500} defaultValue={character?.personality} placeholder="tò mò, nói nhanh, hay hỏi “tại sao”" />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="ch-voice">Giọng đọc trong video (truyện động)</Label>
+            <VoiceSelect id="ch-voice" voices={voices} value={character?.voicePresetId ?? null} emptyLabel="Giọng người dẫn truyện" title="Lời của nhân vật này trong video làm từ truyện; để trống thì người dẫn truyện đọc." className="w-full" />
           </div>
           <div className="flex gap-2 sm:col-span-2">
             <Button type="submit">{character ? "Lưu" : "Tạo nhân vật"}</Button>

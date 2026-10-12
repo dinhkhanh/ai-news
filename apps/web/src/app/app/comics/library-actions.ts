@@ -14,6 +14,7 @@ import { DEFAULT_IMAGE_MODEL, isImageModel } from "@/lib/comic/models";
 import { stylePreviewPrompt } from "@/lib/comic/prompts";
 import { comicDrawAccess } from "@/lib/comic/service";
 import { flagEnabled } from "@/lib/flags";
+import { findVoice } from "@/lib/media/tts";
 import { presignPut } from "@/lib/r2";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 
@@ -164,14 +165,17 @@ export async function saveCharacter(_: ActionState, fd: FormData): Promise<Actio
     const values = { name: str(fd, "name").slice(0, 80), role: str(fd, "role").slice(0, 200), visual: str(fd, "visual").slice(0, 1000), personality: str(fd, "personality").slice(0, 500) };
     if (!values.name) throw new Error("Nhân vật cần có tên");
     if (values.visual.length < 15) throw new Error("Tả ngoại hình (tiếng Anh) cho mô hình vẽ: tuổi, dáng, tóc, trang phục và màu, một món đồ riêng");
+    // The voice of their lines in a motion comic (M4); "" = the narrator. Only sent by the form when voices are listed.
+    const voice = fd.has("voicePresetId") ? await findVoice(ws, str(fd, "voicePresetId")) : undefined;
+    const withVoice = voice === undefined ? values : { ...values, voicePresetId: voice?.id ?? null };
     if (id) {
       await ownCharacter(ws, id);
-      await withOrgContext(ws, (tx) => tx.update(schema.comicCharacters).set(values).where(eq(schema.comicCharacters.id, id)));
-      await log("comic_character.updated", { characterId: id, name: values.name });
+      await withOrgContext(ws, (tx) => tx.update(schema.comicCharacters).set(withVoice).where(eq(schema.comicCharacters.id, id)));
+      await log("comic_character.updated", { characterId: id, name: values.name, ...(voice !== undefined ? { voice: voice?.name ?? "narrator" } : {}) });
       saved = id;
       return "Đã lưu nhân vật; truyện tạo sau sẽ dùng mô tả này";
     }
-    const [row] = await withOrgContext(ws, (tx) => tx.insert(schema.comicCharacters).values({ ...values, organizationId: ws.organizationId, createdBy: ws.userId }).returning({ id: schema.comicCharacters.id }));
+    const [row] = await withOrgContext(ws, (tx) => tx.insert(schema.comicCharacters).values({ ...withVoice, organizationId: ws.organizationId, createdBy: ws.userId }).returning({ id: schema.comicCharacters.id }));
     await log("comic_character.created", { characterId: row.id, name: values.name });
     saved = row.id;
     return "Đã tạo nhân vật";

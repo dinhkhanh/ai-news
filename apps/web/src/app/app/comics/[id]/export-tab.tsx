@@ -18,9 +18,10 @@ const KIND_LABEL: Record<string, string> = { png: "PNG", pdf: "PDF", webtoon: "W
 const STATUS = { queued: "Đang chờ", rendering: "Đang xuất", done: "Xong", failed: "Lỗi" } as Record<string, string>;
 
 /** "Xuất" (docs/COMIC.md §2.7): PNG per page, PDF, webtoon strip, zip of everything. */
-export function ExportTab({ comicId, writer, busy, drawn, panels, exports }: { comicId: string; writer: boolean; busy: boolean; drawn: number; panels: number; exports: ExportRow[] }) {
+export function ExportTab({ comicId, writer, busy, drawn, panels, exports, video }: { comicId: string; writer: boolean; busy: boolean; drawn: number; panels: number; exports: ExportRow[]; video?: React.ReactNode }) {
   return (
     <div className="max-w-3xl space-y-5">
+      {video}
       <Card>
         <CardHeader>
           <CardTitle>Xuất truyện</CardTitle>

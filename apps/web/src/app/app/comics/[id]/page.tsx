@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
@@ -12,7 +12,12 @@ import { docStats, panelsToDraw } from "@/lib/comic/doc";
 import { presignDoc } from "@/lib/comic/flow";
 import { pageFormat } from "@/lib/comic/layout";
 import { estimateDrawUsd, formatUsd, imageModel, textModel } from "@/lib/comic/models";
+import { pageSeconds } from "@/lib/comic/motion";
 import { loadComic, sheetsFor, styleOf } from "@/lib/comic/service";
+import { listBrandKits } from "@/lib/media/brand";
+import { listLogoChannels } from "@/lib/media/logo";
+import { listVoiceOptions } from "@/lib/media/tts";
+import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { busyIsStale } from "@/lib/project-state";
 import { presignGet } from "@/lib/r2";
 import { canWrite } from "@/lib/workspace";
@@ -24,6 +29,7 @@ import { CastTab } from "./cast-tab";
 import { ExportTab } from "./export-tab";
 import { PagesTab, ReadTab } from "./pages-tab";
 import { ScriptTab } from "./script-tab";
+import { VideoCard } from "./video-card";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +74,23 @@ export default async function ComicPage({ params, searchParams }: { params: Prom
     tab === "export"
       ? await withOrgContext(ws, (tx) => tx.select().from(schema.comicExports).where(eq(schema.comicExports.comicId, comic.id)).orderBy(desc(schema.comicExports.createdAt)).limit(10))
       : [];
+  // "Làm video" (M4): the form's choices and the videos already made from this comic.
+  const video =
+    tab === "export" && doc
+      ? await Promise.all([
+          writer ? listVoiceOptions(ws) : [],
+          writer ? listBrandKits(ws) : [],
+          writer ? listLogoChannels(ws) : [],
+          withOrgContext(ws, (tx) =>
+            tx
+              .select({ id: schema.projects.id, title: schema.projects.title, state: schema.projects.state, busyStep: schema.projects.busyStep, createdAt: schema.projects.createdAt, versionId: schema.projects.comicVersionId })
+              .from(schema.projects)
+              .where(and(eq(schema.projects.organizationId, ws.organizationId), eq(schema.projects.comicId, comic.id)))
+              .orderBy(desc(schema.projects.createdAt))
+              .limit(20),
+          ),
+        ])
+      : null;
   const exportLinks = await Promise.all(exports.map(async (e) => ({ ...e, urls: e.status === "done" ? await Promise.all(e.keys.map((k) => presignGet(k))) : [] })));
 
   return (
@@ -153,7 +176,23 @@ export default async function ComicPage({ params, searchParams }: { params: Prom
       ) : tab === "read" ? (
         <ReadTab doc={doc} srcs={srcs} families={comicFamilies} />
       ) : (
-        <ExportTab comicId={comic.id} writer={writer} busy={running} drawn={stats ? stats.drawn : 0} panels={stats ? stats.panels : 0} exports={exportLinks.map((e) => ({ id: e.id, kind: e.kind, status: e.status, error: e.error, createdAt: e.createdAt, files: e.urls.map((url, i) => ({ url, name: e.keys[i].split("/").slice(-2).join("/").replace(/^[0-9a-f-]{36}\//, "") })) }))} />
+        <ExportTab
+          video={
+            video && doc ? (
+              <VideoCard
+                comicId={comic.id}
+                writer={writer}
+                pageSecs={pageSeconds(doc)}
+                undrawn={stats ? stats.panels - stats.drawn : 0}
+                limits={Object.values(PLATFORM_SPEC).filter((p) => p.maxDurationSec > 0).map((p) => ({ label: p.label, maxSec: p.maxDurationSec }))}
+                voices={video[0]}
+                kits={video[1].map((k) => ({ id: k.id, name: k.name, isDefault: k.isDefault }))}
+                logoChannels={video[2].map((c) => ({ id: c.id, name: c.name, platform: PLATFORM_SPEC[c.platform as keyof typeof PLATFORM_SPEC]?.label ?? c.platform }))}
+                videos={video[3].map((v) => ({ id: v.id, title: v.title ?? "Video", state: v.state, busy: Boolean(v.busyStep), createdAt: v.createdAt.toISOString(), current: v.versionId === version?.id }))}
+              />
+            ) : null
+          }
+          comicId={comic.id} writer={writer} busy={running} drawn={stats ? stats.drawn : 0} panels={stats ? stats.panels : 0} exports={exportLinks.map((e) => ({ id: e.id, kind: e.kind, status: e.status, error: e.error, createdAt: e.createdAt, files: e.urls.map((url, i) => ({ url, name: e.keys[i].split("/").slice(-2).join("/").replace(/^[0-9a-f-]{36}\//, "") })) }))} />
       )}
     </div>
   );

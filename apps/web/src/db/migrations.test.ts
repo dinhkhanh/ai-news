@@ -395,4 +395,21 @@ describe("migrations", () => {
       }),
     ).rejects.toThrow(/row-level security/);
   });
+  it("let a comic project have no link, keep its comic and drop the link to it when the comic is deleted (migration 0032)", async () => {
+    await pg.exec(`insert into "user"(id,name,email) values ('u32','U32','u32@suzu.group');
+      insert into organization(id,name,slug) values ('o32','O32','o32');`);
+    const comic = await pg.query<{ id: string }>(`insert into comics(organization_id,owner_id,story,style_snapshot,text_model,image_model) values ('o32','u32','Ngày xưa…','{}','claude-opus-5-5','gemini-3.1-flash-image') returning id`);
+    const version = await pg.query<{ id: string }>(`insert into comic_versions(organization_id,comic_id,kind,doc) values ('o32',$1,'draw','{}') returning id`, [comic.rows[0].id]);
+    const project = await pg.query<{ id: string }>(`insert into projects(organization_id,owner_id,source_kind,comic_id,comic_version_id) values ('o32','u32','comic',$1,$2) returning id`, [comic.rows[0].id, version.rows[0].id]);
+    await expect(pg.query(`insert into projects(organization_id,owner_id,source_kind) values ('o32','u32','article')`)).rejects.toThrow(/projects_url_check/);
+    await expect(pg.query(`insert into projects(organization_id,owner_id,source_kind) values ('o32','u32','comics')`)).rejects.toThrow(/projects_source_kind_check/);
+    const voice = await pg.query<{ id: string }>("select id from voice_presets limit 1");
+    if (voice.rows[0]) {
+      const ch = await pg.query<{ id: string }>(`insert into comic_characters(organization_id,name,voice_preset_id) values ('o32','Lan',$1) returning id`, [voice.rows[0].id]);
+      expect(ch.rows[0].id).toBeTruthy();
+    }
+    await pg.query("delete from comics where id=$1", [comic.rows[0].id]);
+    const left = await pg.query<{ comic_id: string | null; comic_version_id: string | null }>("select comic_id, comic_version_id from projects where id=$1", [project.rows[0].id]);
+    expect(left.rows[0]).toEqual({ comic_id: null, comic_version_id: null });
+  });
 });

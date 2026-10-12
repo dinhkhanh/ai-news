@@ -77,6 +77,20 @@ export const projectAssetsRequested = eventType("project/assets.requested", {
   }),
 });
 
+/**
+ * Motion comic build (docs/COMIC.md §11.1): `prepare-assets` forwards a `comic` project here. Voices per beat (the
+ * speaker's character voice or the narrator), the comic's own panels as the pictures, music, mix → timeline version.
+ */
+export const projectComicBuildRequested = eventType("project/comic-build.requested", {
+  schema: z.object({
+    projectId: z.string(),
+    organizationId: z.string(),
+    requestedBy: z.string(),
+    /** Script version to build from; default = latest. */
+    scriptId: z.string().optional(),
+  }),
+});
+
 /** Phase 3 step 9: Remotion Lambda render of a timeline version + media Lambda post-processing and QA. */
 export const projectRenderRequested = eventType("project/render.requested", {
   schema: z.object({

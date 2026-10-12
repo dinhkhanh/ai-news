@@ -1,6 +1,6 @@
 # Comic studio: design
 
-Status: **accepted** 2026-10-12 (decisions in §13). M1, M2 and M3 built (§11.2–§11.4); M4 (motion comic) next.
+Status: **accepted** 2026-10-12 (decisions in §13). M1–M4 built (§11.2–§11.5).
 
 A standalone feature: a member pastes a story (plain text), picks or defines a style, a cast and the AI models,
 and the app produces a short comic, 5–10 pages by default or as many as asked. It shares the app's infrastructure
@@ -467,6 +467,49 @@ approval, render, QA, multi-channel logos, publishing) is reused unchanged and t
 - To switch it on after M2: deploy `packages/video` **0.20.0**; for GPT Image, add the `openai` integration (key,
   spend cap; the OpenAI organisation may need verification for image models). No migration.
 - Not tested against the live services here: OpenAI, Claude vision, Remotion Lambda (ComicStrip, JPEG stills), R2.
+
+### 11.5 M4 as built (2026-10-12)
+
+- **Entry**: card "Làm video (truyện động)" on the Xuất tab (`video-card.tsx`, action `makeComicVideo` in
+  `app/comics/video-actions.ts`): page range (default all), "Chia thành tập" with N pages per episode (≤ 10 episodes),
+  narrator voice, brand kit, channel logo, music on / off; a live length estimate per episode (`pageSeconds` + 5 s)
+  against the platforms' limits (`PLATFORM_SPEC.maxDurationSec`), and the count of undrawn panels, which are left out.
+  Below, the videos already made from the comic, marked "bản cũ" when the comic changed since.
+- **Project** (migration **0032**): `projects.source_kind = 'comic'` (CHECK extended; `projects_url_check` allows no
+  link), `comic_id` and `comic_version_id` (FKs, set null on delete; index on `comic_id`). One click inserts per
+  episode, in one transaction: the project (state `scripted`, tone `casual`, `ai_disclosure` on, busy `assets`), a
+  confirmed article holding the lines (`fetch_method = 'comic'`) and script v1 (`model = 'comic'`, cost 0); then
+  `project/comic-build.requested`. Activity: `project.created` per project and `comic.video_created`. Making the video
+  again after editing the comic makes a new project (the version stays frozen in the old one).
+- **Script without a model** (`lib/comic/motion.ts`, pure, tested): `comicBeats` walks the chosen pages in reading
+  order; per drawn panel one beat per non-sfx line (captions and lines without a known speaker → narrator, the rest →
+  the speaker's cast member), a panel with nothing to read → a 2.5 s silent beat, sound effects → the on-screen text of
+  the panel's first beat (2 s when they are all there is). `speakerFace` finds the speaker's face box: faces carry no
+  names, so with as many faces as foreground characters the n-th face from the left is the n-th character, otherwise
+  the face nearest to the speaker's staging position. `comicToScript`: scenes `s1…sN`, the first is the hook with the
+  title (and "Tập n/m") on screen, a narrator CTA closes over the last panel ("Hết truyện …" or "Còn tiếp…" for an
+  episode), metadata from the title / logline with comic hashtags, and `scenes_json.comic` = the comic, version,
+  pages, episode, music and per scene the panel, picture, faces, speaker face and reader. A request for a new script
+  on a comic project is refused (action and pipeline).
+- **Build** (`inngest/functions/prepare-comic.ts`; `prepare-assets` forwards a comic project there, so "Dựng lại"
+  works too): the narrator voice is the project voice, a character's line uses `comic_characters.voice_preset_id`
+  (new, picked on `/app/comics/characters`; null = narrator; a voice that cannot read the language falls back as
+  usual), silent beats get no voice. The panels are copied (R2 `copyObject`) into the project's media as `assets` rows
+  (`origin` upload, `provider` comic, `provider_id` = comic_images id, credit "Minh hoạ AI (Gemini)" / "(GPT Image)",
+  `meta.frame` = the panel's faces), once per picture; a rebuild reuses them, and deleting the comic leaves the video
+  intact. `composeComicDoc` (`lib/comic/motion-doc.ts`, pure, tested): one shot per beat, framed by the face guard on
+  the speaker's face (every face for the narrator), Ken Burns as the face guard decides; a wide panel gets the
+  existing landscape treatment of the composition. Music by the project tone unless off; then the usual mix, timeline
+  version, `state = composed`, `ai_disclosure`, and auto mode. Outro credit: "Nguồn: Truyện “<title>”" (no link).
+  Re-voicing a scene in the editor keeps that scene's voice (`build_json.voice.scenes[].presetId`).
+- **Checks**: the editor passes `comic` to `editor-checks.ts`; the shot cadence, repeated-picture and faithfulness
+  checks stay quiet, and the face check only reports cropped / covered faces (a panel framed on its speaker is
+  intended). Everything else (duration limits, hook text, audio) runs as for any project.
+- **Not built** (later): "Giữ bóng thoại" (panels rendered with their balloons), a library sound under sound
+  effects, one camera move continuing across consecutive beats of a panel (needs a composition change: each beat
+  starts its own Ken Burns, framed on its own speaker), a music picker. No `packages/video` change, so no redeploy;
+  run migration 0032.
+- Not tested against the live services here: Google TTS, the media Lambda mix, R2 copies.
 
 ---
 

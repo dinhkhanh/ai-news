@@ -221,17 +221,24 @@ export const projects = pgTable(
     ownerId: text("owner_id")
       .notNull()
       .references(() => user.id, { onDelete: "restrict" }),
-    /** The article or video page; null for a `text` or `topic` project (no link). */
+    /** The article or video page; null for a `text`, `topic` or `comic` project (no link). */
     url: text("url"),
     canonicalUrl: text("canonical_url"),
     /**
      * What the project is made from: `article` = a news page (fetch chain), `video` = a video page (YouTube, TikTok,
      * Facebook…): its file is downloaded as the footage and the user writes the content, `text` = content typed in at creation,
-     * `topic` = keywords / a topic / directions (`brief`) that the fetch step researches on the web (lib/llm/research.ts).
+     * `topic` = keywords / a topic / directions (`brief`) that the fetch step researches on the web (lib/llm/research.ts),
+     * `comic` = a motion comic made from a comic of the studio (`comic_id`): no fetch and no script call (lib/comic/motion.ts).
      */
     sourceKind: text("source_kind").$type<SourceKind>().notNull().default("article"),
     /** `topic` projects: what the user asked for (keywords, topic or directions); researched at fetch, followed by the script. */
     brief: text("brief"),
+    /**
+     * `comic` projects (motion comic, docs/COMIC.md §11.1): the comic and the frozen version the video was made from;
+     * set null when the comic is deleted (the panels were copied into the project's media).
+     */
+    comicId: uuid("comic_id").references((): AnyPgColumn => comics.id, { onDelete: "set null" }),
+    comicVersionId: uuid("comic_version_id").references((): AnyPgColumn => comicVersions.id, { onDelete: "set null" }),
     /** `video` projects: the downloaded source video (a `web_video` asset); every shot of the build is cut from it. */
     sourceVideoAssetId: uuid("source_video_asset_id").references((): AnyPgColumn => assets.id, { onDelete: "set null" }),
     title: text("title"),
@@ -292,6 +299,7 @@ export const projects = pgTable(
     index("projects_org_idx").on(t.organizationId, t.createdAt),
     index("projects_owner_idx").on(t.ownerId),
     index("projects_canonical_idx").on(t.organizationId, t.canonicalUrl),
+    index("projects_comic_idx").on(t.comicId),
   ],
 );
 
@@ -835,6 +843,8 @@ export const comicCharacters = pgTable(
     visual: text("visual").notNull().default(""),
     personality: text("personality").notNull().default(""),
     referenceKeys: text("reference_keys").array().notNull().default(sql`'{}'::text[]`),
+    /** Voice of this character's lines in a motion comic (M4); null = the video's narrator voice. */
+    voicePresetId: uuid("voice_preset_id").references((): AnyPgColumn => voicePresets.id, { onDelete: "set null" }),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

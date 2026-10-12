@@ -65,7 +65,9 @@ export const regenerateSceneFn = inngest.createFunction(
         if (!timeline) throw new NonRetriableError("Timeline version not found");
         await tx.update(schema.projects).set({ busyStep: "regenerate", lastError: null }).where(eq(schema.projects.id, projectId));
         const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), columns: { siteName: true } });
-        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: project.voicePresetId, motionEngine: project.motionEngine, photoSketch: project.photoSketch, sourceName: article?.siteName ?? null, timeline };
+        // A motion comic reads each line in its speaker's voice: re-voicing keeps the voice the build gave that scene.
+        const comicVoice = project.sourceKind === "comic" ? (timeline.buildJson as { voice?: { scenes?: Array<{ sceneId: string; presetId?: string | null }> } }).voice?.scenes?.find((v) => v.sceneId === sceneId)?.presetId : null;
+        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: comicVoice ?? project.voicePresetId, motionEngine: project.motionEngine, photoSketch: project.photoSketch, sourceName: article?.siteName ?? null, timeline };
       });
       const { doc } = docOfRow(row.timeline);
       const stock = ((row.timeline.buildJson as { stock?: Record<string, unknown> }).stock ?? {}) as Record<string, unknown>;

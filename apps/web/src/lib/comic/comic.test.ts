@@ -28,6 +28,10 @@ import { applyEditorOp, editorOpSchema } from "./editor-ops";
 import { crc32, jpegPdf, pdfPageSize, zipStore } from "./files";
 import { formatOf, layoutPage, rowsFor, snapAspect } from "./layout";
 import { balloonBox, baseFontSize, facesOnPage, letterPanel, MIN_FONT_SCALE, segmentHits, speakerPoint, wrapWords } from "./lettering";
+import { brandSchema } from "@ai-news/video/schema";
+import { buildFromDoc } from "@/lib/media/editor";
+import { composeComicDoc } from "./motion-doc";
+import { comicBeats, comicToScript, episodeRanges, estimateMotionSec, pageRange, speakerFace } from "./motion";
 import { estimateAdaptUsd, estimateDrawUsd, IMAGE_MODELS, imageModel, openaiImageCostUsd, openaiSize, textModel } from "./models";
 import { classifyOpenAiError } from "./openai-image";
 import { adaptUser, panelPrompt, pickRefs, qualityBrief, refsNote, sheetPrompt, shortenUser, type ComicStyle } from "./prompts";
@@ -503,5 +507,124 @@ describe("exports", () => {
     expect(pdf).toContain("/Title <FEFF");
     const xref = Number(/startxref\n(\d+)/.exec(pdf)![1]);
     expect(pdf.slice(xref, xref + 4)).toBe("xref");
+  });
+});
+
+describe("motion comic", () => {
+  const balloon = (id: string, text: string, speaker: string | null, kind: "speech" | "caption" | "sfx" | "thought" = "speech") => ({ id, kind, speaker, text, rect: null, tail: null, fontSize: 32, manual: false });
+  const img = (id: string, width = 1000, height = 1000, faces = [{ x: 0.1, y: 0.2, w: 0.2, h: 0.2 }, { x: 0.65, y: 0.2, w: 0.2, h: 0.2 }]) => ({ id, key: `media/o/comics/c/panels/${id}.png`, width, height, faces });
+  const panel = (id: string, lettering: ReturnType<typeof balloon>[], image: ReturnType<typeof img> | null = img(`img-${id}`)): Panel => ({
+    id,
+    rect: { x: 0, y: 0, w: 100, h: 100 },
+    script: { size: "medium", shot: "medium", settingId: null, time: "", mood: "", characters: [{ ref: "lan", position: "left", action: "", expression: "" }, { ref: "ba", position: "right", action: "", expression: "" }], description: "" },
+    image,
+    variants: image ? [image] : [],
+    error: null,
+    lettering,
+  });
+  const doc = comicDocSchema.parse({
+    v: 1,
+    title: "Chiếc đèn lồng",
+    logline: "Lan tìm thấy chiếc đèn lồng cũ của bà.",
+    language: "vi",
+    readingDirection: "ltr",
+    format: { id: "a4", width: 1240, height: 1754, scroll: false },
+    font: "itim",
+    credit: null,
+    cast: [
+      { ref: "lan", characterId: "char-lan", name: "Lan", role: "", visual: "", personality: "" },
+      { ref: "ba", characterId: null, name: "Bà", role: "", visual: "", personality: "" },
+    ],
+    settings: [],
+    pages: [
+      {
+        id: "p1",
+        beat: "",
+        layout: "auto",
+        height: 1754,
+        panels: [
+          panel("k1", [balloon("b1", "Ngày ấy, gác xép nhà bà đầy bụi.", null, "caption"), balloon("b2", "Bà ơi, cái đèn này của ai thế ạ?", "lan"), balloon("b3", "Của bà đấy, cháu ạ.", "ba")]),
+          panel("k2", []),
+          panel("k3", [balloon("b4", "RẦM!", null, "sfx")]),
+        ],
+      },
+      { id: "p2", beat: "", layout: "auto", height: 1754, panels: [panel("k4", [balloon("b5", "Đẹp quá…", "lan", "thought"), balloon("b6", "XOẸT", null, "sfx")]), panel("k5", [balloon("b7", "Chưa vẽ", "ba")], null)] },
+    ],
+  });
+
+  it("makes one beat per line in reading order, captions for the narrator, silent and sound-effect beats", () => {
+    const { beats, skipped } = comicBeats(doc);
+    expect(skipped).toBe(1);
+    expect(beats.map((b) => [b.meta.panelId, b.voiceover, b.meta.reader?.kind ?? null, b.onScreenText])).toEqual([
+      ["k1", "Ngày ấy, gác xép nhà bà đầy bụi.", "narrator", ""],
+      ["k1", "Bà ơi, cái đèn này của ai thế ạ?", "character", ""],
+      ["k1", "Của bà đấy, cháu ạ.", "character", ""],
+      ["k2", "", null, ""],
+      ["k3", "", null, "RẦM!"],
+      ["k4", "Đẹp quá…", "character", "XOẸT"],
+    ]);
+    expect(beats[1].meta.reader).toEqual({ kind: "character", ref: "lan", characterId: "char-lan" });
+    expect(beats[3].durationSec).toBe(2.5);
+    expect(beats[4].durationSec).toBe(2);
+    expect(beats[5].meta.page).toBe(2);
+    // The speaker's face: Lan stands left, Bà right; the narrator frames no one in particular.
+    expect(beats[1].meta.face?.x).toBe(0.1);
+    expect(beats[2].meta.face?.x).toBe(0.65);
+    expect(beats[0].meta.face).toBeNull();
+  });
+
+  it("picks the nearest face when faces and characters do not pair up, and none for a speaker who is not drawn", () => {
+    const p = panel("x", [], img("x", 1000, 1000, [{ x: 0.05, y: 0.2, w: 0.1, h: 0.1 }, { x: 0.4, y: 0.2, w: 0.1, h: 0.1 }, { x: 0.7, y: 0.2, w: 0.1, h: 0.1 }]));
+    expect(speakerFace(p, "ba")?.x).toBe(0.7);
+    expect(speakerFace(p, "lan")?.x).toBe(0.05);
+    expect(speakerFace(p, "nobody")).toBeNull();
+    expect(speakerFace(panel("y", [], img("y", 1000, 1000, [])), "lan")).toBeNull();
+  });
+
+  it("builds the stored script: the hook shows the title, a narrator CTA closes, the comic data rides along", () => {
+    const out = comicToScript(doc, { comicId: "c1", versionId: "v1" })!;
+    const s = out.script;
+    expect(s.scenes.map((x) => x.id)).toEqual(["s1", "s2", "s3", "s4", "s5", "s6", "s7"]);
+    expect(s.scenes[0]).toMatchObject({ kind: "hook", onScreenText: "Chiếc đèn lồng", voiceover: "Ngày ấy, gác xép nhà bà đầy bụi." });
+    expect(s.scenes[6]).toMatchObject({ kind: "cta", voiceover: "Hết truyện “Chiếc đèn lồng”. Theo dõi kênh để xem truyện tiếp theo." });
+    expect(s.comic.scenes.s7).toMatchObject({ panelId: "k4", reader: { kind: "narrator" }, face: null });
+    expect(s.comic).toMatchObject({ comicId: "c1", versionId: "v1", pages: { from: 1, to: 2 }, episode: null, music: true });
+    expect(s.generation.model).toBe("comic");
+    expect(s.metadata.tiktok.hashtags).toContain("truyentranh");
+    expect(s.estimatedDurationSec).toBe(Math.round(s.scenes.reduce((a, x) => a + x.durationSec, 0)));
+  });
+
+  it("composes an editor document: one shot per beat on its panel, framed on the speaker, silent beats without a voice", () => {
+    const s = comicToScript(doc, { comicId: "c1", versionId: "v1" })!.script;
+    const voices = s.scenes.filter((x) => x.voiceover).map((x) => ({ sceneId: x.id, key: `vo/${x.id}.wav`, durationMs: 2000, words: [{ w: "a", s: 0, e: 500 }] }));
+    const panels = Object.fromEntries(Object.values(s.comic.scenes).map((m) => [m.imageId, { assetId: `asset-${m.imageId}`, key: `media/o/p/comic/${m.imageId}.png`, credit: "Minh hoạ AI (Gemini)" }]));
+    const d = composeComicDoc({ title: s.title, language: "vi", comic: s.comic, scenes: s.scenes, brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {} }), hasChannelLogo: false, voices, panels, music: null });
+    expect(d.scenes).toHaveLength(7);
+    expect(d.scenes.every((x) => x.visual.kind === "image" && x.shots.length === 0)).toBe(true);
+    expect(d.scenes[3].voice).toBeNull();
+    expect(d.source).toEqual({ name: "Truyện “Chiếc đèn lồng”", url: "" });
+    // Lan (left) and Bà (right) speak over the same square panel: each beat is framed on its speaker.
+    const focus = (i: number) => (d.scenes[i].visual as { focus: { x: number } | null }).focus;
+    expect(focus(1)).not.toBeNull();
+    expect(focus(1)!.x).toBeLessThan(focus(2)!.x);
+    const { timeline, durationSec } = buildFromDoc(d, null);
+    expect(timeline.scenes).toHaveLength(7);
+    // A silent beat lasts its 2.5 s, a spoken one its recording.
+    expect(durationSec).toBeGreaterThan(6 * 2 + 2.5);
+    expect(() => composeComicDoc({ title: s.title, language: "vi", comic: s.comic, scenes: s.scenes, brand: brandSchema.parse({ colours: {}, fonts: {}, caption: {} }), hasChannelLogo: false, voices, panels: {}, music: null })).toThrow(/not copied/);
+  });
+
+  it("covers a page range, splits episodes and says when the story goes on", () => {
+    expect(pageRange(doc, { from: 0, to: 9 })).toEqual({ from: 1, to: 2 });
+    expect(pageRange(doc, { from: 2, to: 1 })).toEqual({ from: 2, to: 2 });
+    expect(episodeRanges({ from: 1, to: 7 }, 3)).toEqual([{ from: 1, to: 3 }, { from: 4, to: 6 }, { from: 7, to: 7 }]);
+    const first = comicToScript(doc, { comicId: "c1", versionId: "v1" }, { pages: { from: 1, to: 1 }, episode: { n: 1, of: 2 } })!.script;
+    expect(first.title).toBe("Chiếc đèn lồng · Tập 1/2");
+    expect(first.scenes.at(-1)!.voiceover).toContain("tập 2");
+    expect(first.scenes.at(-1)!.onScreenText).toBe("Còn tiếp…");
+    expect(Object.values(first.comic.scenes).every((m) => m.page === 1)).toBe(true);
+    expect(estimateMotionSec(doc, { from: 2, to: 2 })).toBeGreaterThan(4);
+    const empty = comicDocSchema.parse({ ...doc, pages: [{ ...doc.pages[1], panels: [doc.pages[1].panels[1]] }] });
+    expect(comicToScript(empty, { comicId: "c", versionId: "v" })).toBeNull();
   });
 });
