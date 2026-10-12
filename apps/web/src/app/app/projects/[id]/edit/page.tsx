@@ -86,7 +86,8 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const verdicts = verdictsOfScript(script);
   const music = await withOrgContext(ws, (tx) => tx.select().from(schema.musicLibrary).orderBy(schema.musicLibrary.title).limit(50));
   // Sounds from the collections this member can see (/app/sounds), offered as background music after the library.
-  const soundOptions: MusicOption[] = (await listSoundCollections(ws)).flatMap((c) =>
+  // A deploy that lands before migration 0029 has no sound tables: the editor opens with the library only.
+  const soundOptions: MusicOption[] = (await listSoundCollections(ws).catch(() => [])).flatMap((c) =>
     c.items.map((i) => ({ id: i.id, title: i.title, key: i.key, moodTags: [], durationSec: i.durationSec, licence: licenceInfo(i.licence, i.licenceVersion).label, group: c.name, credit: i.credit })),
   );
 
