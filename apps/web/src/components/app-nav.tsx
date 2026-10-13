@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AudioLines, BookOpen, FolderKanban, Music, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
+import { AudioLines, BookOpen, Clapperboard, Music, Palette, Radio, Send, ShieldCheck, type LucideIcon } from "lucide-react";
 import { NavRail } from "@/components/nav-rail";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +11,7 @@ type Item = { href: string; label: string; short?: string; icon: LucideIcon; exa
 /** `comics`: the comic studio's flag (docs/COMIC.md); its item only shows while the flag is on. */
 export function appNavItems(admin: boolean, comics = false): Item[] {
   return [
-    { href: "/app", label: "Dự án", icon: FolderKanban },
+    { href: "/app", label: "Video ngắn", short: "Video", icon: Clapperboard },
     ...(comics ? [{ href: "/app/comics", label: "Truyện tranh", short: "Truyện", icon: BookOpen }] : []),
     { href: "/app/publications", label: "Đã đăng", icon: Send },
     { href: "/app/channels", label: "Kênh", icon: Radio },

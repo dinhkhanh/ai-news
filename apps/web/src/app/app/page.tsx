@@ -68,7 +68,7 @@ export default async function AppHome() {
       <div className="mx-auto max-w-5xl space-y-5 sm:space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="sr-only">Dự án</h1>
+            <h1 className="sr-only">Video ngắn</h1>
             <p className="text-sm text-muted-foreground">
               {ws.name} · vai trò {ws.role} · kịch bản hôm nay {used}/{limit}
             </p>
@@ -78,7 +78,7 @@ export default async function AppHome() {
         {writer ? (
           <Card id="new">
             <CardHeader>
-              <CardTitle>Dự án mới</CardTitle>
+              <CardTitle>Video ngắn mới</CardTitle>
               <CardDescription>Dán link bài báo hoặc video, hoặc tự nhập nội dung. Hệ thống lấy nội dung, nhận diện ngôn ngữ, rồi chờ bạn xác nhận văn bản trước khi viết kịch bản, hoặc bật «tự động» để chạy thẳng tới video.</CardDescription>
             </CardHeader>
             <CardContent>

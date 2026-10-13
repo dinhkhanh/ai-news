@@ -183,7 +183,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">
             <Link href="/app" className="hover:underline">
-              Dự án
+              Video ngắn
             </Link>{" "}
             /{" "}
             <Link href={`/app/projects/${project.id}`} className="hover:underline">

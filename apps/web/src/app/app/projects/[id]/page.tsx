@@ -437,7 +437,7 @@ export default async function ProjectPage({
         <div className="min-w-0 flex-1">
           <div className="text-xs text-muted-foreground">
             <Link href="/app" className="hover:underline">
-              Dự án
+              Video ngắn
             </Link>{" "}
             / {displayHost(project.url) || (isTopic ? "nghiên cứu chủ đề" : isComic ? "truyện tranh" : "nội dung tự nhập")}
           </div>
