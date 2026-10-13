@@ -8,7 +8,9 @@
           "https://ai-news.vercel.app",
           "https://*.vercel.app",
           "https://suzu.net",
-          "https://www.suzu.net"
+          "https://www.suzu.net",
+          "https://lienxo.my",
+          "https://www.lienxo.my"
         ],
         "methods": ["GET", "PUT", "HEAD"],
         "headers": ["content-type", "content-length"]
