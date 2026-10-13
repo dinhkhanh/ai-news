@@ -4,7 +4,8 @@ import { db } from "@/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Overview" };
+// The admin layout's template only reaches child segments, not the page beside it.
+export const metadata: Metadata = { title: { absolute: "Overview · Admin · ai-news" } };
 
 export const dynamic = "force-dynamic";
 

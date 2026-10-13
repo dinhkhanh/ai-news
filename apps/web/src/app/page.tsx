@@ -5,7 +5,8 @@ import { GoogleSignIn } from "@/components/google-sign-in";
 import { getSession } from "@/lib/session";
 import { safeNextPath } from "@/lib/url";
 
-export const metadata: Metadata = { title: "Đăng nhập" };
+// The root layout's template only reaches child segments, not the page beside it.
+export const metadata: Metadata = { title: { absolute: "Đăng nhập · ai-news" } };
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
   const session = await getSession();
