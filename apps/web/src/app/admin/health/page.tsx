@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,8 @@ import { findStalledQueue, inngestStatus } from "@/lib/queue-health";
 import { headObject, presignGet } from "@/lib/r2";
 import { triggerTestRender } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Health & test render" };
 
 export const dynamic = "force-dynamic";
 

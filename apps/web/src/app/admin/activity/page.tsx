@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { loadAdminActivity } from "@/lib/admin-data";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Activity log" };
 
 export const dynamic = "force-dynamic";
 

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { asc, desc, eq, isNull } from "drizzle-orm";
 import { Trash2 } from "lucide-react";
 import { schema } from "@/db";
@@ -10,6 +11,8 @@ import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { VoiceTabs } from "../voice-tabs";
 import { deletePronunciation } from "./actions";
 import { PronunciationForm } from "./pronunciation-form";
+
+export const metadata: Metadata = { title: "Cách đọc từ ngữ" };
 
 export const dynamic = "force-dynamic";
 

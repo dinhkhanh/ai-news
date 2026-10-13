@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { BookOpen, ChevronRight, Plus } from "lucide-react";
@@ -14,6 +15,8 @@ import { canWrite } from "@/lib/workspace";
 import { ComicTabs } from "./comic-tabs";
 import { requireComicsWorkspace } from "./guard";
 import { COMIC_STATE_LABEL } from "./labels";
+
+export const metadata: Metadata = { title: "Truyện tranh" };
 
 export const dynamic = "force-dynamic";
 

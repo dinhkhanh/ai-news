@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
@@ -17,6 +18,8 @@ import { defaultTemplate, DURATION_PRESETS, SCRIPT_TONES } from "@/lib/prompts/d
 import { runPromptEval } from "../evals/actions";
 import { createPromptVersion, promotePromptVersion } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Prompt templates" };
 
 export const dynamic = "force-dynamic";
 

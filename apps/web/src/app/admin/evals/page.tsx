@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ActionForm } from "@/components/action-form";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -14,6 +15,8 @@ import type { EvalArticleResult, EvalSummary } from "@/lib/eval-summary";
 import { projectLabel } from "@/lib/project-state";
 import { addEvalArticle, deleteEvalArticle, importEvalArticleFromProject, toggleEvalArticle } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Eval set & runs" };
 
 export const dynamic = "force-dynamic";
 

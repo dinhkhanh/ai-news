@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { comicTitle } from "@/lib/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, desc, eq } from "drizzle-orm";
@@ -32,6 +34,12 @@ import { ScriptTab } from "./script-tab";
 import { VideoCard } from "./video-card";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const title = await comicTitle((await params).id);
+  return { title: title ? `${title} · Truyện tranh` : "Truyện tranh" };
+}
+
 
 const TABS = [
   { id: "script", label: "Kịch bản" },

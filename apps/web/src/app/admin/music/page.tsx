@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { desc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
@@ -10,6 +11,8 @@ import { TONE_MOODS } from "@/lib/media/music";
 import { presignGet } from "@/lib/r2";
 import { deleteTrack, uploadTrack } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Music library" };
 
 export const dynamic = "force-dynamic";
 

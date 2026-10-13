@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { listSoundCollections } from "@/lib/media/sound-collections";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { SoundLibrary } from "./sound-library";
+
+export const metadata: Metadata = { title: "Âm thanh" };
 
 export const dynamic = "force-dynamic";
 // Adding sounds downloads up to ten files from the source and copies them to R2 inside the server action.

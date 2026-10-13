@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ActionForm } from "@/components/action-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +9,8 @@ import { loadAdminQuotas } from "@/lib/admin-data";
 import { QUOTA_RESOURCES } from "@/lib/integrations";
 import { deleteQuota, saveQuota } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Quotas" };
 
 export const dynamic = "force-dynamic";
 

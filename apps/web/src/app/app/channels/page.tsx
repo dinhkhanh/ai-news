@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { asc, eq, inArray } from "drizzle-orm";
 import { Link2, Plus } from "lucide-react";
 import { schema } from "@/db";
@@ -14,6 +15,8 @@ import { formatVietnam, PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { canApprove } from "@/lib/review";
 import { requireWorkspace } from "@/lib/workspace";
 import { checkMyChannel, disconnectMyChannel, grantMyChannel, revokeMyChannel, setMyChannelEnabled, setMyChannelLogo } from "./actions";
+
+export const metadata: Metadata = { title: "Kênh" };
 
 export const dynamic = "force-dynamic";
 

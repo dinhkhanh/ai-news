@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { asc, eq, isNull, or } from "drizzle-orm";
 import { COMIC_FONTS } from "@ai-news/video/comic";
@@ -19,6 +20,8 @@ import { ComicTabs } from "../comic-tabs";
 import { requireComicsWorkspace } from "../guard";
 import { deleteStyle, drawStyleSample, duplicateStyle, saveStyle } from "../library-actions";
 import { ReferenceImages } from "../library-upload";
+
+export const metadata: Metadata = { title: "Phong cách · Truyện tranh" };
 
 export const dynamic = "force-dynamic";
 // "Vẽ thử" draws one picture inside the request.

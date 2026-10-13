@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Overview" };
 
 export const dynamic = "force-dynamic";
 

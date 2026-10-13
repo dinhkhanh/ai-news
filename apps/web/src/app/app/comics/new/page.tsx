@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { asc, eq, isNull, or } from "drizzle-orm";
 import { schema } from "@/db";
@@ -17,6 +18,8 @@ import { presignGet } from "@/lib/r2";
 import { canWrite } from "@/lib/workspace";
 import { createComic } from "../actions";
 import { requireComicsWorkspace } from "../guard";
+
+export const metadata: Metadata = { title: "Truyện mới · Truyện tranh" };
 
 export const dynamic = "force-dynamic";
 

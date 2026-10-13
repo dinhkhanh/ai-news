@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,8 @@ import { loadAdminWorkspaces } from "@/lib/admin-data";
 import { ORG_ROLE_NAMES } from "@/lib/permissions";
 import { removeMember, setMemberRole } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Workspaces" };
 
 export const dynamic = "force-dynamic";
 

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { ChevronRight } from "lucide-react";
@@ -27,6 +28,8 @@ import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { createProject } from "./actions";
 import { NewProjectSource } from "./new-project-source";
+
+export const metadata: Metadata = { title: "Video ngắn" };
 
 export const dynamic = "force-dynamic";
 

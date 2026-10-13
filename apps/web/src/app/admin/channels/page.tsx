@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,8 @@ import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { presignMap } from "@/lib/media/timeline-resolve";
 import { checkChannel, disconnectChannel, grantChannel, pullAnalyticsNow, revokeChannel, setChannelEnabled, setChannelLogo } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Channels" };
 
 export const dynamic = "force-dynamic";
 

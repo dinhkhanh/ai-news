@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
 import { AdminNav } from "@/components/admin-nav";
 import { TopBar } from "@/components/top-bar";
 import { UserMenu } from "@/components/user-menu";
 import { cookies } from "next/headers";
 import { navExpanded } from "@/lib/nav-prefs";
 import { requireAdmin } from "@/lib/session";
+
+/** Admin tabs read "Users · Admin · ai-news" (this template replaces the root one for every admin page). */
+export const metadata: Metadata = { title: { default: "Admin", template: "%s · Admin · ai-news" } };
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await requireAdmin();

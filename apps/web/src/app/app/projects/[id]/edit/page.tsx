@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { projectTitle } from "@/lib/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
@@ -27,6 +29,12 @@ import { displayHost } from "@/lib/url";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const title = await projectTitle((await params).id);
+  return { title: title ? `Chỉnh sửa · ${title}` : "Chỉnh sửa" };
+}
+
 // Server actions of this page include the media-Lambda transcode of a browser capture (`registerWebCapture`).
 export const maxDuration = 120;
 

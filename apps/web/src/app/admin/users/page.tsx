@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { desc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
@@ -8,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { NativeSelect } from "@/components/ui/native-select";
 import { getSession, requireAdmin } from "@/lib/session";
 import { banUser, impersonate, setPlatformRole, unbanUser } from "./actions";
+
+export const metadata: Metadata = { title: "Users" };
 
 export const dynamic = "force-dynamic";
 

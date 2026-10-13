@@ -1,9 +1,12 @@
+import type { Metadata } from "next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { loadAdminAnalytics } from "@/lib/admin-data";
 import { PLATFORM_SPEC } from "@/lib/publish/platforms";
 import { dayStart } from "@/lib/quota";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Analytics" };
 
 export const dynamic = "force-dynamic";
 

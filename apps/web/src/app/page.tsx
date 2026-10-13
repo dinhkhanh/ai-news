@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LogoMark } from "@/components/logo-mark";
 import { GoogleSignIn } from "@/components/google-sign-in";
 import { getSession } from "@/lib/session";
 import { safeNextPath } from "@/lib/url";
+
+export const metadata: Metadata = { title: "Đăng nhập" };
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
   const session = await getSession();

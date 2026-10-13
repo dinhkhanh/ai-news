@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Eye, Image as ImageIcon, LayoutGrid, Palette, Save, Type } from "lucide-react";
 import { BRAND_FONTS, CAPTION_FONT_RANGE, HEADLINE_FONT_RANGE } from "@ai-news/video/schema";
@@ -19,6 +20,8 @@ import { deleteBrandKit, duplicateBrandKit, saveBrandKit, setDefaultBrandKit } f
 import { BrandPreviewLoader } from "./brand-preview-loader";
 import { ColourField } from "./colour-field";
 import { OverlayUploader } from "./overlay-uploader";
+
+export const metadata: Metadata = { title: "Bộ nhận diện" };
 
 export const dynamic = "force-dynamic";
 

@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+import { projectTitle } from "@/lib/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
@@ -50,6 +52,11 @@ import {
 } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  return { title: (await projectTitle((await params).id)) ?? "Video ngắn" };
+}
+
 /** Server actions of this page run direct pipeline steps in `after()` (queue outage fallback, manual paste): a script takes 1–3 minutes. */
 export const maxDuration = 300;
 

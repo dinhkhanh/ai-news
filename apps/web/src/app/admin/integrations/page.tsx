@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ActionForm } from "@/components/action-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,8 @@ import { loadAdminIntegrations } from "@/lib/admin-data";
 import { FEATURE_FLAGS, flagDefault, INTEGRATIONS } from "@/lib/integrations";
 import { clearIntegrationSecret, saveIntegration, setFeatureFlag } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Integrations" };
 
 export const dynamic = "force-dynamic";
 

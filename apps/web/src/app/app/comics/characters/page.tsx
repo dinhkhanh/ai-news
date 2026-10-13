@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { asc, eq, isNull, or } from "drizzle-orm";
 import { schema } from "@/db";
@@ -20,6 +21,8 @@ import { ComicTabs } from "../comic-tabs";
 import { requireComicsWorkspace } from "../guard";
 import { acceptCharacterSheet, deleteCharacter, drawCharacterSheet, saveCharacter } from "../library-actions";
 import { ReferenceImages, SheetUpload } from "../library-upload";
+
+export const metadata: Metadata = { title: "Nhân vật · Truyện tranh" };
 
 export const dynamic = "force-dynamic";
 // Drawing a sheet runs inside the request.

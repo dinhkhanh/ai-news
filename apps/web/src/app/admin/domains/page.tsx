@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { asc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ActionForm } from "@/components/action-form";
@@ -6,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { addDomain, removeDomain } from "./actions";
 import { requireAdmin } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Domains" };
 
 export const dynamic = "force-dynamic";
 

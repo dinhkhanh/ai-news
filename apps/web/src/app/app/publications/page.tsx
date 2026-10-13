@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { schema } from "@/db";
@@ -9,6 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatVietnam, PLATFORM_SPEC, type Analytics } from "@/lib/publish/platforms";
 import { requireWorkspace } from "@/lib/workspace";
+
+export const metadata: Metadata = { title: "Đã đăng" };
 
 export const dynamic = "force-dynamic";
 

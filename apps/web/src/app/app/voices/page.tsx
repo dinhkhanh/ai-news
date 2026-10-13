@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { asc, desc, eq, isNull, or } from "drizzle-orm";
 import { Pencil, Star, Trash2 } from "lucide-react";
@@ -12,6 +13,8 @@ import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { deleteVoice, setDefaultVoice } from "./actions";
 import { VoiceTabs } from "./voice-tabs";
 import { VoiceEditor, VoicePreviewButton, type VoiceDraft } from "./voice-editor";
+
+export const metadata: Metadata = { title: "Giọng đọc" };
 
 export const dynamic = "force-dynamic";
 
