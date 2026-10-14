@@ -26,9 +26,7 @@ export async function resolveVideoLink(input: string): Promise<string | null> {
   if (kind !== "short") return null;
   let url = /^https?:\/\//i.test(input.trim()) ? input.trim() : `https://${input.trim()}`;
   for (let hop = 0; hop < 6; hop++) {
-    const res = await fetch(url, { method: "GET", redirect: "manual", headers: { "User-Agent": BROWSER_UA, "Accept-Language": "vi,en;q=0.8" }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
-    const location = res?.headers.get("location");
-    await res?.body?.cancel().catch(() => {});
+    const location = (await redirectOf(url, BROWSER_UA)) ?? (await redirectOf(url, null));
     if (!location) break;
     const next = new URL(location, url);
     // Facebook sends visitors without a session to its login page with the destination in `next`.
@@ -38,6 +36,18 @@ export async function resolveVideoLink(input: string): Promise<string | null> {
     url = target;
   }
   throw new Error("Không mở được link chia sẻ này tới trang video. Hãy dán link đầy đủ của video (mở video rồi sao chép địa chỉ trên trình duyệt).");
+}
+
+/**
+ * The `Location` one request to `url` answers with, body left unread. `userAgent` null = fetch's own: Facebook's
+ * share links (facebook.com/share/r/…, what the mobile app copies) answer a desktop-browser UA without the rest of
+ * a browser's headers with a bare 400, and only redirect a plain client to the reel.
+ */
+async function redirectOf(url: string, userAgent: string | null): Promise<string | null> {
+  const headers: Record<string, string> = { "Accept-Language": "vi,en;q=0.8", ...(userAgent ? { "User-Agent": userAgent } : {}) };
+  const res = await fetch(url, { method: "GET", redirect: "manual", headers, signal: AbortSignal.timeout(10_000) }).catch(() => null);
+  await res?.body?.cancel().catch(() => {});
+  return res?.headers.get("location") ?? null;
 }
 
 /** yt-dlp metadata of one video page (title, caption, length, uploader); never downloads. */

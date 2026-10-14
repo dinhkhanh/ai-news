@@ -6,6 +6,7 @@ describe("videoPageUrl", () => {
     expect(videoPageUrl("https://www.tiktok.com/@tranhieu9492/video/7685246867982011655?is_from_webapp=1&sender_device=pc")).toBe("https://www.tiktok.com/@tranhieu9492/video/7685246867982011655");
     expect(videoPageUrl("https://www.facebook.com/reel/946055151335969")).toBe("https://www.facebook.com/reel/946055151335969");
     expect(videoPageUrl("https://m.facebook.com/reel/946055151335969/?mibextid=abc")).toBe("https://www.facebook.com/reel/946055151335969");
+    expect(videoPageUrl("https://www.facebook.com/reel/1431655156688001/?fs=e&mibextid=wwXIfr&rdid=jmLikteG03pdQw7s&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fr%2F1CX6WCSWfS%2F")).toBe("https://www.facebook.com/reel/1431655156688001");
     expect(videoPageUrl("https://www.facebook.com/watch/?v=123&ref=sharing")).toBe("https://www.facebook.com/watch?v=123");
     expect(videoPageUrl("https://www.youtube.com/shorts/tov5lHVESlo")).toBe("https://www.youtube.com/shorts/tov5lHVESlo");
     expect(videoPageUrl("http://youtube.com/watch?v=dQw4w9WgXcQ&t=10s&si=x")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
@@ -29,6 +30,7 @@ describe("videoLinkKind", () => {
     expect(videoLinkKind("https://vm.tiktok.com/ZMabc/")).toBe("short");
     expect(videoLinkKind("https://www.tiktok.com/t/ZTabc/")).toBe("short");
     expect(videoLinkKind("https://www.facebook.com/share/r/1AbCdEf/")).toBe("short");
+    expect(videoLinkKind("https://www.facebook.com/share/r/1CX6WCSWfS/?mibextid=wwXIfr")).toBe("short");
     expect(videoLinkKind("https://www.facebook.com/share/p/1AbCdEf/")).toBeNull();
     expect(videoLinkKind("https://tuoitre.vn/thoi-su/bai-1.htm")).toBeNull();
   });
