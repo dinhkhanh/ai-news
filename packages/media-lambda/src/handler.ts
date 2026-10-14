@@ -19,6 +19,7 @@ import { mix } from "./mix.js";
 import { download, upload } from "./r2.js";
 import type { Check, MediaAction, MediaResult, ProbeResult, WebVideoCandidate } from "./types.js";
 import { dedupeCandidates, parseSearchJson } from "./webvideo.js";
+import { webVideoProfile } from "./webvideo-profile.js";
 
 const DEFAULT_TARGET_LUFS = -14;
 const DEFAULT_TRUE_PEAK = -1;
@@ -135,7 +136,8 @@ export async function handle(event: MediaAction, work: string): Promise<MediaRes
     }
     case "web-video": {
       const raw = path.join(work, "raw.mp4");
-      const format = ["-f", WEB_VIDEO_FORMAT, "--merge-output-format", "mp4", "--no-playlist", "--no-warnings", "--socket-timeout", "30"];
+      const profile = webVideoProfile();
+      const format = ["-f", profile.format, ...profile.sort, "--merge-output-format", "mp4", "--no-playlist", "--no-warnings", "--socket-timeout", "30"];
       // With a trim, only that section is fetched so a long news video costs seconds, not minutes. A section from
       // 0 is a plain stream copy (it starts on the first keyframe anyway, and the encode below cuts its end); only
       // a later start needs `--force-keyframes-at-cuts`, which re-encodes the section once more to start exactly
@@ -147,9 +149,7 @@ export async function handle(event: MediaAction, work: string): Promise<MediaRes
       let final = raw;
       if (event.trim) {
         final = path.join(work, "trim.mp4");
-        // `veryfast` keeps the CRF 18 quality target at a fraction of `medium`'s CPU (a NAS took minutes per 120 s);
-        // the clip is an intermediate the final render encodes again.
-        await ffmpeg(["-i", raw, "-t", String(event.trim.endSec - event.trim.startSec), "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", final]);
+        await ffmpeg(["-i", raw, "-t", String(event.trim.endSec - event.trim.startSec), "-c:v", "libx264", "-crf", "18", "-preset", profile.preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", final]);
       }
       await upload(final, event.output.key, "video/mp4");
       const probe = await probeFile(final).catch(() => undefined);
@@ -190,15 +190,6 @@ export async function handle(event: MediaAction, work: string): Promise<MediaRes
   }
 }
 
-/**
- * Which stream yt-dlp takes from a video site. The composition's frame is 1080 px wide and draws a landscape clip
- * exactly that wide (a portrait one cover-fitted), so the smallest stream at least 1080 px wide is all a shot can
- * show: 1280×720 for a landscape video, 1080×1920 for a portrait one. A bigger one (1920×1080, 4K) only multiplies
- * the decode and encode work, which on a NAS CPU is minutes (Facebook often serves AV1 only). Within each tier
- * yt-dlp's default order takes the best bitrate; a video with nothing that wide gives its best stream.
- */
-const mp4Video = (filter: string) => `bv*${filter}[ext=mp4]+ba[ext=m4a]`;
-export const WEB_VIDEO_FORMAT = [mp4Video("[width>=1080][width<=1280]"), mp4Video("[width>=1080][width<=1920]"), mp4Video("[width>=1080]"), mp4Video(""), "b[ext=mp4]", "b"].join("/");
 
 export const handler = async (event: MediaAction, context?: Context): Promise<MediaResult> => {
   const started = Date.now();
