@@ -14,7 +14,7 @@ import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
 import { storedFrame, type FrameFaces } from "@/lib/media/framing";
 import { downloadToR2 } from "@/lib/media/stock";
 import { formatTimecode, manualSection, SHOT_SEC, webVideoPageUrl, youtubeId, type PendingCapture } from "@/lib/media/visual-plan";
-import { storeWebVideo, webVideoEnabled } from "@/lib/media/webvideo";
+import { storeWebVideoJob, webVideoEnabled } from "@/lib/media/webvideo";
 import { watermarkLabel } from "@/lib/media/watermark";
 import { scanClipWatermark, watermarkScanAvailable } from "@/lib/media/watermark-scan";
 import type { ChosenAsset } from "@/lib/media/broll";
@@ -27,6 +27,9 @@ import { sceneVoiceMs } from "@/lib/media/editor";
 import { docOfRow, saveTimelineVersion, verdictsOfScript } from "@/lib/review";
 import { isPrivateHost } from "@/lib/url";
 import { assertWorkspaceWriter } from "@/lib/workspace";
+
+/** How long pasting a video link waits for the NAS inside the editor's 120 s route (lookup and watermark scan need the rest). */
+const EDITOR_DOWNLOAD_WAIT_MS = 70_000;
 
 export type EditorActionResult = { ok: boolean; message: string; version?: number; timelineId?: string };
 
@@ -335,7 +338,10 @@ export async function importWebVideo(input: { projectId: string; url: string; st
     const ctx = { ...ws, projectId: input.projectId };
     let asset: ChosenAsset;
     try {
-      asset = await storeWebVideo(c, { buildId: `manual-${nanoid(6)}`, startSec: section.startSec, endSec: section.endSec, index: 0 }, ctx);
+      // The editor's route stops at 120 s: wait part of that, and let a second click pick up the same NAS job (it keeps one per section).
+      const r = await storeWebVideoJob(c, { buildId: `manual-${nanoid(6)}`, startSec: section.startSec, endSec: section.endSec, index: 0 }, ctx, { waitMs: EDITOR_DOWNLOAD_WAIT_MS });
+      if ("pending" in r) return { ok: false, message: "NAS vẫn đang tải và mã hoá đoạn video này. Bấm thêm lại sau 1–2 phút: đoạn đang tải sẽ được dùng ngay, không tải lại từ đầu." };
+      asset = r.asset;
     } catch (e) {
       const videoId = youtubeId(url);
       const message = e instanceof Error ? e.message : "download failed";

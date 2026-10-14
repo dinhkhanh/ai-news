@@ -4,7 +4,7 @@ import { invokeWebVideo, type WebVideoCandidate } from "@/lib/media-lambda";
 import { countWords, normaliseText, type Extracted } from "@/lib/fetch/readability";
 import { SOURCE_VIDEO_MAX_SEC, uploadDate, videoLinkKind, videoPageUrl } from "@/lib/video-source";
 import type { ChosenAsset } from "./broll";
-import { storeWebVideo, webVideoEnabled } from "./webvideo";
+import { storeWebVideoJob, webVideoEnabled } from "./webvideo";
 
 /**
  * Video projects (`projects.source_kind = "video"`): the pasted link is a video page (YouTube, TikTok, Facebook…),
@@ -47,13 +47,21 @@ export async function lookupVideo(pageUrl: string): Promise<WebVideoCandidate> {
   return { ...c, url: videoPageUrl(c.url) ?? pageUrl };
 }
 
-/** The first `SOURCE_VIDEO_MAX_SEC` of the video as a `web_video` asset tagged `role: "source"`. */
-export async function downloadSourceVideo(c: WebVideoCandidate, ctx: { userId: string; organizationId: string; projectId: string }): Promise<ChosenAsset & { truncated: boolean }> {
+/**
+ * The first `SOURCE_VIDEO_MAX_SEC` of the video as a `web_video` asset tagged `role: "source"`. A long section can
+ * keep the NAS busy for minutes (decoding, one H.264 encode), longer than one function may run: after `wait.waitMs`
+ * this returns `{ pending: jobId }`, and the caller's next durable step passes that `jobId` back to keep waiting.
+ */
+export async function downloadSourceVideo(
+  c: WebVideoCandidate,
+  ctx: { userId: string; organizationId: string; projectId: string },
+  wait: { jobId?: string | null; waitMs?: number } = {},
+): Promise<(ChosenAsset & { truncated: boolean }) | { pending: string }> {
   if (!(await webVideoEnabled())) throw new Error("Tải video web đang tắt (cờ web_video_downloader tại /admin/integrations)");
   const length = c.durationSec && c.durationSec > 0 ? c.durationSec : SOURCE_VIDEO_MAX_SEC;
   const endSec = Math.round(Math.min(length, SOURCE_VIDEO_MAX_SEC) * 100) / 100;
-  const asset = await storeWebVideo(c, { buildId: `source-${nanoid(6)}`, startSec: 0, endSec, index: 0, role: "source" }, ctx);
-  return { ...asset, truncated: length > SOURCE_VIDEO_MAX_SEC };
+  const r = await storeWebVideoJob(c, { buildId: `source-${nanoid(6)}`, startSec: 0, endSec, index: 0, role: "source" }, ctx, wait);
+  return "pending" in r ? r : { ...r.asset, truncated: length > SOURCE_VIDEO_MAX_SEC };
 }
 
 /** The video's own words as the project's starting content: its caption (or title), for the user to rewrite. */

@@ -115,31 +115,151 @@ async function invokeLambdaRaw(payload: MediaAction): Promise<MediaResult> {
   }
 }
 
+/** A NAS that refused a connection (or never answered) is skipped this long, so every call does not wait for it again. */
+const NAS_DOWN_MS = 3 * 60 * 1000;
+/** How often a running NAS job is asked for its state. */
+const JOB_POLL_MS = 3000;
+/** The longest `invokeWebVideo` waits for a download before giving up on this call (functions stop at 300 s). */
+export const WEB_VIDEO_WAIT_MS = 240_000;
+let nasDownUntil = 0;
+
+type WebVideoAction = Extract<MediaAction, { action: "web-video" }>;
+type ViaResult = MediaResult & { via: "nas" | "lambda" };
+/** A download: finished (or failed), or still running on the NAS as job `pending` (resume with `downloadWebVideo({ jobId })`). */
+export type WebVideoDownload = ViaResult | { pending: string };
+
+/** Connection-level failure (refused, unreachable, DNS, no answer in time): the box is down, not merely busy. */
+const unreachable = (e: unknown) => e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError" || /fetch failed|ECONN|ENOTFOUND|EHOSTUNREACH|ETIMEDOUT/i.test(`${e.message} ${(e as { cause?: { code?: string } }).cause?.code ?? ""}`));
+
+function nas() {
+  const e = env();
+  return e.WEB_VIDEO_API_URL && e.WEB_VIDEO_API_TOKEN ? { url: e.WEB_VIDEO_API_URL, token: e.WEB_VIDEO_API_TOKEN } : null;
+}
+
+async function nasRequest(path: string, init: { method: "GET" | "POST"; body?: unknown }, timeoutMs: number) {
+  const box = nas()!;
+  const res = await fetch(new URL(path, box.url), {
+    method: init.method,
+    headers: { Authorization: `Bearer ${box.token}`, ...(init.body ? { "Content-Type": "application/json" } : {}) },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const json = (await res.json().catch(() => null)) as (Record<string, unknown> & { error?: string }) | null;
+  return { status: res.status, json };
+}
+
+const markDown = (what: string, err: unknown, started: number) => {
+  nasDownUntil = Date.now() + NAS_DOWN_MS;
+  console.warn(`[web-video] self-hosted API unreachable (${what}), using the Lambda for ${NAS_DOWN_MS / 60_000} min`, (err as Error).message, `${Date.now() - started} ms`);
+};
+
+type JobView = { jobId: string; state: "queued" | "running" | "done"; result?: MediaResult };
+
 /**
- * The only way to download from a video site. Downloads and page lookups go to the self-hosted API when one is configured
- * (`WEB_VIDEO_API_URL`, see packages/media-lambda/src/server.ts): it runs the
- * same handler on a regular ISP line, which YouTube does not bot-check, and
- * writes to the same R2 bucket. If the box cannot be reached at all the
- * Lambda is used, so a NAS outage degrades to the old behaviour instead of
- * failing the build; a yt-dlp error from the box is returned as is.
+ * Download a section from a video site. On the self-hosted API (`WEB_VIDEO_API_URL`, packages/media-lambda/src/server.ts,
+ * a regular ISP line that YouTube does not bot-check) it runs as a background job: started (or re-attached to: the
+ * box keeps one job per section) and polled for up to `waitMs`. Still running then = `{ pending: jobId }`, which a
+ * durable caller hands to its next step instead of dying at the function limit while the NAS encodes; a slow NAS
+ * is never mistaken for a dead one. Only a box that cannot be reached at all falls back to the Lambda (and is
+ * skipped for a few minutes). A box built before jobs existed (no `/jobs`) is called the old, blocking way.
+ */
+export async function downloadWebVideo(payload: WebVideoAction, opts: { jobId?: string | null; waitMs?: number } = {}): Promise<WebVideoDownload> {
+  const deadline = Date.now() + (opts.waitMs ?? WEB_VIDEO_WAIT_MS);
+  // A job already running is polled even if this instance thinks the box is down: it may well be back.
+  if (nas() && (opts.jobId || Date.now() >= nasDownUntil)) {
+    let jobId = opts.jobId ?? null;
+    let resubmitted = false;
+    const started = Date.now();
+    const submit = async (): Promise<JobView | ViaResult | "lambda"> => {
+      try {
+        const r = await nasRequest("/jobs", { method: "POST", body: payload }, 15_000);
+        if (r.status === 404 && !r.json?.jobId) return legacyInvoke(payload);
+        if (r.status >= 500 || !r.json) return "lambda";
+        if (r.status !== 202) return { ok: false, action: "web-video", passed: false, error: `web-video API: ${r.json.error ?? `HTTP ${r.status}`}`, via: "nas" };
+        return r.json as unknown as JobView;
+      } catch (e) {
+        if (!unreachable(e)) throw e;
+        markDown("start", e, started);
+        return "lambda";
+      }
+    };
+    const settle = (v: JobView): ViaResult | null => (v.state === "done" && v.result ? { ...v.result, billedMs: 0, via: "nas" } : null);
+
+    let first: JobView | null = null;
+    if (!jobId) {
+      const s = await submit();
+      if (s === "lambda") return { ...(await invokeLambdaRaw(payload)), via: "lambda" };
+      if ("via" in s) return s;
+      first = s;
+      jobId = s.jobId;
+    }
+    if (first && settle(first)) return settle(first)!;
+    while (Date.now() + JOB_POLL_MS < deadline) {
+      await new Promise((r) => setTimeout(r, JOB_POLL_MS));
+      try {
+        const r = await nasRequest(`/jobs/${jobId}`, { method: "GET" }, 15_000);
+        if (r.status === 404) {
+          // The box restarted (jobs live in memory): ask again once, which starts it over.
+          if (resubmitted) return { ok: false, action: "web-video", passed: false, error: "web-video API: the download job was lost twice (NAS restarting?)", via: "nas" };
+          resubmitted = true;
+          const s = await submit();
+          if (s === "lambda") return { ...(await invokeLambdaRaw(payload)), via: "lambda" };
+          if ("via" in s) return s;
+          jobId = s.jobId;
+          if (settle(s)) return settle(s)!;
+          continue;
+        }
+        if (r.status === 200 && r.json) {
+          const done = settle(r.json as unknown as JobView);
+          if (done) return done;
+        }
+        // Anything else (a proxy hiccup, a 5xx) is passing: keep asking until the deadline.
+      } catch (e) {
+        if (!unreachable(e)) throw e;
+      }
+    }
+    return { pending: jobId! };
+  }
+  return { ...(await invokeLambdaRaw(payload)), via: "lambda" };
+}
+
+/** A box without `/jobs`: one blocking request (a reverse proxy may cut it after 60 s), the Lambda when it fails. */
+async function legacyInvoke(payload: WebVideoAction): Promise<ViaResult | "lambda"> {
+  const started = Date.now();
+  try {
+    const r = await nasRequest("/invoke", { method: "POST", body: payload }, 280_000);
+    if (r.status === 429 || r.status >= 500 || !r.json) return "lambda";
+    if (r.status !== 200) return { ok: false, action: "web-video", passed: false, error: `web-video API: ${r.json.error ?? `HTTP ${r.status}`}`, via: "nas" };
+    return { ...(r.json as unknown as MediaResult), billedMs: 0, via: "nas" };
+  } catch (e) {
+    if (unreachable(e)) markDown("invoke", e, started);
+    return "lambda";
+  }
+}
+
+/**
+ * The only way to reach a video site: page lookups / searches, and downloads that may take up to
+ * `WEB_VIDEO_WAIT_MS` (`downloadWebVideo` without a resumable job; a download still running then is an error
+ * here). Both prefer the self-hosted API and fall back to the Lambda when it cannot be reached; a yt-dlp error
+ * from the box is returned as is.
  */
 export async function invokeWebVideo(payload: Extract<MediaAction, { action: "web-video" | "web-video-search" }>): Promise<MediaResult & { via: "nas" | "lambda" }> {
-  const e = env();
-  if (e.WEB_VIDEO_API_URL && e.WEB_VIDEO_API_TOKEN) {
+  if (payload.action === "web-video") {
+    const r = await downloadWebVideo(payload);
+    return "pending" in r ? { ok: false, action: "web-video", passed: false, error: `web-video API: still downloading after ${WEB_VIDEO_WAIT_MS / 1000} s (job ${r.pending})`, via: "nas" } : r;
+  }
+  if (nas() && Date.now() >= nasDownUntil) {
     const started = Date.now();
     try {
-      const res = await fetch(new URL("/invoke", e.WEB_VIDEO_API_URL), {
-        method: "POST",
-        headers: { Authorization: `Bearer ${e.WEB_VIDEO_API_TOKEN}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(10 * 60 * 1000),
-      });
-      const json = (await res.json().catch(() => null)) as (MediaResult & { error?: string }) | null;
-      if (res.status === 429 || res.status >= 500 || !json) throw new Error(`HTTP ${res.status}`);
-      if (!res.ok) return { ok: false, action: payload.action, passed: false, error: `web-video API: ${json.error ?? `HTTP ${res.status}`}`, via: "nas" };
-      return { ...json, billedMs: 0, via: "nas" };
-    } catch (err) {
-      console.warn("[web-video] self-hosted API unreachable, using the Lambda", (err as Error).message, `${Date.now() - started} ms`);
+      const r = await nasRequest("/invoke", { method: "POST", body: payload }, 90_000);
+      if (r.status !== 429 && r.status < 500 && r.json) {
+        if (r.status !== 200) return { ok: false, action: payload.action, passed: false, error: `web-video API: ${r.json.error ?? `HTTP ${r.status}`}`, via: "nas" };
+        return { ...(r.json as unknown as MediaResult), billedMs: 0, via: "nas" };
+      }
+      console.warn("[web-video] self-hosted API answered", r.status, "for a lookup, using the Lambda");
+    } catch (e) {
+      if (unreachable(e)) markDown("lookup", e, started);
+      else console.warn("[web-video] self-hosted lookup failed, using the Lambda", (e as Error).message);
     }
   }
   return { ...(await invokeLambdaRaw(payload)), via: "lambda" };

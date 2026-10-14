@@ -5,9 +5,15 @@
  * not office / home connections, so downloads run here and land in the same R2
  * bucket the Lambda writes to.
  *
- *   GET  /health  → { ok, ytDlp, busy }                      (no auth)
- *   POST /invoke  → MediaResult   Authorization: Bearer <API_TOKEN>
- *                   body = a `web-video` (trim required) or `web-video-search` action
+ *   GET  /health    → { ok, ytDlp, busy, jobs }                (no auth)
+ *   POST /invoke    → MediaResult   Authorization: Bearer <API_TOKEN>
+ *                     body = a `web-video` (trim required) or `web-video-search` action, answered when done
+ *   POST /jobs      → 202 JobView   same auth; body = a `web-video` action, run in the background (`jobs.ts`):
+ *                     the same section asked for again gets the job already queued / running / done
+ *   GET  /jobs/<id> → JobView       same auth; `state` queued | running | done (+ `result`)
+ *
+ * Long downloads go through `/jobs`: a DSM reverse proxy gives up on a request after 60 s and the app's
+ * functions after 300 s, while a 120 s 1080p section can take the NAS CPU longer than both.
  *
  * Put it behind HTTPS (DSM reverse proxy with the DDNS certificate): the token travels in a header.
  */
@@ -15,6 +21,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createHash, timingSafeEqual } from "node:crypto";
 import { ytdlp } from "./ffmpeg.js";
 import { handler } from "./handler.js";
+import { JobQueue } from "./jobs.js";
 import { validateInvoke } from "./server-validate.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -56,18 +63,41 @@ let version: string | null = null;
 const ytDlpVersion = async () => (version ??= await ytdlp(["--version"]).then((r) => r.stdout.trim()).catch(() => null));
 const log = (o: Record<string, unknown>) => console.log(JSON.stringify({ at: new Date().toISOString(), ...o }));
 
+const jobs = new JobQueue((event) => handler(event), {
+  maxConcurrent: MAX_CONCURRENT,
+  // Long enough for the app to come back for a result after a retry backoff.
+  keepMs: 2 * 60 * 60 * 1000,
+  onFinish: ({ event, result, ms }) => log({ event: "job", ok: result.ok, ms, target: event.input.url, section: event.trim, error: result.error?.slice(0, 200) }),
+});
+const JOB_PATH = /^\/jobs\/([0-9a-f-]{36})$/;
+
+/** False (after answering 401) when the bearer token is wrong. */
+async function authorised(req: IncomingMessage, res: ServerResponse) {
+  if (tokenOk(req.headers.authorization)) return true;
+  // Slow down guessing; never say whether a token was close.
+  await new Promise((r) => setTimeout(r, 1000));
+  log({ event: "unauthorized", ip: req.headers["x-forwarded-for"] ?? req.socket.remoteAddress });
+  send(res, 401, { ok: false, error: "unauthorized" });
+  return false;
+}
+
 const server = createServer((req, res) => {
   void (async () => {
     const path = (req.url ?? "/").split("?")[0];
     try {
-      if (req.method === "GET" && path === "/health") return send(res, 200, { ok: true, ytDlp: await ytDlpVersion(), busy, maxConcurrent: MAX_CONCURRENT });
-      if (req.method !== "POST" || path !== "/invoke") return send(res, 404, { ok: false, error: "not found" });
-      if (!tokenOk(req.headers.authorization)) {
-        // Slow down guessing; never say whether a token was close.
-        await new Promise((r) => setTimeout(r, 1000));
-        log({ event: "unauthorized", ip: req.headers["x-forwarded-for"] ?? req.socket.remoteAddress });
-        return send(res, 401, { ok: false, error: "unauthorized" });
+      if (req.method === "GET" && path === "/health") {
+        const j = jobs.stats();
+        return send(res, 200, { ok: true, ytDlp: await ytDlpVersion(), busy: busy + j.running, maxConcurrent: MAX_CONCURRENT, jobs: j });
       }
+      const jobPath = JOB_PATH.exec(path);
+      if (req.method === "GET" && jobPath) {
+        if (!(await authorised(req, res))) return;
+        const view = jobs.get(jobPath[1]);
+        return view ? send(res, 200, { ok: true, ...view }) : send(res, 404, { ok: false, error: "no such job (finished long ago, or the server restarted)" });
+      }
+      const isJob = req.method === "POST" && path === "/jobs";
+      if (!isJob && (req.method !== "POST" || path !== "/invoke")) return send(res, 404, { ok: false, error: "not found" });
+      if (!(await authorised(req, res))) return;
       let body: unknown;
       try {
         body = await readJson(req);
@@ -76,6 +106,12 @@ const server = createServer((req, res) => {
       }
       const v = validateInvoke(body);
       if (!v.ok) return send(res, v.status, { ok: false, error: v.error });
+      if (isJob) {
+        if (v.event.action !== "web-video") return send(res, 400, { ok: false, error: "only web-video downloads run as jobs" });
+        const view = jobs.submit(v.event);
+        log({ event: "job.submit", jobId: view.jobId, state: view.state, target: v.event.input.url, section: v.event.trim });
+        return send(res, 202, { ok: true, ...view });
+      }
       if (busy >= MAX_CONCURRENT) return send(res, 429, { ok: false, error: "busy, retry shortly" });
       busy += 1;
       const started = Date.now();

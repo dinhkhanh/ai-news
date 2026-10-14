@@ -19,6 +19,14 @@ import { putObject, r2Key } from "@/lib/r2";
 import { canonicalizeUrl } from "@/lib/url";
 import type { PipelineSteps } from "./steps";
 
+/**
+ * A video project's download is waited for in steps of this length: with checkpointing a step may start up to
+ * `maxRuntime` (250 s) into a request, so it has to end well inside the remaining 50 s of the route's 300 s.
+ */
+const SOURCE_STEP_WAIT_MS = 45_000;
+/** Steps of waiting after the first before giving up (~30 min in all, plenty for a 120 s section on a NAS CPU). */
+const SOURCE_STEP_ROUNDS = 40;
+
 export type FetchRequest = {
   projectId: string;
   organizationId: string;
@@ -119,14 +127,26 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
   });
 
   // Video projects: the footage itself (the first SOURCE_VIDEO_MAX_SEC), through the NAS like every video download.
-  const sourceVideo = fetched.video
-    ? await steps.run("download-video", async () => {
-        const c = fetched.video!;
-        await reportProgress(pctx, { label: `Tải video từ ${c.site}${c.durationSec ? ` (${Math.round(c.durationSec)} s)` : ""}`, pct: 25 });
-        const a = await downloadSourceVideo(c, pctx);
-        return { assetId: a.assetId, durationSec: a.durationSec, truncated: a.truncated };
-      })
-    : null;
+  // The NAS runs it as a job; each step waits up to SOURCE_STEP_WAIT_MS (well inside the function limit) and a job
+  // still running is handed to the next step, so a slow encode never kills the function and restarts the download.
+  let sourceVideo: { assetId: string; durationSec: number | null; truncated: boolean } | null = null;
+  if (fetched.video) {
+    const c = fetched.video;
+    const label = `Tải video từ ${c.site}${c.durationSec ? ` (${Math.round(c.durationSec)} s)` : ""}`;
+    type Attempt = { pending: string } | { assetId: string; durationSec: number | null; truncated: boolean };
+    const attempt = async (jobId: string | null, round: number): Promise<Attempt> => {
+      await reportProgress(pctx, { label: round ? `${label}: NAS đang xử lý (${Math.round((round * SOURCE_STEP_WAIT_MS) / 60_000)} phút)` : label, pct: Math.min(55, 25 + round * 3) });
+      const a = await downloadSourceVideo(c, pctx, { jobId, waitMs: SOURCE_STEP_WAIT_MS });
+      return "pending" in a ? { pending: a.pending } : { assetId: a.assetId, durationSec: a.durationSec, truncated: a.truncated };
+    };
+    let r: Attempt = await steps.run("download-video", () => attempt(null, 0));
+    for (let round = 1; "pending" in r && round <= SOURCE_STEP_ROUNDS; round++) {
+      const jobId = r.pending;
+      r = await steps.run(`download-video-wait-${round}`, () => attempt(jobId, round));
+    }
+    if ("pending" in r) throw new NonRetriableError(`Video vẫn đang được tải trên NAS sau ${Math.round(((SOURCE_STEP_ROUNDS + 1) * SOURCE_STEP_WAIT_MS) / 60_000)} phút; thử “Tải lại video” sau ít phút (NAS giữ kết quả 2 giờ)`);
+    sourceVideo = r;
+  }
 
   const snapshot = await steps.run("snapshot-to-r2", async () => {
     await reportProgress(pctx, { label: "Lưu bản chụp trang", pct: 60 });

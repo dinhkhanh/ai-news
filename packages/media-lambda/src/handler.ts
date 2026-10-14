@@ -136,8 +136,11 @@ export async function handle(event: MediaAction, work: string): Promise<MediaRes
     case "web-video": {
       const raw = path.join(work, "raw.mp4");
       const format = ["-f", "bv*[height>=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4", "--no-playlist", "--no-warnings", "--socket-timeout", "30"];
-      // With a trim, only that section is fetched (keyframe-accurate cut) so a long news video costs seconds, not minutes.
-      const section = event.trim ? ["--download-sections", `*${event.trim.startSec}-${event.trim.endSec}`, "--force-keyframes-at-cuts"] : [];
+      // With a trim, only that section is fetched so a long news video costs seconds, not minutes. A section from
+      // 0 is a plain stream copy (it starts on the first keyframe anyway, and the encode below cuts its end); only
+      // a later start needs `--force-keyframes-at-cuts`, which re-encodes the section once more to start exactly
+      // there. That extra encode is what made a 120 s source video (often AV1 on Facebook) take minutes of CPU.
+      const section = event.trim ? ["--download-sections", `*${event.trim.startSec}-${event.trim.endSec}`, ...(event.trim.startSec > 0 ? ["--force-keyframes-at-cuts"] : [])] : [];
       await ytdlp([...format, ...section, "-o", raw, event.input.url]).catch((e) => {
         throw new Error(`yt-dlp: ${ytdlpError(e)}`);
       });

@@ -5,7 +5,7 @@ import { withOrgContext } from "@/db/context";
 import { recordUsageCost } from "@/lib/activity";
 import { firecrawlSearch } from "@/lib/fetch/providers";
 import { flagEnabled } from "@/lib/flags";
-import { invokeMediaLambda, invokeWebVideo, type WebVideoCandidate } from "@/lib/media-lambda";
+import { downloadWebVideo, invokeMediaLambda, WEB_VIDEO_WAIT_MS, type WebVideoCandidate } from "@/lib/media-lambda";
 import { r2Key } from "@/lib/r2";
 import { isPrivateHost } from "@/lib/url";
 import type { ChosenAsset } from "./broll";
@@ -94,15 +94,25 @@ export const webVideoHint = (c: WebVideoCandidate, segments: number) => `web vid
 /** Suffix of a candidate's hint naming the scenes whose voice-over it was searched for ("what you hear is what you see"). */
 export const foundForHint = (c: { query: string; sceneIds: string[] }) => (c.sceneIds.length ? `, found for ${c.sceneIds.join(" + ")} ("${c.query.slice(0, 50)}")` : "");
 
+type StoreOpts = { buildId: string; startSec: number; endSec: number; index: number; /** `source`: the footage of a video project (`projects.source_video_asset_id`). */ role?: "source" };
+type StoreCtx = { userId: string; organizationId: string; projectId: string };
+
 /**
- * Download the `[startSec, endSec)` section of one candidate through the media
- * Lambda and record it as a `web_video` asset (deduped org-wide by video + section).
+ * Download the `[startSec, endSec)` section of one candidate (NAS, else the media Lambda) and record it as a
+ * `web_video` asset (deduped org-wide by video + section). Waits up to `WEB_VIDEO_WAIT_MS`; a download still
+ * running on the NAS then is an error. Long sections a durable step can wait for use `storeWebVideoJob`.
  */
-export async function storeWebVideo(
-  c: WebVideoCandidate,
-  opts: { buildId: string; startSec: number; endSec: number; index: number; /** `source`: the footage of a video project (`projects.source_video_asset_id`). */ role?: "source" },
-  ctx: { userId: string; organizationId: string; projectId: string },
-): Promise<ChosenAsset> {
+export async function storeWebVideo(c: WebVideoCandidate, opts: StoreOpts, ctx: StoreCtx): Promise<ChosenAsset> {
+  const r = await storeWebVideoJob(c, opts, ctx);
+  if ("pending" in r) throw new Error(`still downloading on the NAS after ${WEB_VIDEO_WAIT_MS / 1000} s (job ${r.pending})`);
+  return r.asset;
+}
+
+/**
+ * `storeWebVideo` that can be resumed: waits up to `wait.waitMs` and returns `{ pending: jobId }` while the NAS is
+ * still at it; call again with that `jobId` (from the next durable step) to keep waiting for the same job.
+ */
+export async function storeWebVideoJob(c: WebVideoCandidate, opts: StoreOpts, ctx: StoreCtx, wait: { jobId?: string | null; waitMs?: number } = {}): Promise<{ asset: ChosenAsset } | { pending: string }> {
   const { organizationId, projectId } = ctx;
   const providerId = `${c.site.toLowerCase()}:${c.id}@${opts.startSec}-${opts.endSec}`;
   const credit = `Video: ${c.uploader ? `${c.uploader} / ` : ""}${c.site}`;
@@ -115,7 +125,8 @@ export async function storeWebVideo(
   let height = existing?.height ?? c.height ?? null;
   let sizeBytes = existing?.sizeBytes ?? null;
   if (!existing) {
-    const res = await invokeWebVideo({ action: "web-video", input: { url: c.url }, output: { key }, trim: { startSec: opts.startSec, endSec: opts.endSec } });
+    const res = await downloadWebVideo({ action: "web-video", input: { url: c.url }, output: { key }, trim: { startSec: opts.startSec, endSec: opts.endSec } }, wait);
+    if ("pending" in res) return res;
     // The self-hosted API costs nothing per call; only Lambda seconds are billed.
     const costUsd = ((res.billedMs ?? 0) / 1000) * MEDIA_LAMBDA_USD_PER_SEC;
     if (res.via === "lambda") await recordUsageCost({ provider: "media_lambda", resource: "web-video", units: (res.billedMs ?? 0) / 1000, unitType: "seconds", costUsd, userId: ctx.userId, organizationId, projectId, meta: { url: c.url.slice(0, 200) } });
@@ -137,5 +148,5 @@ export async function storeWebVideo(
       })
       .returning({ id: schema.assets.id }),
   );
-  return { assetId: row.id, key, kind: "video", durationSec, credit, provider: WEB_VIDEO_PROVIDER, thumbnailUrl: c.thumbnailUrl };
+  return { asset: { assetId: row.id, key, kind: "video", durationSec, credit, provider: WEB_VIDEO_PROVIDER, thumbnailUrl: c.thumbnailUrl } };
 }
