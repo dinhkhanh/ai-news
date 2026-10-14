@@ -40,6 +40,17 @@ YouTube refuses downloads from AWS (and other datacenter) IPs, so the section do
 
 The API only accepts a bearer token, only serves search and trimmed (≤ 120 s) downloads of public pages on YouTube / TikTok / Facebook / Vimeo / Dailymotion, and only writes to `media/<org>/<project>/webvideo/*.mp4` (and `tmp/smoke/`), so a leaked token cannot reach the NAS's network or other R2 objects. It runs two jobs at a time (`MAX_CONCURRENT`). yt-dlp is pinned at build time: when YouTube changes and downloads start failing, rebuild and re-import the image. Rotate the token by editing `nas.env` + the app env and restarting the project.
 
+## Web-video API on the office Mac mini (replaces the NAS's container)
+
+A NAS CPU needs minutes per 120 s section (Facebook serves many reels as AV1 only, and every download is encoded to H.264); an M2 does it in seconds. The Mac runs the same `server.ts` natively under launchd, and the NAS keeps only its role as the HTTPS front door (DDNS name, certificate, port forward), so Vercel's `WEB_VIDEO_API_URL` and token stay as they are.
+
+1. **Mac:** give it a fixed address (UniFi → Client Devices → the Mac mini → Settings → **Fixed IP**, e.g. `192.168.8.85`). Power settings for an always-on Mac: `sudo pmset -a sleep 0 autorestart 1 womp 1` (never sleep, start after a power cut, wake on network).
+2. **FileVault:** with FileVault on, a Mac that restarts (power cut, macOS update) waits at the unlock screen and no daemon starts until someone logs in. Either turn FileVault off on this machine (System Settings → Privacy & Security → FileVault), or accept that someone must log in after an unplanned restart; for planned restarts use `sudo fdesetup authrestart`, which unlocks once.
+3. **Install:** from the repo, `bash packages/media-lambda/mac/install.sh`. The first run installs `node`, `yt-dlp`, `ffmpeg` and `deno` with Homebrew, copies the server to `~/Library/Application Support/ai-news-webvideo/`, creates `webvideo.env` there (mode 600) and stops. Fill in `API_TOKEN` (the **same** value as `WEB_VIDEO_API_TOKEN` in Vercel / `API_TOKEN` in the NAS's `nas.env`) and the four `R2_*` values (from `nas.env`), then run the script again: it asks for your Mac password once and installs two launch daemons, `com.ai-news.webvideo` (the API on port 8787, starts at boot without a login, restarts if it stops) and `com.ai-news.webvideo-ytdlp-update` (`brew upgrade yt-dlp deno` daily at 04:15). It ends with `/health`.
+4. **NAS → Mac:** DSM → Control Panel → Login Portal → Advanced → **Reverse Proxy** → edit the web-video rule: destination `http://192.168.8.85:8787` instead of `localhost:8787` (keep source `https`, the DDNS name, port 8443). Then stop the NAS's web-video container (Container Manager → Project → Stop) so only the Mac works.
+5. **Check:** `curl https://<ddns-host>:8443/health` → `{"ok":true,…,"jobs":{…}}`; from outside Vietnam, the UniFi Region Blocking must still let in the US, Singapore and Hong Kong (Vercel's regions).
+6. **Day to day:** `bash packages/media-lambda/mac/install.sh status` (daemon state + health); logs in `~/Library/Logs/ai-news-webvideo/`. After changing `packages/media-lambda/src`, run `install.sh` again to deploy the new bundle. `install.sh uninstall` removes the daemons (keeps the env file and logs). To go back to the NAS, point the reverse proxy at `localhost:8787` again and start its container.
+
 ## 3. Vercel
 
 1. Import the GitHub repo. **Root directory: `apps/web`**. Framework: Next.js. Node 22. Fluid compute on (default on Pro).
