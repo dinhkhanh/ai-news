@@ -110,6 +110,14 @@ describe("originality check", () => {
   it("does not count stills or media it cannot place", () => {
     expect(originality(doc)).toEqual([]);
   });
+
+  it("only notes a video project's source playing in full, and does not call it a repeat or a slow cadence", () => {
+    const source = { kind: "video" as const, key: "w1.mp4", clipDurationSec: 60, continuous: true };
+    const d = editorDocSchema.parse({ ...doc, scenes: doc.scenes.map((s) => ({ ...s, visual: source, shots: [] })) });
+    expect(originality(d).map((i) => [i.id, i.severity])).toEqual([["originality:source", "info"]]);
+    const all = runChecks(BUILTIN_CHECKS, input({ doc: d, options: [...options, ...clips] }));
+    expect(all.filter((i) => i.checkId === "checks.repeated-picture" || i.checkId === "checks.shot-hold")).toEqual([]);
+  });
 });
 
 describe("watermark check", () => {

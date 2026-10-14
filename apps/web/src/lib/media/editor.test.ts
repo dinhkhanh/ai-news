@@ -49,6 +49,54 @@ describe("buildFromDoc", () => {
   });
 });
 
+describe("continuous source video (video projects)", () => {
+  const source = (): EditorVisual => ({ kind: "video", key: "media/o/p/web-video/source.mp4", clipDurationSec: 6, trimStartSec: 0, credit: "Video: someone / TikTok", assetId: null, thumbnailUrl: null, continuous: true });
+  const sourceDoc = (minDurationSec: number | null): EditorDoc => ({ ...doc, minDurationSec, scenes: doc.scenes.map((s) => ({ ...s, visual: source(), shots: [] })) });
+
+  it("plays the video on from scene to scene by the timeline clock, wrapping at its end", () => {
+    const { timeline } = buildFromDoc(sourceDoc(null), null);
+    const trims = timeline.scenes.map((s) => (s.visual.kind === "video" ? s.visual.trimStartSec : null));
+    // Every scene starts where the timeline is, modulo the 6 s file.
+    timeline.scenes.forEach((s, i) => expect(trims[i]).toBeCloseTo((s.from % 180) / 30, 5));
+    expect(trims[0]).toBe(0);
+    expect(timeline.scenes.every((s) => s.shots.length === 1 && s.visual.kind === "video" && s.visual.continuous)).toBe(true);
+  });
+
+  it("keeps the trims right when a scene's length changes in the editor", () => {
+    const d = sourceDoc(null);
+    const held = { ...d, scenes: d.scenes.map((s, i) => (i === 0 ? { ...s, holdMs: 1500 } : s)) };
+    const { timeline } = buildFromDoc(held, null);
+    const s2 = timeline.scenes[1];
+    expect(s2.visual.kind === "video" && s2.visual.trimStartSec).toBeCloseTo((s2.from % 180) / 30, 5);
+  });
+
+  it("holds the closing scene until the video has played to its end", () => {
+    const short = buildFromDoc(sourceDoc(null), null);
+    const full = buildFromDoc(sourceDoc(20), null);
+    expect(full.durationSec).toBe(20);
+    expect(full.timeline.durationFrames).toBe(600);
+    // Only the last scene grows; the voice-overs stay where they were.
+    expect(full.timings.slice(0, -1)).toEqual(short.timings.slice(0, -1));
+    expect(full.timings[2].atSec).toBe(short.timings[2].atSec);
+    // A video shorter than the voice-over changes nothing.
+    expect(buildFromDoc(sourceDoc(2), null).durationSec).toBe(short.durationSec);
+  });
+
+  it("needs no extra shots and re-mixes when the minimum length changes", () => {
+    expect(sourceDoc(null).scenes.map(shotsMissing)).toEqual([0, 0, 0]);
+    expect(audioSignature(sourceDoc(20))).not.toBe(audioSignature(sourceDoc(null)));
+    // Documents without it keep the signature their mix was made under.
+    expect(audioSignature(sourceDoc(null))).toBe(audioSignature({ ...sourceDoc(null), minDurationSec: null }));
+    expect(audioSignature(doc)).toBe(JSON.stringify({ scenes: doc.scenes.map((s) => [s.voice?.key ?? null, s.voice?.durationMs ?? null, s.holdMs]), music: [doc.music!.key, doc.music!.gainDb] }));
+  });
+
+  it("survives the timeline round trip", () => {
+    const { timeline } = buildFromDoc(sourceDoc(null), null);
+    const back = docFromTimeline(timelineSchema.parse(timeline), {});
+    expect(back.scenes.every((s) => s.visual.kind === "video" && s.visual.continuous === true)).toBe(true);
+  });
+});
+
 describe("shots", () => {
   const img = (n: number): EditorVisual => ({ kind: "image", key: `media/o/p/aroll/b1-${n}.jpg`, kenBurns: true, focus: null, sketch: null, credit: "Ảnh: VnExpress", assetId: null, thumbnailUrl: null });
   it("needs one shot per 5 s", () => {

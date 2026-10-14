@@ -28,7 +28,7 @@ export type GenerateScriptResult = {
  * tell, possibly with directions for the script), and its footage is that video; a `text` project is the user's
  * own writing. Kept in the user message so the cached system prefix stays the template + text.
  */
-function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language, brief?: string | null) {
+function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language, brief?: string | null, videoSec?: number | null) {
   if (kind === "topic") {
     const b = brief?.trim() ? (lang === "vi" ? ` Yêu cầu của biên tập viên: <brief>${brief.trim()}</brief>` : ` The editor's brief: <brief>${brief.trim()}</brief>`) : "";
     return lang === "vi"
@@ -36,9 +36,11 @@ function sourceNote(kind: GenerateScriptInput["article"]["kind"], lang: Language
       : ` Note: the text above was compiled from web sources at the editor's request (there is no single source article); Source lists the outlets used. Use only facts the text states; follow any directions the brief gives on tone, angle or opening, never read them out as voice-over.${b}`;
   }
   if (kind === "video") {
+    const sec = videoSec && videoSec > 0 ? Math.round(videoSec) : null;
+    const len = sec ? (lang === "vi" ? ` Video dài ${sec} giây: lời bình nên dài khoảng chừng đó để video chạy hết một lượt (ngắn hơn thì video vẫn chạy tiếp đến hết sau lời bình, dài hơn thì video phát lại từ đầu).` : ` The video is ${sec} seconds long: aim for about that much voice-over so it plays through once (if shorter, the video plays on to its end after the voice-over; if longer, it starts over).`) : "";
     return lang === "vi"
-      ? " Lưu ý: nguồn là một video (trang ghi ở Source), không phải bài báo. Văn bản ở trên do biên tập viên viết về video đó: đó là toàn bộ dữ kiện được dùng, và nếu có chỉ dẫn cách viết kịch bản thì làm theo chỉ dẫn, đừng đọc chỉ dẫn thành lời bình. Hình ảnh là các đoạn cắt từ chính video này, xen với hình khác; lời bình bình luận về video (bối cảnh, vì sao đáng chú ý, điều gì tiếp theo) chứ không thuật lại diễn biến trên màn hình; không bịa chi tiết ngoài văn bản."
-      : " Note: the source is a video (the page under Source), not a news article. The text above was written by the editor about that video: it is all the facts there are, and any directions it gives for the script are to be followed, never read out as voice-over. The pictures are clips of this video interspersed with other pictures; the voice-over comments on it (context, why it matters, what comes next) rather than narrating what happens on screen; invent nothing beyond the text.";
+      ? ` Lưu ý: nguồn là một video (trang ghi ở Source), không phải bài báo. Văn bản ở trên do biên tập viên viết về video đó: đó là toàn bộ dữ kiện được dùng, và nếu có chỉ dẫn cách viết kịch bản thì làm theo chỉ dẫn, đừng đọc chỉ dẫn thành lời bình. Hình ảnh là chính video này, phát trọn vẹn từ đầu đến cuối không bị cắt, lời bình và phụ đề chạy trên đó; lời bình bình luận về video (bối cảnh, vì sao đáng chú ý, điều gì tiếp theo) chứ không thuật lại diễn biến trên màn hình; không bịa chi tiết ngoài văn bản. Mỗi cảnh đổi một tiêu đề trên màn hình, nên dùng ít cảnh (mở đầu, một đến ba cảnh thân bài, kết) với các cảnh thân bài dài hơn thay vì nhiều cảnh ngắn.${len}`
+      : ` Note: the source is a video (the page under Source), not a news article. The text above was written by the editor about that video: it is all the facts there are, and any directions it gives for the script are to be followed, never read out as voice-over. The picture is this video itself, played in full from start to end without cuts, with the voice-over and captions over it; the voice-over comments on it (context, why it matters, what comes next) rather than narrating what happens on screen; invent nothing beyond the text. Every scene puts up a new on-screen headline, so use few scenes (a hook, one to three body scenes, a close) with longer body scenes rather than many short ones.${len}`;
   }
   if (kind === "text") {
     return lang === "vi"
@@ -62,7 +64,7 @@ const ORIGINALITY_NOTE = {
 function userMessage(input: GenerateScriptInput) {
   const lang = input.language;
   const tone = toneLabel(input.tone, lang);
-  const note = sourceNote(input.article.kind, lang, input.article.brief) + ORIGINALITY_NOTE[lang];
+  const note = sourceNote(input.article.kind, lang, input.article.brief, input.article.videoSec) + ORIGINALITY_NOTE[lang];
   return lang === "vi"
     ? `Viết kịch bản từ ${input.article.kind === "video" ? "nội dung" : "bài báo"} ở trên. Thời lượng mục tiêu: ${input.durationSec} giây. Giọng điệu: ${tone}. Ngôn ngữ đầu ra: tiếng Việt.${note}`
     : `Write the script from the ${input.article.kind === "video" ? "content" : "article"} above. Target length: ${input.durationSec} seconds. Tone: ${tone}. Output language: English.${note}`;

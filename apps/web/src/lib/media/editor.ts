@@ -39,6 +39,12 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     credit: z.string().nullable().default(null),
     assetId: z.string().nullable().default(null),
     thumbnailUrl: z.string().nullable().default(null),
+    /**
+     * A video project's source playing on unbroken from scene to scene: `clipDurationSec` is the whole file and the
+     * shot shows the part of the video at its place on the timeline (`continuousTrimSec`), so `trimStartSec` is not
+     * used and no ≤ 5 s cadence applies.
+     */
+    continuous: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal("image"),
@@ -150,6 +156,8 @@ export const editorDocSchema = z.object({
   coverAtSec: z.number().nonnegative().nullable().default(null),
   /** Motion comic drawn as a cartoon (composition 0.21.0): its panels; null = a news video. */
   cartoon: cartoonSchema.nullable().default(null),
+  /** The video lasts at least this long: a video project's source plays to its end, the closing scene holding on after its voice-over. */
+  minDurationSec: z.number().positive().nullable().default(null),
 });
 export type EditorDoc = z.infer<typeof editorDocSchema>;
 
@@ -207,9 +215,15 @@ export function sceneVoiceMs(scene: Pick<EditorScene, "voice" | "durationSec" | 
   return (scene.voice?.durationMs ?? Math.round(scene.durationSec * 1000)) + scene.holdMs;
 }
 
-/** How many shots this scene still lacks for a picture change every ≤ 5 s (0 = fine). A motion graphic moves by itself: no cadence to keep. */
+/** A video project's source playing on through the scene (`continuous`). */
+export const isContinuousVisual = (v: EditorVisual) => v.kind === "video" && v.continuous === true;
+
+/**
+ * How many shots this scene still lacks for a picture change every ≤ 5 s (0 = fine). A motion graphic moves by itself
+ * and a video project's source plays on by design: no cadence to keep.
+ */
 export function shotsMissing(scene: EditorScene) {
-  if (sceneShots(scene).some(isGraphicVisual)) return 0;
+  if (sceneShots(scene).some((v) => isGraphicVisual(v) || isContinuousVisual(v))) return 0;
   return Math.max(0, shotsNeeded(sceneVoiceMs(scene)) - sceneShots(scene).length);
 }
 
@@ -228,7 +242,7 @@ export function setCaptionText(chunk: CaptionChunk, text: string): CaptionChunk 
 }
 
 function toVisualInput(v: EditorVisual): SceneVisualInput {
-  if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit };
+  if (v.kind === "video") return { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit, continuous: v.continuous };
   if (v.kind === "image") return { kind: "image", key: v.key, kenBurns: v.kenBurns, focus: v.focus, sketch: v.sketch, credit: v.credit };
   if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images, backdrop: v.backdrop, credit: v.backdrop?.credit ?? null };
   if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images, backdrop: v.backdrop, credit: v.backdrop?.credit ?? null };
@@ -263,6 +277,7 @@ export function buildFromDoc(doc: EditorDoc, audio: { mixKey: string; voiceKey: 
     audio: { mixKey: audio?.mixKey ?? null, voiceKey: audio?.voiceKey ?? null },
     coverAtSec: doc.coverAtSec,
     cartoon: doc.cartoon,
+    minDurationSec: doc.minDurationSec,
     leadMs: LEAD_MS,
     gapMs: GAP_MS,
     tailMs: TAIL_MS,
@@ -275,6 +290,8 @@ export function audioSignature(doc: EditorDoc) {
   return JSON.stringify({
     scenes: doc.scenes.map((s) => [s.voice?.key ?? null, s.voice?.durationMs ?? Math.round(s.durationSec * 1000), s.holdMs]),
     music: doc.music ? [doc.music.key, doc.music.gainDb] : null,
+    // Only when set, so documents without it keep the signature their mix was made under.
+    ...(doc.minDurationSec ? { minDurationSec: doc.minDurationSec } : {}),
   });
 }
 
@@ -346,7 +363,7 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
     const voice = key ? { key, durationMs, words: storedWords ?? words } : null;
     const st = b.stock?.[sc.id]?.selected ?? null;
     const fromTimeline = (v: Timeline["scenes"][number]["visual"], credit: string | null): EditorVisual => {
-      if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null };
+      if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null, ...(v.continuous ? { continuous: true } : {}) };
       if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, focus: v.focus ?? null, sketch: v.sketch ?? null, credit, assetId: null, thumbnailUrl: null };
       const backdrop = (v.kind === "motion" || v.kind === "hyperframes") && v.backdrop ? { key: v.backdrop.src, clipDurationSec: v.backdrop.clipDurationSec, trimStartSec: v.backdrop.trimStartSec, credit, assetId: null, thumbnailUrl: null } : null;
       if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images ?? [], backdrop, instruction: null };

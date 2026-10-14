@@ -142,20 +142,48 @@ const SceneVisual: React.FC<{ visual: Visual; durationFrames: number; brand: Bra
   return <ClipVisual visual={visual} durationFrames={durationFrames} brand={brand} />;
 };
 
-/** A clip: cover-fitted when portrait or square; a landscape clip plays full width in the `LandscapeFrame` (no Ken Burns on footage). */
+/**
+ * A clip: cover-fitted when portrait or square; a landscape clip plays full width in the `LandscapeFrame` (no Ken Burns on footage).
+ * A `continuous` clip is a whole file played from `trimStartSec` to its end and then over again from the start.
+ */
 const ClipVisual: React.FC<{ visual: Extract<Visual, { kind: "video" }>; durationFrames: number; brand: Brand }> = ({ visual, durationFrames, brand }) => {
   const { fps } = useVideoConfig();
   const size = useMediaSize(visual.src, "video");
   const clipFrames = Math.max(1, Math.round(visual.clipDurationSec * fps));
-  const clip = (style: React.CSSProperties) => <OffthreadVideo src={visual.src} muted={visual.muted} trimBefore={Math.round(visual.trimStartSec * fps)} style={style} delayRenderTimeoutInMilliseconds={90_000} />;
-  const body =
-    size && isLandscape(size.width, size.height) ? (
+  const startFrame = Math.round(visual.trimStartSec * fps);
+  const body = (trimBefore: number) => {
+    const clip = (style: React.CSSProperties) => <OffthreadVideo src={visual.src} muted={visual.muted} trimBefore={trimBefore} style={style} delayRenderTimeoutInMilliseconds={90_000} />;
+    return size && isLandscape(size.width, size.height) ? (
       <LandscapeFrame size={size} scale={1} brand={brand} render={(layer) => clip(layer === "backdrop" ? { width: "100%", height: "100%", objectFit: "cover" } : { display: "block", width: "100%", height: "100%", objectFit: "fill" })} />
     ) : (
       <AbsoluteFill style={{ backgroundColor: brand.colours.background }}>{clip({ width: "100%", height: "100%", objectFit: visual.fit })}</AbsoluteFill>
     );
+  };
+  if (visual.continuous) {
+    const start = startFrame % clipFrames;
+    const toEnd = clipFrames - start;
+    if (toEnd >= durationFrames) return body(start);
+    return (
+      <>
+        <Sequence durationInFrames={toEnd} name="to the end">
+          {body(start)}
+        </Sequence>
+        <Sequence from={toEnd} name="from the start">
+          <Loop durationInFrames={clipFrames}>{body(0)}</Loop>
+        </Sequence>
+      </>
+    );
+  }
   // The clip loops when the shot is longer than it; the loop wraps the whole frame so backdrop and front stay in step.
-  return clipFrames < durationFrames ? <Loop durationInFrames={clipFrames}>{body}</Loop> : body;
+  return clipFrames < durationFrames ? <Loop durationInFrames={clipFrames}>{body(startFrame)}</Loop> : body(startFrame);
+};
+
+/** The clip a continuous shot at the start / end of the scene plays (`continuous`), so neighbouring scenes can join without a fade. */
+const continuousSrc = (scene: TimelineScene | undefined, edge: "start" | "end"): string | null => {
+  if (!scene) return null;
+  const shots = sceneShots(scene);
+  const v = shots[edge === "start" ? 0 : shots.length - 1].visual;
+  return v.kind === "video" && v.continuous ? v.src : null;
 };
 
 /** Hard cut into each shot with a quick punch-in so the change registers. */
@@ -177,7 +205,7 @@ const SceneShots: React.FC<{ scene: TimelineScene; brand: Brand; language: Timel
           <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} context={{ kind: scene.kind, language }} />
         ) : (
           <>
-            <ShotPunch first={i === 0}>
+            <ShotPunch first={i === 0 || (shot.visual.kind === "video" && shot.visual.continuous === true)}>
               <SceneVisual visual={shot.visual} durationFrames={shot.durationFrames} brand={brand} variant={i} context={{ kind: scene.kind, language }} />
             </ShotPunch>
             <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.55) 100%)" }} />
@@ -234,7 +262,7 @@ const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Bra
 };
 
 /** Where the picture on screen comes from ("Ảnh: VnExpress", "Video: … / Pexels"), bottom-left, for the length of the shot. */
-const CreditLine: React.FC<{ text: string; brand: Brand }> = ({ text, brand }) => {
+const CreditLine: React.FC<{ text: string; brand: Brand; fadeIn?: boolean }> = ({ text, brand, fadeIn = true }) => {
   const frame = useCurrentFrame();
   return (
     <div
@@ -251,7 +279,7 @@ const CreditLine: React.FC<{ text: string; brand: Brand }> = ({ text, brand }) =
         fontSize: 30,
         fontWeight: 500,
         color: brand.colours.text,
-        opacity: 0.85 * interpolate(frame, [0, FADE_FRAMES], [0, 1], { extrapolateRight: "clamp" }),
+        opacity: 0.85 * (fadeIn ? interpolate(frame, [0, FADE_FRAMES], [0, 1], { extrapolateRight: "clamp" }) : 1),
         background: "rgba(0,0,0,.45)",
         padding: "8px 16px",
         borderRadius: 8,
@@ -262,15 +290,15 @@ const CreditLine: React.FC<{ text: string; brand: Brand }> = ({ text, brand }) =
   );
 };
 
-/** Each shot's own credit while that shot is on screen; the article itself is credited in the outro. */
-const ShotCredits: React.FC<{ scene: TimelineScene; brand: Brand }> = ({ scene, brand }) => {
+/** Each shot's own credit while that shot is on screen; the article itself is credited in the outro. `joined`: the scene carries on the previous scene's continuous clip, whose credit is already showing. */
+const ShotCredits: React.FC<{ scene: TimelineScene; brand: Brand; joined: boolean }> = ({ scene, brand, joined }) => {
   if (brand.showSource === false) return null;
   return (
     <>
       {sceneShots(scene).map((shot, i) =>
         shot.credit ? (
           <Sequence key={i} from={shot.from} durationInFrames={shot.durationFrames} name={`${scene.id} credit ${i + 1}`}>
-            <CreditLine text={shot.credit} brand={brand} />
+            <CreditLine text={shot.credit} brand={brand} fadeIn={!(i === 0 && joined)} />
           </Sequence>
         ) : null,
       )}
@@ -421,10 +449,16 @@ const Outro: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
 
 /* ------------------------------------------------------------ composition */
 
-const SceneFade: React.FC<{ durationFrames: number; children: React.ReactNode }> = ({ durationFrames, children }) => {
+/** Fades the scene's pictures in and out; an edge where the same continuous clip carries on from / into the next scene does not fade. */
+const SceneFade: React.FC<{ durationFrames: number; fadeIn: boolean; fadeOut: boolean; children: React.ReactNode }> = ({ durationFrames, fadeIn, fadeOut, children }) => {
   const frame = useCurrentFrame();
-  const opacity = interpolate(frame, [0, FADE_FRAMES, durationFrames - FADE_FRAMES, durationFrames], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const opacity = interpolate(frame, [0, FADE_FRAMES, durationFrames - FADE_FRAMES, durationFrames], [fadeIn ? 0 : 1, 1, 1, fadeOut ? 0 : 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   return <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
+};
+
+const joins = (a: TimelineScene | undefined, b: TimelineScene | undefined) => {
+  const src = continuousSrc(a, "end");
+  return src !== null && src === continuousSrc(b, "start");
 };
 
 /**
@@ -465,14 +499,14 @@ export const News: React.FC<Timeline> = (timeline) => {
   }
   return (
     <AbsoluteFill style={{ backgroundColor: brand.colours.background, color: brand.colours.text }}>
-      {scenes.map((scene) => (
+      {scenes.map((scene, i) => (
         <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationFrames} name={`${scene.id} ${scene.kind}`}>
-          <SceneFade durationFrames={scene.durationFrames}>
+          <SceneFade durationFrames={scene.durationFrames} fadeIn={!joins(scenes[i - 1], scene)} fadeOut={!joins(scene, scenes[i + 1])}>
             <SceneShots scene={scene} brand={brand} language={timeline.language} />
           </SceneFade>
           {scene.overlay !== false && brand.overlaySrc && brand.overlayLayer !== "top" ? <BrandOverlay src={brand.overlaySrc} /> : null}
           {allGraphic(scene) ? null : <Headline text={scene.headline} kind={scene.kind} brand={brand} />}
-          <ShotCredits scene={scene} brand={brand} />
+          <ShotCredits scene={scene} brand={brand} joined={joins(scenes[i - 1], scene)} />
           {scene.kind === "cta" && scene.id === last?.id ? <Outro timeline={timeline} /> : null}
         </Sequence>
       ))}

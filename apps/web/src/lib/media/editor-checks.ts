@@ -7,7 +7,7 @@
  */
 import type { TextLayoutInput } from "@ai-news/video/schema";
 import { PLATFORM_SPEC, type Platform } from "@/lib/publish/platforms";
-import { sceneShots, sceneVoiceMs, setShot, shotsMissing, visualKey, type EditorDoc, type EditorScene, type EditorVisual } from "./editor";
+import { isContinuousVisual, sceneShots, sceneVoiceMs, setShot, shotsMissing, visualKey, type EditorDoc, type EditorScene, type EditorVisual } from "./editor";
 import { frameStill, overlayZones, FRAMING_ISSUE_LABEL, type FrameFaces } from "./framing";
 import { docShots, MAX_THIRD_PARTY_RUN_SEC, MAX_THIRD_PARTY_VIDEO_SHARE, originalityReport } from "./originality";
 import { watermarkLabel, type WatermarkVerdict } from "./watermark";
@@ -164,7 +164,8 @@ const repeated: Check = {
     for (const s of doc.scenes)
       sceneShots(s).forEach((v, i) => {
         const k = visualKey(v);
-        if (!k) return;
+        // A video project's source plays on from scene to scene: the same file in every scene is the point.
+        if (!k || isContinuousVisual(v)) return;
         const at = used[k] ?? [];
         // Flag every use after the first.
         const here = shotName(s.id, i);
@@ -259,15 +260,27 @@ const audio: Check = {
 /**
  * Meta's original content rules (`originality.ts`): third-party video footage at most half of the running time and
  * never more than 10 s in a row. A shot's source comes from its option's provider; a key with no option is not counted.
+ * A video project's source playing on through the video (`continuous`) is the project's choice: one note, not counted.
  */
 const originality: Check = {
   id: "checks.originality",
   label: "Nội dung nguyên bản (Meta)",
   run: ({ doc, options }) => {
     const providers = new Map(options.map((o) => [o.key, o.provider]));
-    const shots = docShots(doc, (k) => providers.get(k));
+    const continuous = new Set(doc.scenes.flatMap((s) => sceneShots(s).flatMap((v, i) => (isContinuousVisual(v) ? [shotName(s.id, i)] : []))));
+    const shots = docShots(doc, (k) => providers.get(k)).map((sh) => (continuous.has(shotName(sh.sceneId, sh.shot)) ? { ...sh, source: null } : sh));
     const r = originalityReport(shots);
     const out: Issue[] = [];
+    if (continuous.size)
+      out.push({
+        id: "originality:source",
+        checkId: "checks.originality",
+        severity: "info",
+        sceneId: null,
+        title: "Video gốc phát trọn vẹn suốt video",
+        detail: "Facebook / Instagram có thể hạ phân phối video chủ yếu là cảnh quay lấy lại: lời bình nên thêm bối cảnh, vì sao đáng chú ý và điều gì tiếp theo, thay vì kể lại hình.",
+        fix: null,
+      });
     if (r.share > MAX_THIRD_PARTY_VIDEO_SHARE) {
       const first = shots.find((s) => s.source === "third_party_video");
       out.push({

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { brandSchema } from "@ai-news/video/schema";
 import { editorDocSchema } from "./editor";
-import { docShots, MAX_THIRD_PARTY_RUN_SEC, MAX_THIRD_PARTY_VIDEO_SHARE, originalityReport, providerSource, spreadThirdParty, thirdPartyVideoBudget, thirdPartyVideoMask, type TimedShot } from "./originality";
+import { docShots, MAX_THIRD_PARTY_RUN_SEC, MAX_THIRD_PARTY_VIDEO_SHARE, originalityReport, providerSource, spreadThirdParty, thirdPartyVideoBudget, type TimedShot } from "./originality";
 
 describe("rules", () => {
   it("allow at most half of the time and two 5 s shots in a row", () => {
@@ -73,29 +73,6 @@ describe("docShots", () => {
       { sceneId: "s2", shot: 0, sec: 4, source: "stock" },
       { sceneId: "s2", shot: 1, sec: 4, source: "own" },
     ]);
-  });
-});
-
-describe("thirdPartyVideoMask", () => {
-  const five = (n: number) => Array.from({ length: n }, () => ({ sec: 5, eligible: true }));
-
-  it("opens on the footage and keeps it at about half of the shots", () => {
-    const mask = thirdPartyVideoMask(five(8));
-    expect(mask).toEqual([true, false, false, true, false, true, false, true]);
-    expect(mask.filter(Boolean).length).toBe(4);
-  });
-
-  it("never lets the footage run past the limit", () => {
-    expect(thirdPartyVideoMask(five(6), { maxShare: 1, maxRunSec: 10 })).toEqual([true, true, false, true, true, false]);
-  });
-
-  it("skips shots that show something else and lets the run start over after them", () => {
-    const shots = [{ sec: 5, eligible: true }, { sec: 5, eligible: true }, { sec: 8, eligible: false }, { sec: 5, eligible: true }, { sec: 5, eligible: true }];
-    expect(thirdPartyVideoMask(shots, { maxShare: 1, maxRunSec: 10 })).toEqual([true, true, false, true, true]);
-  });
-
-  it("allows everything when the rules allow everything (guard off)", () => {
-    expect(thirdPartyVideoMask(five(5), { maxShare: 1, maxRunSec: Number.POSITIVE_INFINITY })).toEqual([true, true, true, true, true]);
   });
 });
 

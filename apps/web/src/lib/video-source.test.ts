@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sourceVideoShots, uploadDate, videoLinkKind, videoPageUrl } from "./video-source";
+import { uploadDate, videoLinkKind, videoPageUrl } from "./video-source";
 
 describe("videoPageUrl", () => {
   it("keeps the video id and drops tracking queries", () => {
@@ -39,22 +39,5 @@ describe("uploadDate", () => {
     expect(uploadDate("20260915")?.toISOString()).toBe("2026-09-15T00:00:00.000Z");
     expect(uploadDate(null)).toBeNull();
     expect(uploadDate("2026-09-15")).toBeNull();
-  });
-});
-
-describe("sourceVideoShots", () => {
-  it("plays the footage on continuously across shots and scenes", () => {
-    const out = sourceVideoShots([{ id: "s1", sec: 8, shots: 2 }, { id: "s2", sec: 3, shots: 1 }], 60);
-    expect(out.s1).toEqual([{ trimStartSec: 0, clipDurationSec: 4 }, { trimStartSec: 4, clipDurationSec: 4 }]);
-    expect(out.s2).toEqual([{ trimStartSec: 8, clipDurationSec: 3 }]);
-  });
-  it("starts over when the voice-over outlasts the video", () => {
-    const out = sourceVideoShots([{ id: "s1", sec: 8, shots: 2 }, { id: "s2", sec: 5, shots: 1 }], 10);
-    expect(out.s2).toEqual([{ trimStartSec: 0, clipDurationSec: 5 }]);
-  });
-  it("loops a video shorter than one shot", () => {
-    const out = sourceVideoShots([{ id: "s1", sec: 4, shots: 1 }, { id: "s2", sec: 4, shots: 1 }], 3);
-    expect(out.s1).toEqual([{ trimStartSec: 0, clipDurationSec: 3 }]);
-    expect(out.s2).toEqual([{ trimStartSec: 0, clipDurationSec: 3 }]);
   });
 });

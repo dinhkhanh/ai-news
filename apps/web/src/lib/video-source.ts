@@ -80,28 +80,3 @@ export function uploadDate(value: string | null | undefined): Date | null {
   const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   return Number.isNaN(d.getTime()) ? null : d;
 }
-
-export type SourceShot = { trimStartSec: number; clipDurationSec: number };
-
-/**
- * The source video cut into the build's shots so it plays on continuously: every scene's time is split equally
- * between its shots (as `layoutShots` does), and each shot starts where the previous one ended. When the voice-over
- * outlasts the footage it starts over from the beginning; a shot longer than the whole video loops it.
- */
-export function sourceVideoShots(scenes: Array<{ id: string; sec: number; shots: number }>, videoSec: number): Record<string, SourceShot[]> {
-  const round = (n: number) => Math.round(n * 100) / 100;
-  const out: Record<string, SourceShot[]> = {};
-  let t = 0;
-  for (const sc of scenes) {
-    const n = Math.max(1, sc.shots);
-    const d = Math.max(0, sc.sec) / n;
-    out[sc.id] = [];
-    for (let i = 0; i < n; i++) {
-      // A little slack so rounding does not restart the video a few frames before its end.
-      if (t + d > videoSec + 0.05 || t >= videoSec) t = 0;
-      out[sc.id].push({ trimStartSec: round(t), clipDurationSec: round(Math.max(0.5, Math.min(d, videoSec - t))) });
-      t += d;
-    }
-  }
-  return out;
-}

@@ -31,6 +31,8 @@ export type ArticleInput = {
   kind?: "article" | "video" | "text" | "topic";
   /** `topic` projects: the user's brief (keywords, topic, directions); its directions apply to the script (`sourceNote`). */
   brief?: string | null;
+  /** `video` projects: length of the source video in seconds, which plays in full under the voice-over (`sourceNote`). */
+  videoSec?: number | null;
 };
 
 export function articleBlockText(a: ArticleInput) {

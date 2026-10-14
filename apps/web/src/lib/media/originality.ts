@@ -118,29 +118,6 @@ export function originalityReport(shots: TimedShot[], rules: OriginalityRules = 
   };
 }
 
-/**
- * Build: which shots may show third-party footage, for a video that would otherwise be all of it (a `video`
- * project's own source video). Walks the shots in order and lets footage in while the stretch stays within
- * `maxRunSec` and the share so far within `maxShare`; the first eligible shot always gets it (the hook shows
- * what the video is about). `eligible` false = a shot that shows something else anyway (a motion graphic).
- */
-export function thirdPartyVideoMask(shots: Array<{ sec: number; eligible: boolean }>, rules: OriginalityRules = ORIGINALITY_RULES): boolean[] {
-  let used = 0;
-  let elapsed = 0;
-  let run = 0;
-  let first = true;
-  return shots.map(({ sec, eligible }) => {
-    const ok = eligible && (run === 0 || run + sec <= rules.maxRunSec + 1e-6) && (first || used + sec <= rules.maxShare * (elapsed + sec) + 1e-6);
-    elapsed += sec;
-    if (ok) {
-      used += sec;
-      run += sec;
-      first = false;
-    } else run = 0;
-    return ok;
-  });
-}
-
 /** Build: how many shots of web video tier 2 may still place, after `alreadyUsed` shots of third-party footage. */
 export function thirdPartyVideoBudget(totalShots: number, alreadyUsed: number, rules: OriginalityRules = ORIGINALITY_RULES): number {
   return Math.max(0, Math.floor(rules.maxShare * totalShots + 1e-9) - alreadyUsed);

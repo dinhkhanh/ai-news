@@ -301,6 +301,12 @@ export const visualSchema = z.discriminatedUnion("kind", [
     clipDurationSec: z.number().positive(),
     fit: z.enum(["cover", "contain"]).default("cover"),
     muted: z.boolean().default(true),
+    /**
+     * A video project's source playing on from scene to scene (0.22.0): `clipDurationSec` is the whole file, the
+     * shot plays from `trimStartSec` to its end and then starts over from 0, with no punch-in, and scenes that hand
+     * the same continuous clip over to each other do not fade. Absent = a section looped from `trimStartSec`.
+     */
+    continuous: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal("image"),

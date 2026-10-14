@@ -50,7 +50,9 @@ export async function scriptPipeline(data: ScriptRequest, steps: PipelineSteps) 
       if (!article) throw new NonRetriableError("No article on this project yet");
       if (!article.confirmedAt) throw new NonRetriableError("Confirm the article text before generating a script");
       await tx.update(schema.projects).set({ busyStep: "script", lastError: null, durationSec, tone }).where(eq(schema.projects.id, projectId));
-      return { project, article };
+      // A video project's source plays in full under the voice-over: the script is told how long it is.
+      const sourceVideo = project.sourceKind === "video" && project.sourceVideoAssetId ? await tx.query.assets.findFirst({ where: eq(schema.assets.id, project.sourceVideoAssetId), columns: { durationSec: true } }) : undefined;
+      return { project, article, videoSec: sourceVideo?.durationSec ? Number(sourceVideo.durationSec) : null };
     });
     if (!row) return null;
     await reportProgress(pctx, { label: "Đọc bài đã xác nhận", pct: 3 });
@@ -62,6 +64,7 @@ export async function scriptPipeline(data: ScriptRequest, steps: PipelineSteps) 
       publishedAt: row.article.publishedAt ? row.article.publishedAt.toISOString() : null,
       kind: row.project.sourceKind === "comic" ? "text" : row.project.sourceKind,
       brief: row.project.brief,
+      videoSec: row.videoSec,
     };
     return { article, language: row.project.language, articleId: row.article.id };
   });

@@ -13,7 +13,12 @@ import { markCompounds } from "./compounds";
 
 export type SceneVoiceInput = { key: string; durationMs: number; words: TimedWord[] };
 export type SceneVisualInput =
-  | { kind: "video"; key: string; clipDurationSec: number; trimStartSec?: number; credit: string | null }
+  /**
+   * `continuous`: a video project's source, pinned to the timeline clock (composition 0.22.0): `clipDurationSec` is
+   * the whole file and the builder sets the trim to the shot's place on the timeline, wrapping at the file's end, so
+   * the video plays on unbroken from scene to scene whatever the scenes' lengths; `trimStartSec` is ignored.
+   */
+  | { kind: "video"; key: string; clipDurationSec: number; trimStartSec?: number; credit: string | null; continuous?: boolean }
   /** `sketch`: the photo turns into a drawing of itself during the shot (composition 0.16.0). */
   | { kind: "image"; key: string; kenBurns?: boolean; focus?: Focus | null; sketch?: Sketch | null; credit: string | null }
   /** Motion graphics (`@ai-news/video/motion`): `images` and the backdrop clip are R2 keys; `credit` = the backdrop's. */
@@ -59,6 +64,8 @@ export type BuildInput = {
   coverAtSec?: number | null;
   /** Motion comic drawn as a cartoon (composition 0.21.0); null = a news video. */
   cartoon?: Cartoon | null;
+  /** The video lasts at least this long (a video project's source plays to its end): the closing scene holds on after its voice-over. */
+  minDurationSec?: number | null;
   /** Silence between scenes and after the last one. */
   gapMs?: number;
   tailMs?: number;
@@ -74,7 +81,7 @@ export const GAP_MS = 200;
 export const TAIL_MS = 700;
 
 function toVisual(v: NonNullable<SceneVisualInput>): Visual {
-  if (v.kind === "video") return { kind: "video", src: v.key, trimStartSec: Math.max(0, v.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, v.clipDurationSec), fit: "cover", muted: true };
+  if (v.kind === "video") return { kind: "video", src: v.key, trimStartSec: Math.max(0, v.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, v.clipDurationSec), fit: "cover", muted: true, ...(v.continuous ? { continuous: true } : {}) };
   const backdrop = (b: BackdropInput | null | undefined) => (b ? { src: b.key, trimStartSec: Math.max(0, b.trimStartSec ?? 0), clipDurationSec: Math.max(0.5, b.clipDurationSec) } : null);
   if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images, backdrop: backdrop(v.backdrop) };
   if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images, backdrop: backdrop(v.backdrop) };
@@ -94,16 +101,22 @@ export function layoutShots(inputs: SceneVisualInput[], durationFrames: number):
 }
 
 /** Scene start offsets: needed before the audio mix exists (the mix places VO segments at these offsets). */
-export function sceneTimings(input: Pick<BuildInput, "scenes" | "gapMs" | "tailMs" | "leadMs">): { timings: SceneTiming[]; durationSec: number } {
+export function sceneTimings(input: Pick<BuildInput, "scenes" | "gapMs" | "tailMs" | "leadMs" | "minDurationSec">): { timings: SceneTiming[]; durationSec: number } {
   const gap = input.gapMs ?? GAP_MS;
   const tail = input.tailMs ?? TAIL_MS;
   const lead = input.leadMs ?? LEAD_MS;
-  let cursorMs = 0;
-  const timings: SceneTiming[] = input.scenes.map((s, i) => {
+  const lengths = input.scenes.map((s, i) => {
     const last = i === input.scenes.length - 1;
     const voiceMs = s.voice?.durationMs ?? Math.round(s.durationSec * 1000);
     const hold = Math.min(5000, Math.max(0, Math.round(s.holdMs ?? 0)));
-    const durationMs = (i === 0 ? lead : 0) + voiceMs + hold + (last ? tail : gap);
+    return (i === 0 ? lead : 0) + voiceMs + hold + (last ? tail : gap);
+  });
+  // Too short for `minDurationSec`: the closing scene holds on until then.
+  const shortMs = Math.round((input.minDurationSec ?? 0) * 1000) - lengths.reduce((a, n) => a + n, 0);
+  if (shortMs > 0 && lengths.length) lengths[lengths.length - 1] += shortMs;
+  let cursorMs = 0;
+  const timings: SceneTiming[] = input.scenes.map((s, i) => {
+    const durationMs = lengths[i];
     const fromFrame = Math.round((cursorMs / 1000) * FPS);
     const endFrame = Math.round(((cursorMs + durationMs) / 1000) * FPS);
     const t = { id: s.id, atSec: (cursorMs + (i === 0 ? lead : 0)) / 1000, fromFrame, durationFrames: Math.max(1, endFrame - fromFrame), durationMs };
@@ -113,13 +126,19 @@ export function sceneTimings(input: Pick<BuildInput, "scenes" | "gapMs" | "tailM
   return { timings, durationSec: Math.round(cursorMs) / 1000 };
 }
 
+/** Where a continuous clip (`SceneVisualInput` `continuous`) is at timeline frame `frame`: it started with the video and wraps at its end. */
+export function continuousTrimSec(frame: number, clipDurationSec: number) {
+  const clipFrames = Math.max(1, Math.round(clipDurationSec * FPS));
+  return (frame % clipFrames) / FPS;
+}
+
 export function buildTimeline(input: BuildInput): { timeline: Timeline; durationSec: number; timings: SceneTiming[] } {
   const { timings, durationSec } = sceneTimings(input);
   // Media credits are drawn on their own shots (`shots[].credit`); the outro lists the article and the music.
   const credits = new Set<string>();
   const scenes = input.scenes.map((s, i) => {
     const t = timings[i];
-    const shots = layoutShots([s.visual, ...(s.shots ?? [])], t.durationFrames);
+    const shots = layoutShots([s.visual, ...(s.shots ?? [])], t.durationFrames).map((sh) => (sh.visual.kind === "video" && sh.visual.continuous ? { ...sh, visual: { ...sh.visual, trimStartSec: continuousTrimSec(t.fromFrame + sh.from, sh.visual.clipDurationSec) } } : sh));
     return { id: s.id, kind: s.kind, from: t.fromFrame, durationFrames: t.durationFrames, headline: s.onScreenText, visual: shots[0].visual, shots, credit: shots[0].credit, voiceSrc: s.voice?.key ?? null, overlay: s.overlay ?? true, cartoon: s.cartoon ?? null };
   });
   const captions = input.scenes.flatMap((s, i) => {

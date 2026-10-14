@@ -24,7 +24,7 @@ import { mixDocAudio } from "@/lib/media/remix";
 import { downloadToR2, stockProvidersAvailable } from "@/lib/media/stock";
 import { designMotionShot, planMotionScenes } from "@/lib/llm/motion";
 import { motionScenes, shotWords } from "@/lib/media/motion-plan";
-import { docShots, ORIGINALITY_RULES, originalityReport, spreadThirdParty, thirdPartyVideoBudget, thirdPartyVideoMask } from "@/lib/media/originality";
+import { docShots, ORIGINALITY_RULES, originalityReport, spreadThirdParty, thirdPartyVideoBudget } from "@/lib/media/originality";
 import { LEAD_MS, sceneTimings, shotsNeeded } from "@/lib/media/timeline";
 import { loadPronunciations, loadVoicePreset, synthesizeScene, type SceneVoice } from "@/lib/media/tts";
 import { allocateChecked, orderByTier, SHOT_SEC, shortfall, splitBudget, tier2Queries, tierAllowed, total, videoSegments, VISUAL_TIERS, youtubeId, type PendingCapture, type SceneQuery, type VisualTier } from "@/lib/media/visual-plan";
@@ -32,7 +32,6 @@ import { findWebVideosFor, foundForHint, storeWebVideo, webVideoEnabled, webVide
 import { watermarkLabel, type WatermarkVerdict } from "@/lib/media/watermark";
 import { scanClipWatermark, watermarkScanAvailable } from "@/lib/media/watermark-scan";
 import { deleteObject, r2Key } from "@/lib/r2";
-import { sourceVideoShots } from "@/lib/video-source";
 
 const ext = (url: string, fallback: string) => {
   const m = /\.(jpe?g|png|webp|mp4|mov)(?:$|\?)/i.exec(url);
@@ -62,15 +61,16 @@ const MAX_AI_PER_BUILD = 8;
  * line. A still that fails in its scene leaves the pool, so another candidate
  * or a later tier takes the shot; it only comes back when nothing else could.
  *
- * A `video` project cuts its shots from its own video (downloaded by the fetch step), played on continuously
- * from scene to scene (`sourceVideoShots`), starting over if the voice-over runs longer.
+ * A `video` project plays its own video (downloaded by the fetch step) in full, unbroken from scene to scene: every
+ * scene is one `continuous` shot of it (the timeline builder sets each trim from the timeline clock, wrapping to the
+ * start when the voice-over runs longer), the closing scene holds on until the video has played to its end
+ * (`minDurationSec`), and no other pictures or motion graphics are sourced. Only the headline and captions change.
  *
  * Originality (`originality.ts`, flag `originality_guard`, default on): Meta demotes and demonetises videos made of
- * someone else's footage, so third-party video (web video, a video project's source) fills at most half of the
- * shots and never more than two in a row. A video project's source video gets every other slot or so
- * (`thirdPartyVideoMask`) and the tiers fill the rest; each web video gives at most two segments, tier 2 places
- * web video only within the remaining budget, and a scene's shots are reordered so footage is interspersed with
- * other pictures (`spreadThirdParty`). Slots no tier could fill in a video project fall back to the source video.
+ * someone else's footage, so web video fills at most half of the shots and never more than two in a row: each web
+ * video gives at most two segments, tier 2 places web video only within the budget, and a scene's shots are
+ * reordered so footage is interspersed with other pictures (`spreadThirdParty`). A video project's own source is
+ * exempt: playing it in full is what the project is for (the editor notes the risk, the report records it).
  * Every downloaded clip is scanned for watermarks (`watermark.ts`: an app name or @handle, or a bug that stays put
  * near the frame edge); a watermarked web video leaves the pool like a failed download, so another candidate or a
  * later tier takes its shots. A video project's own source video is scanned too, and only reported.
@@ -133,7 +133,8 @@ export const prepareAssetsFn = inngest.createFunction(
         /** Political story (fetch classification): only real pictures of the story, never stock footage or AI stills. */
         political: row.project.political,
         /** Motion graphics (Claude Opus 5.5): none, the scenes Claude picks, or every scene; drawn by Remotion or HyperFrames. */
-        motionMode: row.project.motionMode,
+        // A video project's source plays unbroken through every scene: a graphic would cut it off.
+        motionMode: row.sourceVideo ? ("off" as const) : row.project.motionMode,
         motionEngine: row.project.motionEngine,
         /** Hand-drawn photos: every downloaded still turns into a drawing of itself (`off` | pencil | ink | colour). */
         photoSketch: row.project.photoSketch,
@@ -234,33 +235,21 @@ export const prepareAssetsFn = inngest.createFunction(
     const motionVisual: Record<string, EditorScene["visual"]> = Object.fromEntries(motionResults.flatMap((r) => (r.visual ? [[r.sceneId, r.visual]] : [])));
     const motionCostUsd = motionPlan.costUsd + motionResults.reduce((a, r) => a + r.costUsd, 0);
 
-    /* ---- shot budget: one picture per ≤ 5 s of voice, one for the CTA; a motion graphic is the scene's one shot ---- */
+    /* ---- shot budget: one picture per ≤ 5 s of voice, one for the CTA; a motion graphic or a video project's source is the scene's one shot ---- */
     const voiceMs = (id: string, fallbackSec: number) => voices.find((v) => v.sceneId === id)?.durationMs ?? fallbackSec * 1000;
-    const fullNeed: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, motionVisual[sc.id] ? 1 : sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
+    const fullNeed: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, motionVisual[sc.id] || input.sourceVideo ? 1 : sc.kind === "cta" ? 1 : shotsNeeded(voiceMs(sc.id, sc.durationSec))]));
     /* ---- originality (flag `originality_guard`): third-party footage fills at most half the shots, never more than two in a row ---- */
     const rules = input.originality ? ORIGINALITY_RULES : null;
     const shotSec = (id: string) => motionTiming.timings[input.scenes.findIndex((sc) => sc.id === id)].durationMs / 1000 / Math.max(1, fullNeed[id]);
-    /* ---- video project: its source video takes the slots `thirdPartyVideoMask` allows (every slot without the guard);
-     * the tiers below fill the rest. `sourceCut` keeps the footage of every slot, for slots no tier could fill. ---- */
-    const sourceCut: Record<string, EditorScene["visual"][]> = {};
-    const sourceSlots: Record<string, Array<EditorScene["visual"] | null>> = {};
-    if (input.sourceVideo) {
-      const v = input.sourceVideo;
-      const cut = sourceVideoShots(input.scenes.map((sc, i) => ({ id: sc.id, sec: motionTiming.timings[i].durationMs / 1000, shots: fullNeed[sc.id] })), v.durationSec || SHOT_SEC);
-      for (const [id, list] of Object.entries(cut)) {
-        sourceCut[id] = list.map((c) => ({ kind: "video", key: v.key, clipDurationSec: c.clipDurationSec, trimStartSec: c.trimStartSec, credit: v.credit, assetId: v.assetId, thumbnailUrl: v.thumbnailUrl }));
-      }
-      const slots = input.scenes.flatMap((sc) => Array.from({ length: fullNeed[sc.id] }, () => ({ sceneId: sc.id, sec: shotSec(sc.id), eligible: !motionVisual[sc.id] })));
-      const mask = rules ? thirdPartyVideoMask(slots, rules) : slots.map(() => true);
-      let at = 0;
-      for (const sc of input.scenes) sourceSlots[sc.id] = sourceCut[sc.id].map((c) => (mask[at++] ? c : null));
-    }
-    const sourceUsed = (id: string) => (sourceSlots[id] ?? []).filter(Boolean).length;
-    const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, motionVisual[sc.id] ? 0 : Math.max(0, fullNeed[sc.id] - sourceUsed(sc.id))]));
+    /* ---- video project: every scene is one shot of its source video, played on unbroken (`continuous`); no tier is consulted ---- */
+    const sourceShot: EditorScene["visual"] | null = input.sourceVideo
+      ? { kind: "video", key: input.sourceVideo.key, clipDurationSec: input.sourceVideo.durationSec || SHOT_SEC, trimStartSec: 0, credit: input.sourceVideo.credit, assetId: input.sourceVideo.assetId, thumbnailUrl: input.sourceVideo.thumbnailUrl, continuous: true }
+      : null;
+    const need: Record<string, number> = Object.fromEntries(input.scenes.map((sc) => [sc.id, motionVisual[sc.id] || sourceShot ? 0 : fullNeed[sc.id]]));
     const totalNeed = total(need);
-    // Shots of web video tier 2 may still place: half of the picture shots, minus the source video's.
+    // Shots of web video tier 2 may still place: half of the picture shots.
     const pictureShots = total(Object.fromEntries(input.scenes.map((sc) => [sc.id, motionVisual[sc.id] ? 0 : fullNeed[sc.id]])));
-    const webVideoBudget = rules ? thirdPartyVideoBudget(pictureShots, total(Object.fromEntries(input.scenes.map((sc) => [sc.id, sourceUsed(sc.id)]))), rules) : Number.POSITIVE_INFINITY;
+    const webVideoBudget = rules ? thirdPartyVideoBudget(pictureShots, 0, rules) : Number.POSITIVE_INFINITY;
     // A web video gives at most a run's worth of segments (2 × 5 s), so one clip never plays longer than the rule allows.
     const clipSegments = rules ? Math.max(1, Math.floor(rules.maxRunSec / SHOT_SEC)) : undefined;
 
@@ -539,7 +528,8 @@ export const prepareAssetsFn = inngest.createFunction(
     }
 
     /* ---- music ---- */
-    const preTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })) });
+    const minDurationSec = input.sourceVideo?.durationSec || null;
+    const preTiming = sceneTimings({ scenes: input.scenes.map((sc) => ({ ...sc, voice: voices.find((v) => v.sceneId === sc.id) ?? null, visual: null })), minDurationSec });
     const music = await step.run("music", async () => {
       await reportProgress(pctx, { label: "Chọn nhạc nền", pct: 78 });
       return pickMusic({ tone: input.tone, durationSec: preTiming.durationSec, r2Key: media(`music/${input.buildId}.mp3`) }, pctx);
@@ -574,13 +564,8 @@ export const prepareAssetsFn = inngest.createFunction(
         if (motionVisual[sc.id]) {
           all = [motionVisual[sc.id]];
           carry = 0;
-        } else if (input.sourceVideo) {
-          // Video project: the source video keeps its slots, the tiers fill the others in order, and a slot nothing could fill shows the source video after all.
-          const rest = fill.map((x) => x.visual);
-          all = (sourceSlots[sc.id] ?? []).map((v, i) => {
-            if (v) return v;
-            return rest.shift() ?? sourceCut[sc.id][i];
-          });
+        } else if (sourceShot) {
+          all = [sourceShot];
           carry = 0;
         } else {
           const spread = rules ? spreadThirdParty(fill.slice(0, fullNeed[sc.id]), (x) => x.footage, shotSec(sc.id), carry, rules.maxRunSec) : { items: fill.slice(0, fullNeed[sc.id]), carryOut: 0 };
@@ -615,6 +600,7 @@ export const prepareAssetsFn = inngest.createFunction(
         scenes,
         music: music.pick ? { key: music.pick.key, gainDb: -12, attribution: music.pick.attribution, title: music.pick.title, source: music.pick.source, licence: music.pick.licence } : null,
         coverAtSec: null,
+        minDurationSec,
       });
     });
 
@@ -649,10 +635,8 @@ export const prepareAssetsFn = inngest.createFunction(
           /** Tier-2 searches: one per scene for what its voice-over names, plus the story title. */
           queries,
           need: fullNeed,
-          /** Video project: shots cut from its own video (`sourceVideoShots`): the slots the originality guard gave it, and how many the cut shows. */
-          sourceVideo: input.sourceVideo
-            ? { assetId: input.sourceVideo.assetId, durationSec: input.sourceVideo.durationSec, planned: total(Object.fromEntries(input.scenes.map((sc) => [sc.id, sourceUsed(sc.id)]))), shots: doc.scenes.reduce((a, s) => a + [s.visual, ...s.shots].filter((v) => v.kind === "video" && v.key === input.sourceVideo?.key).length, 0) }
-            : null,
+          /** Video project: its own video plays in full under every scene (`continuous`), the video lasting at least as long. */
+          sourceVideo: input.sourceVideo ? { assetId: input.sourceVideo.assetId, durationSec: input.sourceVideo.durationSec, continuous: true, minDurationSec } : null,
           perScene: Object.fromEntries(
             input.scenes.map((sc) => {
               const tiers = (placed.perScene[sc.id] ?? []).map((p) => pool[p.index].tier);
@@ -700,8 +684,6 @@ export const prepareAssetsFn = inngest.createFunction(
           guard: input.originality,
           rules: rules ?? null,
           webVideoBudget: Number.isFinite(webVideoBudget) ? webVideoBudget : null,
-          /** Video project: slots kept for other pictures that no tier could fill, so they show the source video after all. */
-          sourceForced: doc.scenes.reduce((a, s) => a + [s.visual, ...s.shots].filter((v, i) => v.kind === "video" && v.key === input.sourceVideo?.key && !sourceSlots[s.id]?.[i]).length, 0),
           report: originalityReport(docShots(doc, (key) => providers.get(key)), rules ?? ORIGINALITY_RULES),
           /** Watermark scan of the downloaded clips: which web videos it turned down, and the source video's verdict. */
           watermarks: {

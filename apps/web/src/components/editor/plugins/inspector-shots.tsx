@@ -164,7 +164,9 @@ function ShotsTab() {
           </div>
         ) : null}
 
-        {shot.kind === "video" ? (
+        {shot.kind === "video" && shot.continuous ? (
+          <p className="pt-1 text-xs text-muted-foreground">Video gốc phát liền từ cảnh này sang cảnh khác theo thời gian của video, hết thì phát lại từ đầu.</p>
+        ) : shot.kind === "video" ? (
           <label className="flex flex-wrap items-center gap-2 pt-1 text-xs">
             Cắt clip từ (giây)
             <Input type="number" min={0} max={Math.max(0, shot.clipDurationSec - 1)} step={0.5} value={shot.trimStartSec} disabled={ctx.readOnly} onChange={(e) => setActive({ ...shot, trimStartSec: Math.min(Math.max(0, Number(e.target.value) || 0), Math.max(0, shot.clipDurationSec - 1)) }, "cắt clip")} className="h-8 w-24" />
