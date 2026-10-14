@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { uploadDate, videoLinkKind, videoPageUrl } from "./video-source";
+import { parseSourceSegment, SOURCE_VIDEO_MAX_SEC, sourceSection, uploadDate, videoLinkKind, videoPageUrl } from "./video-source";
 
 describe("videoPageUrl", () => {
   it("keeps the video id and drops tracking queries", () => {
@@ -39,5 +39,40 @@ describe("uploadDate", () => {
     expect(uploadDate("20260915")?.toISOString()).toBe("2026-09-15T00:00:00.000Z");
     expect(uploadDate(null)).toBeNull();
     expect(uploadDate("2026-09-15")).toBeNull();
+  });
+});
+
+describe("parseSourceSegment", () => {
+  it("reads blank fields as the whole video", () => {
+    expect(parseSourceSegment("", " ")).toEqual({ ok: true, segment: { startSec: null, endSec: null } });
+  });
+  it("reads timecodes, and a start of 0 as no start", () => {
+    expect(parseSourceSegment("0:45", "2:30")).toEqual({ ok: true, segment: { startSec: 45, endSec: 150 } });
+    expect(parseSourceSegment("0", "1:00:00")).toMatchObject({ ok: false });
+    expect(parseSourceSegment("0:00", "90")).toEqual({ ok: true, segment: { startSec: null, endSec: 90 } });
+    expect(parseSourceSegment("1:10", "")).toEqual({ ok: true, segment: { startSec: 70, endSec: null } });
+  });
+  it("refuses unreadable, reversed and over-long segments", () => {
+    expect(parseSourceSegment("abc", "")).toMatchObject({ ok: false });
+    expect(parseSourceSegment("", "1:75")).toMatchObject({ ok: false });
+    expect(parseSourceSegment("2:00", "1:59")).toMatchObject({ ok: false });
+    expect(parseSourceSegment("1:00", `${SOURCE_VIDEO_MAX_SEC + 61}`)).toMatchObject({ ok: false });
+    expect(parseSourceSegment("1:00", `${SOURCE_VIDEO_MAX_SEC + 60}`)).toMatchObject({ ok: true });
+  });
+});
+
+describe("sourceSection", () => {
+  it("takes the whole video when nothing is asked, up to the cap", () => {
+    expect(sourceSection({ startSec: null, endSec: null }, 255.595)).toEqual({ ok: true, startSec: 0, endSec: 255.6, truncated: false });
+    expect(sourceSection({ startSec: null, endSec: null }, 3600)).toEqual({ ok: true, startSec: 0, endSec: SOURCE_VIDEO_MAX_SEC, truncated: true });
+  });
+  it("cuts the asked segment to the video", () => {
+    expect(sourceSection({ startSec: 45, endSec: 150 }, 255.6)).toEqual({ ok: true, startSec: 45, endSec: 150, truncated: false });
+    expect(sourceSection({ startSec: 200, endSec: 400 }, 255.6)).toEqual({ ok: true, startSec: 200, endSec: 255.6, truncated: false });
+    expect(sourceSection({ startSec: 60, endSec: null }, 3600)).toEqual({ ok: true, startSec: 60, endSec: 60 + SOURCE_VIDEO_MAX_SEC, truncated: true });
+  });
+  it("refuses a start past the end of the video, and works without a known length", () => {
+    expect(sourceSection({ startSec: 300, endSec: null }, 255.6)).toMatchObject({ ok: false });
+    expect(sourceSection({ startSec: 10, endSec: 40 }, null)).toEqual({ ok: true, startSec: 10, endSec: 40, truncated: false });
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Clapperboard, Plus, Search } from "lucide-react";
+import { SourceSegmentFields } from "@/components/source-segment-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,7 @@ const SITE_NAME: Array<[RegExp, string]> = [
 /**
  * The source part of the new-project form: a link (a news article, or a video page, recognised as it is typed),
  * content typed in, or a topic to research on the web. Posts `mode` = `link` | `text` | `topic` with `url`,
- * `title` + `text`, or `brief` (see `createProject`).
+ * `title` + `text`, or `brief` (see `createProject`); a video link also posts the segment to use (`sourceStart` / `sourceEnd`).
  */
 export function NewProjectSource() {
   const [mode, setMode] = useState<"link" | "text" | "topic">("link");
@@ -86,6 +87,7 @@ export function NewProjectSource() {
               "Bài báo: hệ thống lấy nội dung bài. Link YouTube, TikTok, Facebook reels… được nhận ra là video."
             )}
           </p>
+          {video ? <SourceSegmentFields /> : null}
         </div>
       ) : mode === "topic" ? (
         <div className="space-y-2">

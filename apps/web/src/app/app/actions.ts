@@ -17,7 +17,7 @@ import { parsePreset } from "@/lib/presets";
 import { startProgress } from "@/lib/project-state";
 import { assertQuota } from "@/lib/quota";
 import { canonicalizeUrl, isPrivateHost } from "@/lib/url";
-import { MIN_CONTENT_WORDS } from "@/lib/video-source";
+import { MIN_CONTENT_WORDS, parseSourceSegment } from "@/lib/video-source";
 import { assertWorkspaceWriter } from "@/lib/workspace";
 import { parseMotion } from "@/components/motion-select";
 import { parsePhotoSketch } from "@/components/sketch-select";
@@ -48,6 +48,10 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
     const url = linkless ? null : (videoUrl ?? canonicalizeUrl(str(fd, "url")));
     if (url && isPrivateHost(url)) throw new Error("That address is not a public website");
     const sourceKind = typed ? "text" : topic ? "topic" : videoUrl ? "video" : "article";
+    // Video link: the part to download and use ("từ … đến …"), decided before anything is downloaded; blank = all of it.
+    const segment = sourceKind === "video" ? parseSourceSegment(String(fd.get("sourceStart") ?? ""), String(fd.get("sourceEnd") ?? "")) : null;
+    if (segment && !segment.ok) throw new Error(segment.error);
+    const seg = segment?.ok ? segment.segment : { startSec: null, endSec: null };
     const { durationSec, tone } = parsePreset(fd);
     const force = fd.get("force") === "on";
     const auto = fd.get("auto") === "on";
@@ -81,12 +85,13 @@ export async function createProject(_: ActionState, fd: FormData): Promise<Actio
           organizationId: ws.organizationId, ownerId: ws.userId, url, canonicalUrl: url, sourceKind, brief: topic ? brief : null, title: title || null, durationSec, tone, autoPipeline: auto,
           brandKitId: kit?.id ?? null, brandKitSource: kit ? "manual" : null, logoChannelId: logoChannel?.id ?? null, voicePresetId: voice?.id ?? null,
           motionMode: motion.mode, motionEngine: motion.engine, photoSketch,
+          sourceStartSec: seg.startSec === null ? null : String(seg.startSec), sourceEndSec: seg.endSec === null ? null : String(seg.endSec),
           // Typed content is saved in this request's `after()`, never through the queue: nothing to fetch, nothing to wait for.
           busyStep: "fetch", busyProgress: typed ? { ...startProgress("Lưu nội dung…"), direct: true } : startProgress(),
         })
         .returning({ id: schema.projects.id }),
     );
-    await log("project.created", { url, sourceKind, ...(typed ? { words: countWords(text) } : {}), ...(topic ? { brief: brief.slice(0, 300) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, voice: voice?.name ?? "default", motion: motion.mode === "off" ? "off" : `${motion.mode}/${motion.engine}`, photoSketch, duplicateOf: existing?.id ?? null }, project.id);
+    await log("project.created", { url, sourceKind, ...(seg.startSec !== null || seg.endSec !== null ? { segment: seg } : {}), ...(typed ? { words: countWords(text) } : {}), ...(topic ? { brief: brief.slice(0, 300) } : {}), durationSec, tone, auto, brandKit: kit?.name ?? "auto", logoChannel: logoChannel?.name ?? null, voice: voice?.name ?? "default", motion: motion.mode === "off" ? "off" : `${motion.mode}/${motion.engine}`, photoSketch, duplicateOf: existing?.id ?? null }, project.id);
     if (typed) after(() => runFetchDirect({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId, manual: { title, text } }));
     else await inngest.send(projectFetchRequested.create({ projectId: project.id, organizationId: ws.organizationId, requestedBy: ws.userId }));
     target = `/app/projects/${project.id}`;

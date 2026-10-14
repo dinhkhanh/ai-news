@@ -241,6 +241,12 @@ export const projects = pgTable(
     comicVersionId: uuid("comic_version_id").references((): AnyPgColumn => comicVersions.id, { onDelete: "set null" }),
     /** `video` projects: the downloaded source video (a `web_video` asset); every shot of the build is cut from it. */
     sourceVideoAssetId: uuid("source_video_asset_id").references((): AnyPgColumn => assets.id, { onDelete: "set null" }),
+    /**
+     * `video` projects: the part of the video to download and use, chosen before the download ("từ … đến …" at
+     * creation or on "Tải lại video"); null = from the start / to the end (`sourceSection` in lib/video-source.ts).
+     */
+    sourceStartSec: numeric("source_start_sec", { precision: 8, scale: 1 }),
+    sourceEndSec: numeric("source_end_sec", { precision: 8, scale: 1 }),
     title: text("title"),
     language: languageEnum("language").notNull().default("vi"),
     state: projectStateEnum("state").notNull().default("created"),

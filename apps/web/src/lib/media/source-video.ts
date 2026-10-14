@@ -1,8 +1,9 @@
 import "server-only";
+import { NonRetriableError } from "inngest";
 import { nanoid } from "nanoid";
 import { invokeWebVideo, type WebVideoCandidate } from "@/lib/media-lambda";
 import { countWords, normaliseText, type Extracted } from "@/lib/fetch/readability";
-import { SOURCE_VIDEO_MAX_SEC, uploadDate, videoLinkKind, videoPageUrl } from "@/lib/video-source";
+import { sourceSection, uploadDate, videoLinkKind, videoPageUrl, type SourceSegment } from "@/lib/video-source";
 import type { ChosenAsset } from "./broll";
 import { storeWebVideoJob, webVideoEnabled } from "./webvideo";
 
@@ -48,7 +49,8 @@ export async function lookupVideo(pageUrl: string): Promise<WebVideoCandidate> {
 }
 
 /**
- * The whole video (up to `SOURCE_VIDEO_MAX_SEC`, 10 min) as a `web_video` asset tagged `role: "source"`. It can keep
+ * The segment the user chose (`projects.source_start_sec` / `source_end_sec`; none = the whole video), at most
+ * `SOURCE_VIDEO_MAX_SEC` (10 min), as a `web_video` asset tagged `role: "source"`, starting at 0. It can keep
  * the video box busy for minutes (decoding, one H.264 encode), longer than one function may run: after `wait.waitMs`
  * this returns `{ pending: jobId }`, and the caller's next durable step passes that `jobId` back to keep waiting.
  */
@@ -56,12 +58,14 @@ export async function downloadSourceVideo(
   c: WebVideoCandidate,
   ctx: { userId: string; organizationId: string; projectId: string },
   wait: { jobId?: string | null; waitMs?: number } = {},
-): Promise<(ChosenAsset & { truncated: boolean }) | { pending: string }> {
+  segment: SourceSegment = { startSec: null, endSec: null },
+): Promise<(ChosenAsset & { truncated: boolean; startSec: number; endSec: number }) | { pending: string }> {
   if (!(await webVideoEnabled())) throw new Error("Tải video web đang tắt (cờ web_video_downloader tại /admin/integrations)");
-  const length = c.durationSec && c.durationSec > 0 ? c.durationSec : SOURCE_VIDEO_MAX_SEC;
-  const endSec = Math.round(Math.min(length, SOURCE_VIDEO_MAX_SEC) * 100) / 100;
-  const r = await storeWebVideoJob(c, { buildId: `source-${nanoid(6)}`, startSec: 0, endSec, index: 0, role: "source" }, ctx, wait);
-  return "pending" in r ? r : { ...r.asset, truncated: length > SOURCE_VIDEO_MAX_SEC };
+  const section = sourceSection(segment, c.durationSec);
+  // A start past the end of the video will not get better by retrying: the user picks another segment.
+  if (!section.ok) throw new NonRetriableError(section.error);
+  const r = await storeWebVideoJob(c, { buildId: `source-${nanoid(6)}`, startSec: section.startSec, endSec: section.endSec, index: 0, role: "source" }, ctx, wait);
+  return "pending" in r ? r : { ...r.asset, truncated: section.truncated, startSec: section.startSec, endSec: section.endSec };
 }
 
 /** The video's own words as the project's starting content: its caption (or title), for the user to rewrite. */

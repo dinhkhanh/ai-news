@@ -19,7 +19,7 @@ import { assertQuota } from "@/lib/quota";
 import { findVoice } from "@/lib/media/tts";
 import { queueRender } from "@/lib/render-request";
 import { copyObject } from "@/lib/r2";
-import { MIN_CONTENT_WORDS } from "@/lib/video-source";
+import { MIN_CONTENT_WORDS, parseSourceSegment } from "@/lib/video-source";
 import { assertWorkspaceWriter, type Workspace } from "@/lib/workspace";
 import { parseMotion } from "@/components/motion-select";
 import { parsePhotoSketch } from "@/components/sketch-select";
@@ -79,16 +79,20 @@ export async function refetchArticle(_: ActionState, fd: FormData): Promise<Acti
     if (!project.url && !topic) throw new Error("This project has no link to fetch; edit its content instead");
     const brief = topic && fd.has("brief") ? normaliseBrief(String(fd.get("brief") ?? "")) : null;
     if (brief !== null && brief.length < BRIEF_MIN_CHARS) throw new Error("Type a few keywords, a topic or directions to research");
+    // Video: the segment may have been changed in the "Tải lại video" form (blank fields = the whole video).
+    const segment = project.sourceKind === "video" && fd.has("sourceStart") ? parseSourceSegment(String(fd.get("sourceStart") ?? ""), String(fd.get("sourceEnd") ?? "")) : null;
+    if (segment && !segment.ok) throw new Error(segment.error);
+    const seg = segment?.ok ? { sourceStartSec: segment.segment.startSec === null ? null : String(segment.segment.startSec), sourceEndSec: segment.segment.endSec === null ? null : String(segment.segment.endSec) } : null;
     const m = str(fd, "method");
     const method = !topic && (m === "browser_rendering" || m === "http" || m === "firecrawl") ? m : undefined;
     await withOrgContext(ws, (tx) =>
       tx
         .update(schema.projects)
-        .set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null, ...(brief !== null ? { brief } : {}) })
+        .set({ busyStep: "fetch", busyProgress: startProgress(), lastError: null, ...(brief !== null ? { brief } : {}), ...(seg ?? {}) })
         .where(eq(schema.projects.id, projectId)),
     );
     await inngest.send(projectFetchRequested.create({ projectId, organizationId: ws.organizationId, requestedBy: ws.userId, method }));
-    await log("article.refetch_requested", topic ? { method: "research", ...(brief !== null && brief !== project.brief ? { brief: brief.slice(0, 300) } : {}) } : { method: method ?? "auto" }, projectId);
+    await log("article.refetch_requested", topic ? { method: "research", ...(brief !== null && brief !== project.brief ? { brief: brief.slice(0, 300) } : {}) } : { method: method ?? "auto", ...(segment?.ok ? { segment: segment.segment } : {}) }, projectId);
     revalidatePath(`/app/projects/${projectId}`);
     if (topic) return "Researching the topic again…";
     return project.sourceKind === "video" ? "Downloading the video again…" : `Fetching again${method ? ` via ${method} first` : ""}…`;

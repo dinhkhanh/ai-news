@@ -7,6 +7,8 @@ import { BookOpen, Clapperboard, ExternalLink, Eye, FileText, Film, Newspaper, P
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
+import { SourceSegmentFields } from "@/components/source-segment-fields";
+import { formatTimecode } from "@/lib/media/visual-plan";
 import { PipelineStatus } from "@/components/pipeline-status";
 import { DirectFetchButtons } from "@/components/queue-rescue";
 import { ProjectStateIcon, stateLabel } from "@/components/project-state";
@@ -1290,19 +1292,22 @@ function briefForm(project: { id: string; brief: string | null }, busy: boolean)
 }
 
 /** Re-fetch: one "download again" for a video page, the provider choice for an article, nothing for typed content. */
-function refetchButtons(project: { id: string; sourceKind: string; url: string | null }, busy: boolean) {
+function refetchButtons(project: { id: string; sourceKind: string; url: string | null; sourceStartSec?: string | null; sourceEndSec?: string | null }, busy: boolean) {
   const projectId = project.id;
   if (!project.url || project.sourceKind === "text") return null;
   if (project.sourceKind === "video") {
+    // The segment can be changed here before downloading again (blank = the whole video).
+    const tc = (v: string | null | undefined) => (v == null ? "" : formatTimecode(Number(v)));
     return (
-      <ActionForm action={refetchArticle}>
+      <ActionForm action={refetchArticle} className="w-full space-y-2">
         <input type="hidden" name="projectId" value={projectId} />
+        <SourceSegmentFields defaultStart={tc(project.sourceStartSec)} defaultEnd={tc(project.sourceEndSec)} />
         <Button
           type="submit"
           size="sm"
           variant="outline"
           disabled={busy}
-          title="Đọc lại tiêu đề + chú thích và tải lại video. Ô nội dung sẽ trở về chú thích của video."
+          title="Đọc lại tiêu đề + chú thích và tải lại đoạn video đã chọn. Ô nội dung sẽ trở về chú thích của video."
         >
           Tải lại video
         </Button>

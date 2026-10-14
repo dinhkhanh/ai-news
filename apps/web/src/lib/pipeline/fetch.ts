@@ -13,6 +13,7 @@ import { researchBrief, writeTopicArticle } from "@/lib/llm/research";
 import { creditLine, type ResearchSource } from "@/lib/llm/research-sources";
 import { chooseBrandKit } from "@/lib/media/brand";
 import { downloadSourceVideo, lookupVideo, videoArticle } from "@/lib/media/source-video";
+import { formatTimecode } from "@/lib/media/visual-plan";
 import { reportProgress } from "@/lib/progress";
 import { DIRECT_RUN_ID, eventSuperseded } from "@/lib/project-state";
 import { putObject, r2Key } from "@/lib/r2";
@@ -66,7 +67,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
     if (eventSuperseded(sentAt, { latestResultAt: article?.createdAt, progress: row.busyProgress })) return null;
     await reportProgress(pctx, { label: "Mở dự án", pct: 5 });
     await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ busyStep: "fetch", lastError: null }).where(eq(schema.projects.id, projectId)));
-    return { id: row.id, url: row.url, sourceKind: row.sourceKind, brief: row.brief, language: row.language, brandKitId: row.brandKitId, brandKitSource: row.brandKitSource };
+    return { id: row.id, url: row.url, sourceKind: row.sourceKind, brief: row.brief, language: row.language, brandKitId: row.brandKitId, brandKitSource: row.brandKitSource, sourceStartSec: row.sourceStartSec, sourceEndSec: row.sourceEndSec };
   });
   if (!project) return { next: null, result: { projectId, skipped: "superseded" as const } };
 
@@ -126,17 +127,21 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
     }
   });
 
-  // Video projects: the whole video (up to SOURCE_VIDEO_MAX_SEC), through the video box like every video download.
+  // Video projects: the segment the user chose (default the whole video, up to SOURCE_VIDEO_MAX_SEC), through the video box.
   // The NAS runs it as a job; each step waits up to SOURCE_STEP_WAIT_MS (well inside the function limit) and a job
   // still running is handed to the next step, so a slow encode never kills the function and restarts the download.
   let sourceVideo: { assetId: string; durationSec: number | null; truncated: boolean } | null = null;
+  // The segment chosen before the download (null ends = the start / the end of the video).
+  const from = project.sourceStartSec == null ? null : Number(project.sourceStartSec);
+  const to = project.sourceEndSec == null ? null : Number(project.sourceEndSec);
   if (fetched.video) {
     const c = fetched.video;
-    const label = `Tải video từ ${c.site}${c.durationSec ? ` (${Math.round(c.durationSec)} s)` : ""}`;
+    const part = from !== null || to !== null ? `đoạn ${formatTimecode(from ?? 0)}–${to !== null ? formatTimecode(to) : "hết"}${c.durationSec ? ` của ${formatTimecode(c.durationSec)}` : ""}` : c.durationSec ? `${formatTimecode(c.durationSec)}` : "";
+    const label = `Tải video từ ${c.site}${part ? ` (${part})` : ""}`;
     type Attempt = { pending: string } | { assetId: string; durationSec: number | null; truncated: boolean };
     const attempt = async (jobId: string | null, round: number): Promise<Attempt> => {
       await reportProgress(pctx, { label: round ? `${label}: NAS đang xử lý (${Math.round((round * SOURCE_STEP_WAIT_MS) / 60_000)} phút)` : label, pct: Math.min(55, 25 + round * 3) });
-      const a = await downloadSourceVideo(c, pctx, { jobId, waitMs: SOURCE_STEP_WAIT_MS });
+      const a = await downloadSourceVideo(c, pctx, { jobId, waitMs: SOURCE_STEP_WAIT_MS }, { startSec: from, endSec: to });
       return "pending" in a ? { pending: a.pending } : { assetId: a.assetId, durationSec: a.durationSec, truncated: a.truncated };
     };
     let r: Attempt = await steps.run("download-video", () => attempt(null, 0));
@@ -255,7 +260,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
         brandKit: kit ? { id: kit.id, name: kit.name, method: kit.method, reason: kit.reason } : null,
         attempts: fetched.attempts,
         ...(research ? { research: { searches: research.searches, fetches: research.fetches, pagesFound: research.found.length, sources: fetched.sources.length, costUsd: Math.round(research.costUsd * 10000) / 10000 } } : {}),
-        ...(sourceVideo ? { video: { assetId: sourceVideo.assetId, durationSec: sourceVideo.durationSec, truncated: sourceVideo.truncated, site: fetched.video?.site ?? null } } : {}),
+        ...(sourceVideo ? { video: { assetId: sourceVideo.assetId, durationSec: sourceVideo.durationSec, truncated: sourceVideo.truncated, segment: { startSec: from, endSec: to }, site: fetched.video?.site ?? null } } : {}),
       },
     });
   });
