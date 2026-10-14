@@ -11,8 +11,12 @@ import { WEB_VIDEO_PAGE } from "./media/visual-plan";
  */
 export type SourceKind = "article" | "video" | "text" | "topic" | "comic";
 
-/** Longest part of a source video that is downloaded (from the start): the NAS API refuses longer sections. */
-export const SOURCE_VIDEO_MAX_SEC = 120;
+/**
+ * Longest part of a source video that is downloaded (from the start): a safety cap well above social videos
+ * (TikTok uploads stop at 10 min), so a pasted hour-long video cannot tie up the video box or fill R2.
+ * The video box (`MAX_SECTION_SEC` in packages/media-lambda/src/server-validate.ts) refuses longer sections.
+ */
+export const SOURCE_VIDEO_MAX_SEC = 600;
 
 /**
  * Least content a script can be written from. An article needs some substance; a video's content is what the

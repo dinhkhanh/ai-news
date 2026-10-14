@@ -188,7 +188,7 @@ export async function downloadWebVideo(payload: WebVideoAction, opts: { jobId?: 
     let first: JobView | null = null;
     if (!jobId) {
       const s = await submit();
-      if (s === "lambda") return { ...(await invokeLambdaRaw(payload)), via: "lambda" };
+      if (s === "lambda") return lambdaFallback(payload);
       if ("via" in s) return s;
       first = s;
       jobId = s.jobId;
@@ -203,7 +203,7 @@ export async function downloadWebVideo(payload: WebVideoAction, opts: { jobId?: 
           if (resubmitted) return { ok: false, action: "web-video", passed: false, error: "web-video API: the download job was lost twice (NAS restarting?)", via: "nas" };
           resubmitted = true;
           const s = await submit();
-          if (s === "lambda") return { ...(await invokeLambdaRaw(payload)), via: "lambda" };
+          if (s === "lambda") return lambdaFallback(payload);
           if ("via" in s) return s;
           jobId = s.jobId;
           if (settle(s)) return settle(s)!;
@@ -219,6 +219,22 @@ export async function downloadWebVideo(payload: WebVideoAction, opts: { jobId?: 
       }
     }
     return { pending: jobId! };
+  }
+  return lambdaFallback(payload);
+}
+
+/** Longest section the Lambda fallback takes on: it has ~2 vCPU, and the caller's function stops at 300 s. */
+export const LAMBDA_MAX_SECTION_SEC = 120;
+
+/**
+ * The media Lambda instead of the video box (unreachable, or failing). A whole source video (minutes long) cannot
+ * be encoded there before the calling function is cut off, which would only restart the download in a loop, so a
+ * long section fails at once with a message naming the box instead.
+ */
+async function lambdaFallback(payload: WebVideoAction): Promise<ViaResult> {
+  const sec = payload.trim ? payload.trim.endSec - payload.trim.startSec : Number.POSITIVE_INFINITY;
+  if (sec > LAMBDA_MAX_SECTION_SEC) {
+    return { ok: false, action: "web-video", passed: false, error: `máy tải video (Mac mini / NAS) không phản hồi, và đoạn ${Math.round(sec)} s quá dài cho máy dự phòng (tối đa ${LAMBDA_MAX_SECTION_SEC} s): kiểm tra máy rồi tải lại`, via: "lambda" };
   }
   return { ...(await invokeLambdaRaw(payload)), via: "lambda" };
 }

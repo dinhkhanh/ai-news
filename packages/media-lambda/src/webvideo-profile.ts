@@ -3,7 +3,7 @@
  *
  * `full` (the default: the office Mac mini, or a NAS): the best stream up to 1080p class (shorter side ≤ 1080:
  * 1920×1080 landscape, 1080×1920 portrait; a 4K stream only multiplies the work, the frame is 1080 px wide) and
- * preset `medium`. A 120 s Facebook AV1 section takes an M2 about a minute.
+ * preset `medium`. A 120 s Facebook AV1 section takes an M2 about 80 s, a 10 min video about 7 min.
  *
  * `fast` (the media Lambda, the fallback when the Mac cannot be reached, ~2 vCPU and a 600 s limit): the smallest
  * stream at least 1080 px wide (1280×720 for landscape, still drawn 1080 wide) and preset `veryfast`, about a

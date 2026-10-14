@@ -10,7 +10,8 @@ import type { MediaAction } from "./types.js";
  */
 export const VIDEO_PAGE = /^https:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?|shorts\/)|youtu\.be\/|tiktok\.com\/@[^/]+\/video\/|facebook\.com\/(?:watch|reel|[^/]+\/videos)|fb\.watch\/|vimeo\.com\/\d|dailymotion\.com\/video\/)/i;
 const OUTPUT_KEY = /^(?:media\/[\w-]+\/[\w-]+\/webvideo\/|tmp\/smoke\/)[\w.-]+\.mp4$/;
-const MAX_SECTION_SEC = 120;
+/** Longest section the box downloads: a whole social video (a video project's source; TikTok's upload limit is 10 min). */
+export const MAX_SECTION_SEC = 600;
 
 export type Validated = { ok: true; event: Extract<MediaAction, { action: "web-video" | "web-video-search" }> } | { ok: false; status: number; error: string };
 

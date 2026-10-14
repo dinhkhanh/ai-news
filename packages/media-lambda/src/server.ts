@@ -13,7 +13,7 @@
  *   GET  /jobs/<id> → JobView       same auth; `state` queued | running | done (+ `result`)
  *
  * Long downloads go through `/jobs`: a DSM reverse proxy gives up on a request after 60 s and the app's
- * functions after 300 s, while a 120 s 1080p section can take the NAS CPU longer than both.
+ * functions after 300 s, while a whole source video (up to 10 min of 1080p) takes minutes even on an M2.
  *
  * Put it behind HTTPS (DSM reverse proxy with the DDNS certificate): the token travels in a header.
  */

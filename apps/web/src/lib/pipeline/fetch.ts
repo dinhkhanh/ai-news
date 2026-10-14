@@ -24,7 +24,7 @@ import type { PipelineSteps } from "./steps";
  * `maxRuntime` (250 s) into a request, so it has to end well inside the remaining 50 s of the route's 300 s.
  */
 const SOURCE_STEP_WAIT_MS = 45_000;
-/** Steps of waiting after the first before giving up (~30 min in all, plenty for a 120 s section on a NAS CPU). */
+/** Steps of waiting after the first before giving up (~30 min in all; a 10 min source takes the Mac mini about 7). */
 const SOURCE_STEP_ROUNDS = 40;
 
 export type FetchRequest = {
@@ -126,7 +126,7 @@ export async function fetchPipeline(data: FetchRequest, steps: PipelineSteps) {
     }
   });
 
-  // Video projects: the footage itself (the first SOURCE_VIDEO_MAX_SEC), through the NAS like every video download.
+  // Video projects: the whole video (up to SOURCE_VIDEO_MAX_SEC), through the video box like every video download.
   // The NAS runs it as a job; each step waits up to SOURCE_STEP_WAIT_MS (well inside the function limit) and a job
   // still running is handed to the next step, so a slow encode never kills the function and restarts the download.
   let sourceVideo: { assetId: string; durationSec: number | null; truncated: boolean } | null = null;

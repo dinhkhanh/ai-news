@@ -24,6 +24,9 @@ describe("web-video API request validation", () => {
   it("requires a bounded trim", () => {
     expect(validateInvoke(dl({ trim: undefined })).ok).toBe(false);
     expect(validateInvoke(dl({ trim: { startSec: 0, endSec: 1000 } })).ok).toBe(false);
+    // A whole social video (a video project's source) up to 10 min is fine; longer is not.
+    expect(validateInvoke(dl({ trim: { startSec: 0, endSec: 600 } })).ok).toBe(true);
+    expect(validateInvoke(dl({ trim: { startSec: 0, endSec: 600.5 } })).ok).toBe(false);
     expect(validateInvoke(dl({ trim: { startSec: 10, endSec: 5 } })).ok).toBe(false);
   });
 

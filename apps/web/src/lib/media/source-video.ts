@@ -48,8 +48,8 @@ export async function lookupVideo(pageUrl: string): Promise<WebVideoCandidate> {
 }
 
 /**
- * The first `SOURCE_VIDEO_MAX_SEC` of the video as a `web_video` asset tagged `role: "source"`. A long section can
- * keep the NAS busy for minutes (decoding, one H.264 encode), longer than one function may run: after `wait.waitMs`
+ * The whole video (up to `SOURCE_VIDEO_MAX_SEC`, 10 min) as a `web_video` asset tagged `role: "source"`. It can keep
+ * the video box busy for minutes (decoding, one H.264 encode), longer than one function may run: after `wait.waitMs`
  * this returns `{ pending: jobId }`, and the caller's next durable step passes that `jobId` back to keep waiting.
  */
 export async function downloadSourceVideo(

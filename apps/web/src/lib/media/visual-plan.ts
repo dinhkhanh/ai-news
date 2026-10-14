@@ -201,7 +201,7 @@ export function youtubeId(url: string): string | null {
   }
 }
 
-/** Longest section of a web video the editor fetches by hand (the NAS API refuses more than 120 s; a shot needs far less). */
+/** Longest section of a web video the editor fetches by hand (a shot needs far less; the editor's route stops at 120 s). */
 export const MAX_MANUAL_SECTION_SEC = 60;
 /** Section fetched when the editor pastes a video page without an end time. */
 export const DEFAULT_MANUAL_SECTION_SEC = 20;
