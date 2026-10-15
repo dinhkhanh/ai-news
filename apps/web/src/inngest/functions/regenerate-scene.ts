@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { inngest } from "../client";
 import { projectSceneRegenerateRequested } from "../events";
-import { reportProgress } from "@/lib/progress";
+import { reportProgress, tickProgress } from "@/lib/progress";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { logActivity } from "@/lib/activity";
@@ -26,7 +26,8 @@ import { docOfRow, saveTimelineVersion } from "@/lib/review";
 /**
  * Phase 4 (docs/PLAN.md §4.7 "regenerate one scene's B-roll or VO, change
  * music", plus a motion graphic designed by Claude Opus 5.5 for one shot or the
- * whole scene): redo one part of the editor document and store the result as a
+ * whole scene, and the whole voice-over read again, in another voice if the
+ * editor picked one): redo one part of the editor document and store the result as a
  * new timeline version (kind = regenerated) on top of the version the editor
  * was looking at. A B-roll re-search follows the visual priority
  * (`visual-plan.ts`) from tier 2: other outlets' pictures of what the scene's
@@ -51,7 +52,7 @@ export const regenerateSceneFn = inngest.createFunction(
     },
   },
   async ({ event, step }) => {
-    const { projectId, organizationId, requestedBy, timelineId, what, sceneId, voiceover, brollTerms, engine, instruction, shot, backdrop: backdropPick } = event.data;
+    const { projectId, organizationId, requestedBy, timelineId, what, sceneId, voiceover, voicePresetId, brollTerms, engine, instruction, shot, backdrop: backdropPick } = event.data;
     const ctx = { userId: requestedBy, organizationId };
     const pctx = { ...ctx, projectId };
     const buildId = nanoid(8);
@@ -65,17 +66,18 @@ export const regenerateSceneFn = inngest.createFunction(
         if (!timeline) throw new NonRetriableError("Timeline version not found");
         await tx.update(schema.projects).set({ busyStep: "regenerate", lastError: null }).where(eq(schema.projects.id, projectId));
         const article = await tx.query.articles.findFirst({ where: eq(schema.articles.projectId, projectId), columns: { siteName: true } });
-        // A motion comic reads each line in its speaker's voice: re-voicing keeps the voice the build gave that scene.
-        const comicVoice = project.sourceKind === "comic" ? (timeline.buildJson as { voice?: { scenes?: Array<{ sceneId: string; presetId?: string | null }> } }).voice?.scenes?.find((v) => v.sceneId === sceneId)?.presetId : null;
-        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: comicVoice ?? project.voicePresetId, motionEngine: project.motionEngine, photoSketch: project.photoSketch, sourceName: article?.siteName ?? null, timeline };
+        // A motion comic reads each line in its speaker's voice: re-voicing keeps the voice the build gave each scene.
+        const comicVoices: Record<string, string> =
+          project.sourceKind === "comic" ? Object.fromEntries(((timeline.buildJson as { voice?: { scenes?: Array<{ sceneId: string; presetId?: string | null }> } }).voice?.scenes ?? []).flatMap((v) => (v.presetId ? [[v.sceneId, v.presetId]] : []))) : {};
+        return { tone: project.tone, political: project.political, sourceUrl: project.canonicalUrl ?? project.url, voicePresetId: project.voicePresetId, comicVoices, motionEngine: project.motionEngine, photoSketch: project.photoSketch, sourceName: article?.siteName ?? null, timeline };
       });
       const { doc } = docOfRow(row.timeline);
       const stock = ((row.timeline.buildJson as { stock?: Record<string, unknown> }).stock ?? {}) as Record<string, unknown>;
-      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, voicePresetId: row.voicePresetId, motionEngine: row.motionEngine, photoSketch: row.photoSketch, sourceName: row.sourceName, version: row.timeline.version, doc, stock };
+      return { tone: row.tone, political: row.political, sourceUrl: row.sourceUrl, voicePresetId: row.voicePresetId, comicVoices: row.comicVoices, motionEngine: row.motionEngine, photoSketch: row.photoSketch, sourceName: row.sourceName, version: row.timeline.version, doc, stock };
     });
 
     const sceneIdx = base.doc.scenes.findIndex((s) => s.id === sceneId);
-    if (what !== "music" && sceneIdx < 0) throw new NonRetriableError(`Scene ${sceneId} is not in timeline v${base.version}`);
+    if (what !== "music" && what !== "voices" && sceneIdx < 0) throw new NonRetriableError(`Scene ${sceneId} is not in timeline v${base.version}`);
     const scene = base.doc.scenes[sceneIdx] as EditorScene | undefined;
 
     let next: EditorDoc = base.doc;
@@ -87,8 +89,8 @@ export const regenerateSceneFn = inngest.createFunction(
       if (text.length < 2) throw new NonRetriableError("Voice-over text is empty");
       const v = await step.run("voice", async () => {
         await reportProgress(pctx, { label: `Đọc lại lời cảnh ${scene.id} (Google TTS)`, pct: 20 });
-        // The project's voice: it is only changed together with a rebuild (build form), so it is the voice of this version.
-        const preset = await loadVoicePreset(ctx, base.doc.language, base.voicePresetId);
+        // The project's voice: the build form and the editor's whole-video re-voice change it, so it is the voice of this version.
+        const preset = await loadVoicePreset(ctx, base.doc.language, base.comicVoices[scene.id] ?? base.voicePresetId);
         const pronunciations = await loadPronunciations(ctx, base.doc.language);
         return synthesizeScene({ sceneId: scene.id, text, language: base.doc.language, preset, pronunciations, r2Key: r2Key.media(organizationId, projectId, `vo/${buildId}-${scene.id}.wav`) }, pctx);
       });
@@ -98,6 +100,48 @@ export const regenerateSceneFn = inngest.createFunction(
       };
       changes.push(`${scene.id}: đọc lại lời${text !== scene.voiceover ? " (văn bản mới)" : ""} · timing ${v.timing}`);
       build.lastVoice = { sceneId: scene.id, timing: v.timing, matched: v.matched, words: v.words.length, costUsd: v.costUsd };
+    }
+
+    if (what === "voices") {
+      // Every scene with words is read again from its saved text; a new voice becomes the project's once the version is saved.
+      const presetId = voicePresetId === undefined ? base.voicePresetId : voicePresetId;
+      const spoken = base.doc.scenes.filter((s) => s.voiceover.trim().length >= 2);
+      if (!spoken.length) throw new NonRetriableError("Không cảnh nào có lời đọc");
+      const setup = await step.run("voices-setup", async () => {
+        await reportProgress(pctx, { label: `Đọc lại toàn bộ lời (${spoken.length} cảnh)`, pct: 5, total: spoken.length });
+        const preset = await loadVoicePreset(ctx, base.doc.language, presetId);
+        // A motion comic keeps each speaker's voice; only the narrator's lines take the chosen one.
+        const presets: Record<string, Awaited<ReturnType<typeof loadVoicePreset>>> = { [preset.id]: preset };
+        for (const id of new Set(Object.values(base.comicVoices))) presets[id] ??= await loadVoicePreset(ctx, base.doc.language, id);
+        return { preset, presets, pronunciations: await loadPronunciations(ctx, base.doc.language) };
+      });
+      const voices = await Promise.all(
+        spoken.map((s) =>
+          step.run(`voice-${s.id}`, async () => {
+            const preset = setup.presets[base.comicVoices[s.id] ?? setup.preset.id] ?? setup.preset;
+            const v = await synthesizeScene({ sceneId: s.id, text: s.voiceover.trim(), language: base.doc.language, preset, pronunciations: setup.pronunciations, r2Key: r2Key.media(organizationId, projectId, `vo/${buildId}-${s.id}.wav`) }, pctx);
+            await tickProgress(pctx, { label: "Đọc lại lời", total: spoken.length, from: 5, to: 70 });
+            return v;
+          }),
+        ),
+      );
+      const byScene = new Map(voices.map((v) => [v.sceneId, v]));
+      next = {
+        ...base.doc,
+        scenes: base.doc.scenes.map((s) => {
+          const v = byScene.get(s.id);
+          return v ? { ...s, voiceover: s.voiceover.trim(), voice: { key: v.key, durationMs: v.durationMs, words: v.words }, captions: null, durationSec: Math.round((v.durationMs / 1000) * 10) / 10 } : s;
+        }),
+      };
+      const changed = voicePresetId !== undefined && voicePresetId !== base.voicePresetId;
+      changes.push(`Đọc lại toàn bộ lời (${voices.length} cảnh) bằng giọng ${setup.preset.name}${changed ? " (giọng mới)" : ""}`);
+      build.voice = {
+        preset: setup.preset.voice,
+        presetId: setup.preset.id,
+        presetName: setup.preset.name,
+        model: setup.preset.model,
+        scenes: voices.map((v) => ({ sceneId: v.sceneId, key: v.key, durationMs: v.durationMs, timing: v.timing, matched: v.matched, words: v.words.length, chars: v.chars, spokenText: v.spokenText, pronunciations: v.pronunciationsApplied, costUsd: v.costUsd, ...(base.comicVoices[v.sceneId] ? { presetId: base.comicVoices[v.sceneId] } : {}) })),
+      };
     }
 
     if (what === "broll" && scene) {
@@ -282,6 +326,13 @@ export const regenerateSceneFn = inngest.createFunction(
       await reportProgress(pctx, { label: "Trộn âm lại và lưu phiên bản mới", pct: 75 });
       return saveTimelineVersion({ ws: ctx, projectId, doc: next, baseVersion: base.version, kind: "regenerated", changes, build });
     });
+    // The voice the editor picked is the project's from now on (single-scene re-voices and rebuilds read it), once its version exists.
+    if (what === "voices" && voicePresetId !== undefined && voicePresetId !== base.voicePresetId) {
+      await step.run("project-voice", async () => {
+        await withOrgContext(ctx, (tx) => tx.update(schema.projects).set({ voicePresetId }).where(eq(schema.projects.id, projectId)));
+        await logActivity({ actorId: requestedBy, organizationId, projectId, type: "project.voice_changed", payload: { from: base.voicePresetId, to: voicePresetId, timelineVersion: saved.version } });
+      });
+    }
     return { timelineId: saved.id, version: saved.version, changes: saved.changes };
   },
 );

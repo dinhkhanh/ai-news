@@ -16,6 +16,7 @@ import { channelLogo } from "@/lib/media/logo";
 import { listSoundCollections } from "@/lib/media/sound-collections";
 import { licenceInfo } from "@/lib/media/sound-library";
 import { presignMap } from "@/lib/media/timeline-resolve";
+import { listVoiceOptions } from "@/lib/media/tts";
 import { storedFrame, storedSection } from "@/lib/media/framing";
 import { storedWatermark } from "@/lib/media/watermark";
 import type { PendingCapture } from "@/lib/media/visual-plan";
@@ -135,6 +136,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const [renderLimit, renderUsed] = writer ? await Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0];
   const renderUrls = await Promise.all(renders.map((r) => (r.status === "done" && r.outputPath ? presignGet(r.outputPath, 3600).catch(() => null) : null)));
   const status = await loadProjectStatus(ws, project.id);
+  const voiceOptions = await listVoiceOptions(ws);
   const props: EditorProps = {
     projectId: project.id,
     projectTitle: projectLabel(project),
@@ -149,6 +151,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
     political: project.political,
     comic: project.sourceKind === "comic",
     motionEngine: project.motionEngine,
+    voice: { options: voiceOptions, projectPresetId: project.voicePresetId, versionName: (selected.buildJson as { voice?: { presetName?: string } }).voice?.presetName ?? null },
     version: { id: selected.id, version: selected.version, kind: selected.kind, changes: selected.changes, note: selected.note, createdAt: selected.createdAt.toISOString(), createdByName: selected.createdBy ? (data.authors.get(selected.createdBy) ?? null) : null, isLatest: selected.id === timelines[0].id },
     versions: timelines.map((t) => ({ id: t.id, version: t.version, kind: t.kind, changes: t.changes, createdAt: t.createdAt.toISOString(), createdByName: t.createdBy ? (data.authors.get(t.createdBy) ?? null) : null })),
     doc,

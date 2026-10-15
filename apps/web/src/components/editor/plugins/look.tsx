@@ -1,10 +1,14 @@
 "use client";
+import { useRef, useState } from "react";
 import Link from "next/link";
-import { SlidersHorizontal } from "lucide-react";
+import { Mic, SlidersHorizontal, Volume2 } from "lucide-react";
+import { toast } from "sonner";
 import { SKETCH_STYLES, type SketchStyle } from "@ai-news/video/schema";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
+import { VoiceSelect } from "@/components/voice-select";
+import { previewVoice } from "@/app/app/voices/actions";
 import { setSceneSketch, SKETCH_LABEL, sketchCount } from "@/lib/media/editor";
 import { useEditor } from "../core/context";
 import { definePlugin } from "../core/plugin";
@@ -101,6 +105,8 @@ function LookPanel() {
           </Section>
         ) : null}
 
+        <VoiceSection />
+
         <Section title="Nhạc nền">
           <NativeSelect
             aria-label="Nhạc nền"
@@ -174,21 +180,64 @@ function LookPanel() {
   );
 }
 
+/** The whole voice-over read again from the saved text, in the project's voice or another one (which then becomes the project's). */
+function VoiceSection() {
+  const ctx = useEditor();
+  const { doc, props } = ctx;
+  const current = props.voice.projectPresetId ?? "";
+  const [picked, setPicked] = useState(current);
+  const [listening, setListening] = useState(false);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const changed = picked !== current;
+  const spoken = doc.scenes.filter((s) => s.voiceover.trim().length >= 2).length;
+
+  const listen = async () => {
+    setListening(true);
+    const r = await previewVoice({ presetId: picked || undefined, language: doc.language });
+    setListening(false);
+    if (!r.ok) return void toast.error(r.message);
+    audio.current?.pause();
+    audio.current = new Audio(r.audio);
+    void audio.current.play();
+  };
+
+  return (
+    <Section title="Giọng đọc" aside={props.voice.versionName ? <span className="text-[11px] text-muted-foreground">bản này: {props.voice.versionName}</span> : null}>
+      {props.comic ? (
+        <p className="text-[11px] text-muted-foreground">Truyện tranh: mỗi nhân vật giữ giọng của mình; đổi giọng người dẫn ở form “Dựng video”.</p>
+      ) : (
+        <div className="flex gap-1.5">
+          <VoiceSelect id="editor-voice" voices={props.voice.options} value={current} size="sm" className="min-w-0 flex-1" emptyLabel="Giọng mặc định của workspace" disabled={!props.canEdit} onChange={setPicked} />
+          <Button size="sm" variant="ghost" disabled={!props.canEdit || listening} onClick={() => void listen()} title="Nghe một câu mẫu bằng giọng này">
+            <Volume2 /> {listening ? "…" : "Nghe"}
+          </Button>
+        </div>
+      )}
+      <Button size="sm" variant={changed ? "default" : "outline"} disabled={!ctx.canRegenerate || !spoken} title={ctx.regenerateHint ?? "Google TTS cho mọi cảnh từ lời đã lưu; trộn lại âm thanh; thành phiên bản mới"} onClick={() => ctx.services.regenerate("voices", changed ? { voicePresetId: picked || null } : {})}>
+        <Mic /> {changed ? `Đổi giọng & đọc lại ${spoken} cảnh` : `Đọc lại toàn bộ (${spoken} cảnh)`}
+      </Button>
+      <p className="text-[11px] text-muted-foreground">Đọc lại mọi cảnh từ lời đã lưu (lời đang sửa dở chưa tính). Độ dài cảnh theo giọng mới, phụ đề sửa tay được tạo lại; giọng chọn ở đây thành giọng của dự án.</p>
+    </Section>
+  );
+}
+
 function setCoverNow(ctx: ReturnType<typeof useEditor>) {
   const sec = Math.round(ctx.player.nowSec() * 10) / 10;
   ctx.update(`Ảnh bìa tại ${sec.toFixed(1)} s`, (d) => ({ ...d, coverAtSec: sec }));
 }
 
-/** Brand kit, overlay, hand-drawn look, music and the cover frame: settings of the whole video. */
+/** Brand kit, overlay, hand-drawn look, voice, music and the cover frame: settings of the whole video. */
 export const lookPlugin = definePlugin({
   id: "look",
   name: "Diện mạo & âm thanh",
-  description: "Bộ nhận diện, lớp phủ, ảnh vẽ tay cho cả video, nhạc nền và ảnh bìa.",
+  description: "Bộ nhận diện, lớp phủ, ảnh vẽ tay cho cả video, giọng đọc, nhạc nền và ảnh bìa.",
   panels: [{ id: "look", title: "Diện mạo", icon: SlidersHorizontal, order: 30, Component: LookPanel }],
   markers: [{ id: "cover", items: (c) => (c.doc.coverAtSec != null ? [{ id: "cover", atSec: c.doc.coverAtSec, label: `Ảnh bìa tại ${timecode(c.doc.coverAtSec)}`, tone: "info", glyph: "bìa" }] : []) }],
   commands: [
     { id: "look.cover", title: () => "Đặt ảnh bìa tại khung đang xem", group: "Cả video", when: (c) => !c.readOnly, run: setCoverNow },
     { id: "look.music", title: () => "Tìm nhạc nền mới", group: "Cả video", when: (c) => c.canRegenerate, run: (c) => c.services.regenerate("music") },
+    { id: "look.revoice", title: () => "Đọc lại toàn bộ lời", group: "Cả video", when: (c) => c.canRegenerate, run: (c) => c.services.regenerate("voices") },
+    { id: "look.voice", title: () => "Đổi giọng đọc", group: "Cả video", when: (c) => !c.readOnly && !c.props.comic, run: (c) => c.ui.setPanel("look") },
     { id: "look.open", title: () => "Mở Diện mạo & âm thanh", group: "Đi tới", run: (c) => c.ui.setPanel("look") },
   ],
 });

@@ -24,6 +24,7 @@ import { queueRender } from "@/lib/render-request";
 import { canManagePlugins, PLUGIN_ID_RE } from "@/lib/editor-plugins";
 import { REWRITE_MODES, rewriteVoiceover, type RewriteMode } from "@/lib/llm/rewrite";
 import { sceneVoiceMs } from "@/lib/media/editor";
+import { findVoice } from "@/lib/media/tts";
 import { docOfRow, saveTimelineVersion, verdictsOfScript } from "@/lib/review";
 import { isPrivateHost } from "@/lib/url";
 import { assertWorkspaceWriter } from "@/lib/workspace";
@@ -141,8 +142,12 @@ export async function setEditorPlugins(input: { disabled: string[] }): Promise<{
   }
 }
 
-/** Redo one scene's B-roll or voice-over, or pick new music, as a background step that stores a new version. */
-export async function regenerateScene(input: { projectId: string; timelineId: string; what: "broll" | "voice" | "music" | "motion"; sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { kind: "video" | "image"; key: string; trimStartSec: number } | null }): Promise<EditorActionResult> {
+/**
+ * Redo one scene's B-roll, voice-over or motion graphic, read the whole voice-over again (`voices`, optionally in another
+ * voice: `voicePresetId`, "" = the workspace default, which becomes the project's voice), or pick new music, as a
+ * background step that stores a new version.
+ */
+export async function regenerateScene(input: { projectId: string; timelineId: string; what: "broll" | "voice" | "voices" | "music" | "motion"; sceneId?: string; voiceover?: string; voicePresetId?: string | null; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { kind: "video" | "image"; key: string; trimStartSec: number } | null }): Promise<EditorActionResult> {
   try {
     const { ws, log } = await assertWorkspaceWriter();
     const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, input.projectId) }));
@@ -151,7 +156,9 @@ export async function regenerateScene(input: { projectId: string; timelineId: st
     if (busy) throw new Error(`Đợi bước ${busy} chạy xong`);
     const latest = await withOrgContext(ws, (tx) => tx.query.timelines.findFirst({ where: eq(schema.timelines.projectId, input.projectId), orderBy: desc(schema.timelines.version) }));
     if (!latest || latest.id !== input.timelineId) throw new Error("Chỉ tạo lại được trên phiên bản mới nhất. Tải lại trang.");
-    if (input.what !== "music" && !input.sceneId) throw new Error("Thiếu cảnh");
+    if (input.what !== "music" && input.what !== "voices" && !input.sceneId) throw new Error("Thiếu cảnh");
+    // A voice of this workspace or the platform's; a motion comic keeps its narrator (the build form changes it).
+    const voicePresetId = input.what === "voices" && input.voicePresetId !== undefined && project.sourceKind !== "comic" ? ((await findVoice(ws, input.voicePresetId ?? ""))?.id ?? null) : undefined;
     const timeline = await withOrgContext(ws, (tx) => tx.query.timelines.findFirst({ where: and(eq(schema.timelines.projectId, input.projectId), eq(schema.timelines.id, input.timelineId)) }));
     if (!timeline) throw new Error("Timeline not found");
     const voiceover = input.voiceover?.trim().slice(0, 2000) || undefined;
@@ -164,11 +171,11 @@ export async function regenerateScene(input: { projectId: string; timelineId: st
     const backdrop = input.what === "motion" && input.backdrop?.key ? { kind: input.backdrop.kind === "image" ? ("image" as const) : ("video" as const), key: String(input.backdrop.key).slice(0, 512), trimStartSec: Math.max(0, Number(input.backdrop.trimStartSec) || 0) } : undefined;
     await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "regenerate", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, input.projectId)));
     await inngest.send(
-      projectSceneRegenerateRequested.create({ projectId: input.projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: input.timelineId, what: input.what, sceneId: input.sceneId, voiceover, brollTerms: brollTerms?.length ? brollTerms : undefined, engine, instruction, shot, backdrop }),
+      projectSceneRegenerateRequested.create({ projectId: input.projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: input.timelineId, what: input.what, sceneId: input.what === "voices" ? undefined : input.sceneId, voiceover, voicePresetId, brollTerms: brollTerms?.length ? brollTerms : undefined, engine, instruction, shot, backdrop }),
     );
-    await log("scene.regenerate_requested", { timelineId: input.timelineId, version: timeline.version, what: input.what, sceneId: input.sceneId ?? null, textEdited: Boolean(voiceover), terms: brollTerms ?? null, ...(engine ? { engine, shot: shot ?? "scene", instruction: instruction ?? null, backdrop: backdrop?.key ?? null } : {}) }, input.projectId);
+    await log("scene.regenerate_requested", { timelineId: input.timelineId, version: timeline.version, what: input.what, sceneId: input.sceneId ?? null, textEdited: Boolean(voiceover), terms: brollTerms ?? null, ...(voicePresetId !== undefined ? { voicePresetId, voiceChanged: voicePresetId !== project.voicePresetId } : {}), ...(engine ? { engine, shot: shot ?? "scene", instruction: instruction ?? null, backdrop: backdrop?.key ?? null } : {}) }, input.projectId);
     revalidatePath(`/app/projects/${input.projectId}/edit`);
-    const label = input.what === "voice" ? "Đang đọc lại lời" : input.what === "broll" ? "Đang tìm B-roll mới" : input.what === "motion" ? `Claude đang dựng đồ hoạ chuyển động (${engine === "hyperframes" ? "HyperFrames" : "Remotion"})` : "Đang chọn nhạc mới";
+    const label = input.what === "voice" ? "Đang đọc lại lời" : input.what === "voices" ? "Đang đọc lại toàn bộ lời" : input.what === "broll" ? "Đang tìm B-roll mới" : input.what === "motion" ? `Claude đang dựng đồ hoạ chuyển động (${engine === "hyperframes" ? "HyperFrames" : "Remotion"})` : "Đang chọn nhạc mới";
     return { ok: true, message: `${label}… kết quả sẽ thành phiên bản v${timeline.version + 1}` };
   } catch (e) {
     return fail(e);

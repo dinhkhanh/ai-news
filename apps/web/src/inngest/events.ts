@@ -116,11 +116,13 @@ export const projectSceneRegenerateRequested = eventType("project/scene.regenera
     requestedBy: z.string(),
     /** Version to build on; must still be the latest when the result is saved. */
     timelineId: z.string(),
-    what: z.enum(["broll", "voice", "music", "motion"]),
-    /** Scene for broll/voice. */
+    what: z.enum(["broll", "voice", "voices", "music", "motion"]),
+    /** Scene for broll/voice/motion (`voices` = every scene, `music` = none). */
     sceneId: z.string().optional(),
     /** Edited spoken text for a voice regeneration; default = the scene's current text. */
     voiceover: z.string().max(2000).optional(),
+    /** `voices`: the voice to read the whole video with, which becomes the project's voice (null = workspace default; absent = keep the project's). */
+    voicePresetId: z.string().nullable().optional(),
     /** Replacement English search terms for a B-roll regeneration. */
     brollTerms: z.array(z.string().max(80)).max(6).optional(),
     /** Motion graphic: the engine, the editor's directions, and which shot (absent = one graphic for the whole scene). */

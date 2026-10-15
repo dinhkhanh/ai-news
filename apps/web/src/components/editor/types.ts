@@ -3,6 +3,7 @@ import type { Brand } from "@ai-news/video/schema";
 import type { EditorDoc } from "@/lib/media/editor";
 import type { SceneVerdict } from "@/lib/llm/schemas";
 import type { FrameFaces } from "@/lib/media/framing";
+import type { VoiceOption } from "@/lib/media/tts";
 import type { PendingCapture } from "@/lib/media/visual-plan";
 import type { WatermarkVerdict } from "@/lib/media/watermark";
 import type { Platform } from "@/lib/publish/platforms";
@@ -76,6 +77,8 @@ export type EditorProps = {
   political: boolean;
   /** Motion comic (`source_kind = 'comic'`): a panel held for several beats and longer than 5 s is the point, not a fault. */
   comic: boolean;
+  /** Voices the whole voice-over can be read again with, the project's voice ("" = workspace default) and the one this version was read with. */
+  voice: { options: VoiceOption[]; projectPresetId: string | null; versionName: string | null };
   /** Engine the motion panel preselects (`projects.motion_engine`). */
   motionEngine: MotionEngine;
   version: VersionRow & { note: string | null; isLatest: boolean };

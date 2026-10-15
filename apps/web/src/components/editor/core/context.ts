@@ -13,8 +13,8 @@ import type { Contributions, EditorPlugin } from "./plugin";
 export type Selection = { sceneId: string | null; shot: number };
 export type EditorMode = "edit" | "deliver";
 export type UpdateOpts = { coalesce?: string };
-export type RegenerateWhat = "voice" | "broll" | "music" | "motion";
-export type RegeneratePayload = { sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { kind: "video" | "image"; key: string; trimStartSec: number } | null };
+export type RegenerateWhat = "voice" | "voices" | "broll" | "music" | "motion";
+export type RegeneratePayload = { sceneId?: string; voiceover?: string; voicePresetId?: string | null; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { kind: "video" | "image"; key: string; trimStartSec: number } | null };
 
 /** Player position, kept outside React state so only the playhead and the transport re-render at 30 fps. */
 export type TimeState = { frame: number; playing: boolean };
