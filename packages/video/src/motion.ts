@@ -24,7 +24,7 @@ export type MotionMode = (typeof MOTION_MODES)[number];
 export const MOTION_ENGINES = ["remotion", "hyperframes"] as const;
 export type MotionEngine = (typeof MOTION_ENGINES)[number];
 
-/** `video` = the shot's backdrop clip (real footage, dimmed); falls back to `gradient` when the shot has none. */
+/** `video` = the shot's backdrop (a clip or a picture, dimmed; `MotionBackdrop.tsx`); falls back to `gradient` when the shot has none. */
 export const MOTION_BACKGROUNDS = ["gradient", "grid", "dots", "rays", "image", "video"] as const;
 export const MOTION_MOODS = ["brand", "dark", "light", "alert"] as const;
 export const MOTION_ELEMENTS = ["kicker", "title", "text", "stat", "bars", "list", "quote", "timeline", "compare", "icon", "image"] as const;
@@ -148,7 +148,10 @@ export type HyperframesDocumentInput = {
   fontFamily: string;
   /** Lowest y (px) the composition may draw text at: the captions start below it. */
   safeBottom: number;
-  /** A backdrop clip plays under the iframe: the page's own background stays transparent. */
+  /**
+   * A backdrop (clip or picture) shows under the iframe: the page and the composition's root element are forced
+   * transparent, so the editor can swap the backdrop behind an existing composition without touching its motion.
+   */
   transparent?: boolean;
 };
 
@@ -184,7 +187,7 @@ export function hyperframesDocument(input: HyperframesDocumentInput): string {
 <style>
 :root{--brand-primary:${c.primary};--brand-accent:${c.accent};--brand-bg:${c.background};--brand-text:${c.text};--brand-highlight:${c.highlight};--font:${input.fontFamily},'Be Vietnam Pro',sans-serif;--safe-bottom:${input.safeBottom}px}
 html,body{margin:0;padding:0;width:1080px;height:1920px;overflow:hidden;background:${input.transparent ? "transparent" : "var(--brand-bg)"};color:var(--brand-text);font-family:var(--font)}
-*{box-sizing:border-box}
+*{box-sizing:border-box}${input.transparent ? "\n[data-composition-id]{background:transparent!important}" : ""}
 </style>
 <script src="${HYPERFRAMES_GSAP_URL}"></script>
 </head><body>

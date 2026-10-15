@@ -142,7 +142,7 @@ export async function setEditorPlugins(input: { disabled: string[] }): Promise<{
 }
 
 /** Redo one scene's B-roll or voice-over, or pick new music, as a background step that stores a new version. */
-export async function regenerateScene(input: { projectId: string; timelineId: string; what: "broll" | "voice" | "music" | "motion"; sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { key: string; trimStartSec: number } | null }): Promise<EditorActionResult> {
+export async function regenerateScene(input: { projectId: string; timelineId: string; what: "broll" | "voice" | "music" | "motion"; sceneId?: string; voiceover?: string; brollTerms?: string[]; engine?: MotionEngine; instruction?: string; shot?: number | null; backdrop?: { kind: "video" | "image"; key: string; trimStartSec: number } | null }): Promise<EditorActionResult> {
   try {
     const { ws, log } = await assertWorkspaceWriter();
     const project = await withOrgContext(ws, (tx) => tx.query.projects.findFirst({ where: eq(schema.projects.id, input.projectId) }));
@@ -160,8 +160,8 @@ export async function regenerateScene(input: { projectId: string; timelineId: st
     const engine = input.what === "motion" ? (MOTION_ENGINES.includes(input.engine as MotionEngine) ? (input.engine as MotionEngine) : project.motionEngine) : undefined;
     const instruction = input.what === "motion" ? input.instruction?.trim().slice(0, 1000) || undefined : undefined;
     const shot = input.what === "motion" && input.shot != null ? Math.max(0, Math.min(12, Math.round(input.shot))) : undefined;
-    // The clip behind the graphic; the function only accepts one of the scene's own clips.
-    const backdrop = input.what === "motion" && input.backdrop?.key ? { key: String(input.backdrop.key).slice(0, 512), trimStartSec: Math.max(0, Number(input.backdrop.trimStartSec) || 0) } : undefined;
+    // The clip or picture behind the graphic; the function only accepts one of the scene's own or an asset of the project.
+    const backdrop = input.what === "motion" && input.backdrop?.key ? { kind: input.backdrop.kind === "image" ? ("image" as const) : ("video" as const), key: String(input.backdrop.key).slice(0, 512), trimStartSec: Math.max(0, Number(input.backdrop.trimStartSec) || 0) } : undefined;
     await withOrgContext(ws, (tx) => tx.update(schema.projects).set({ busyStep: "regenerate", busyProgress: startProgress(), lastError: null }).where(eq(schema.projects.id, input.projectId)));
     await inngest.send(
       projectSceneRegenerateRequested.create({ projectId: input.projectId, organizationId: ws.organizationId, requestedBy: ws.userId, timelineId: input.timelineId, what: input.what, sceneId: input.sceneId, voiceover, brollTerms: brollTerms?.length ? brollTerms : undefined, engine, instruction, shot, backdrop }),

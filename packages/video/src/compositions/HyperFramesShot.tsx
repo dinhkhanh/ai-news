@@ -15,8 +15,9 @@ const SEEK_TIMEOUT_MS = 8_000;
  * posts `hf-seek` with the shot-relative time and holds the render
  * (`delayRender`) until the page answers that its timelines were seeked and
  * painted, so each frame is deterministic like the rest of the composition.
- * With a `backdrop` the clip plays under the iframe (Remotion seeks video far
- * better than a page could) and the page's background is transparent.
+ * With a `backdrop` the clip or picture shows under the iframe (Remotion seeks
+ * video far better than a page could) and the page and the composition's root
+ * are transparent, so a backdrop swapped in later shows through unchanged code.
  */
 export const HyperFramesShot: React.FC<{ html: string; images: string[]; backdrop: Backdrop | null; durationFrames: number; brand: Brand; kind: TimelineScene["kind"]; font: string }> = ({ html, images, backdrop, durationFrames, brand, kind, font }) => {
   const frame = useCurrentFrame();

@@ -97,7 +97,7 @@ export type MotionShotInput = {
   /** Pictures the graphic may use: R2 key + a URL Claude can look at. */
   images: Array<{ key: string; url: string }>;
   /**
-   * Real footage that can play behind the graphic (drawn by the renderer, dimmed), described in words: Claude
+   * A clip or picture that can show behind the graphic (drawn by the renderer, dimmed), described in words: Claude
    * cannot watch it. `required` = the editor chose it, so the graphic must leave it visible; otherwise Claude
    * decides whether the shot is better over footage or over a drawn background.
    */
@@ -116,7 +116,7 @@ Rules for every motion graphic:
 - Sync with the speech: a word or figure appears about 0.2 s before it is spoken (word timings are given in seconds from the shot's first frame). Keep the last state on screen until the shot ends.
 - Vertical 1080×1920 frame. The platform's UI covers the top 220 px, the right 180 px and the bottom 420 px; the captions sit right above that.
 - Bold, legible, high contrast, generous spacing, one focal point at a time. Movement is purposeful: entrances, count-ups, bars growing, lines drawing. No flashing.
-- Real footage behind the graphic (only when a video clip is provided): the renderer plays the clip full frame, muted and dimmed, under your graphic. It suits a hook, a kinetic title, a quote, a list or a single big figure over the place or scene the voice-over is about; a dense chart reads better on a drawn background. Over footage, keep large areas open so the clip shows, and put every line of text on a solid or frosted card / panel or give it a strong shadow – never thin text straight on moving video.`;
+- Real footage or a photo behind the graphic (only when a clip or picture is provided): the renderer shows it full frame, muted and dimmed, under your graphic. It suits a hook, a kinetic title, a quote, a list or a single big figure over the place or scene the voice-over is about; a dense chart reads better on a drawn background. Over footage, keep large areas open so the clip shows, and put every line of text on a solid or frosted card / panel or give it a strong shadow – never thin text straight on moving video.`;
 
 function remotionSystem(lang: "vi" | "en") {
   return `You are a senior motion designer for a news channel's short vertical videos. You design one shot as a JSON spec that a fixed renderer draws with the channel's brand colours.
@@ -136,7 +136,7 @@ Elements (fields not listed are null):
 - icon: \`emoji\` – one large emoji floating, as an accent next to a title or stat.
 - image: \`image\` = index of a provided picture, \`text\` = caption. Only when pictures are provided.
 
-\`mood\`: brand (the kit's colours, default), dark, light (paper, for explainers), alert (breaking / danger only); with a video background it tints the footage. \`background\`: gradient, grid (data), dots, rays (energy, the hook), image (\`backgroundImage\` = a provided picture, dimmed), video (the provided clip plays behind, tinted by the mood; only when a clip is provided). Over video the renderer puts titles, stats and lists on the frame as usual; prefer 1–2 elements per beat so the footage stays visible.
+\`mood\`: brand (the kit's colours, default), dark, light (paper, for explainers), alert (breaking / danger only); with a video background it tints the footage. \`background\`: gradient, grid (data), dots, rays (energy, the hook), image (\`backgroundImage\` = a provided picture, dimmed), video (the provided background clip or picture shows behind, tinted by the mood; only when one is provided). Over video the renderer puts titles, stats and lists on the frame as usual; prefer 1–2 elements per beat so the footage stays visible.
 ${COMMON_RULES(lang)}`;
 }
 
@@ -162,7 +162,7 @@ Technical constraints (the render fails otherwise):
 - Canvas 1080×1920. Put text between x 80 and 960, y 240 and ${Math.round(safeBottom)} (below that are the captions). Background art may fill the whole frame.
 - Available CSS variables: --brand-primary, --brand-accent, --brand-bg, --brand-text, --brand-highlight, --font (the brand font, Be Vietnam Pro / Inter, weights 500–900; Vietnamese diacritics supported), --safe-bottom.
 - Pictures: only the provided ones, as <img src="{{image:N}}"> (N = index); otherwise draw with CSS and inline SVG (charts, icons, maps as simple shapes).
-- Video clip (only when one is provided): you cannot embed it (no <video>); the renderer plays it under the page. To use it, give #stage and every full-frame layer a transparent background (a partial gradient vignette is fine) and answer videoBackground: true; to paint your own background instead, answer false and the clip is not shown.
+- Background clip or picture (only when one is provided): you cannot embed it (no <video>, not as an <img>); the renderer shows it under the page. To use it, give #stage and every full-frame layer a transparent background (a partial gradient vignette is fine) and answer videoBackground: true; to paint your own background instead, answer false and it is not shown.
 - Keep it under 40 000 characters.
 ${COMMON_RULES(lang)}`;
 }
@@ -179,9 +179,9 @@ function userContent(input: MotionShotInput) {
     input.images.length ? `Pictures you may use (index: what you see below): ${input.images.map((_, i) => i).join(", ")}.` : "No pictures: a pure graphic.",
     input.backdrop
       ? input.backdrop.required
-        ? `Video clip behind the graphic, chosen by the editor (it must stay visible: ${input.engine === "remotion" ? 'background "video"' : "transparent stage, videoBackground true"}): ${input.backdrop.description}.`
-        : `Video clip available as background (use it when real footage serves the shot better than a drawn background): ${input.backdrop.description}.`
-      : "No video clip: draw the background.",
+        ? `${input.backdrop.kind === "image" ? "Picture" : "Video clip"} behind the graphic, chosen by the editor (it must stay visible: ${input.engine === "remotion" ? 'background "video"' : "transparent stage, videoBackground true"}): ${input.backdrop.description}.`
+        : `${input.backdrop.kind === "image" ? "Picture" : "Video clip"} available as background (use it when real footage serves the shot better than a drawn background): ${input.backdrop.description}.`
+      : "No background clip or picture: draw the background.",
     input.instruction ? `The editor's directions (follow them unless they break the rules): ${input.instruction}` : "",
   ]
     .filter(Boolean)
@@ -195,7 +195,12 @@ function userContent(input: MotionShotInput) {
   return blocks;
 }
 
-const backdropOnly = (b: MotionShotInput["backdrop"]): EditorBackdrop | null => (b ? { key: b.key, clipDurationSec: b.clipDurationSec, trimStartSec: b.trimStartSec, credit: b.credit, assetId: b.assetId, thumbnailUrl: b.thumbnailUrl } : null);
+const backdropOnly = (b: MotionShotInput["backdrop"]): EditorBackdrop | null =>
+  !b
+    ? null
+    : b.kind === "image"
+      ? { kind: "image", key: b.key, focus: b.focus, credit: b.credit, assetId: b.assetId, thumbnailUrl: b.thumbnailUrl }
+      : { kind: "video", key: b.key, clipDurationSec: b.clipDurationSec, trimStartSec: b.trimStartSec, credit: b.credit, assetId: b.assetId, thumbnailUrl: b.thumbnailUrl };
 
 /** Design one motion shot. Throws `LlmOutputError` on a refusal / unusable output (HyperFrames is retried once with the problems named). */
 export async function designMotionShot(input: MotionShotInput, ctx: Omit<LlmContext, "purpose">): Promise<MotionShotResult> {
@@ -221,7 +226,7 @@ export async function designMotionShot(input: MotionShotInput, ctx: Omit<LlmCont
     if (!res.parsed_output) throw new LlmOutputError("Motion spec did not match the schema", res.stop_reason);
     const spec: MotionSpec = normaliseMotionSpec(res.parsed_output, input.durationSec);
     if (!spec.beats.length) throw new LlmOutputError("Motion spec has no beats", res.stop_reason);
-    // The clip is kept only when the spec plays it (always when the editor chose it); a video background without a clip is a gradient.
+    // The backdrop is kept only when the spec shows it (always when the editor chose it); a video background without one is a gradient.
     if (input.backdrop?.required) spec.background = "video";
     if (spec.background === "video" && !input.backdrop) spec.background = "gradient";
     const backdrop = spec.background === "video" ? backdropOnly(input.backdrop) : null;

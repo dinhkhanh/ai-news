@@ -10,10 +10,10 @@ import { logActivity } from "@/lib/activity";
 import { fetchSceneBroll } from "@/lib/media/broll";
 import { isPermanentLlmError, LlmOutputError } from "@/lib/llm/client";
 import { designMotionShot } from "@/lib/llm/motion";
-import { backdropCandidates, buildFromDoc, EDITOR_FPS, setShot, voicePlacement, type EditorDoc, type EditorScene } from "@/lib/media/editor";
+import { backdropCandidates, buildFromDoc, EDITOR_FPS, setShot, voicePlacement, type EditorBackdrop, type EditorDoc, type EditorScene } from "@/lib/media/editor";
 import { shotWords } from "@/lib/media/motion-plan";
 import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
-import { frameStill, overlayZones } from "@/lib/media/framing";
+import { frameStill, overlayZones, storedFrame } from "@/lib/media/framing";
 import { aiImagesAvailable, generateSceneImages } from "@/lib/media/generate";
 import { pickMusic } from "@/lib/media/music";
 import { findRelatedImages, storeRelatedImages } from "@/lib/media/related";
@@ -209,8 +209,24 @@ export const regenerateSceneFn = inngest.createFunction(
       const voiceStartSec = (sceneIdx === 0 ? LEAD_MS / 1000 : 0) - target.from / EDITOR_FPS;
       // Pictures the graphic may use: the scene's own stills (at most 4), so a graphic can frame a real photo of the story.
       const stills = [scene.visual, ...scene.shots].flatMap((v) => (v.kind === "image" ? [v.key] : [])).filter((k, i, a) => a.indexOf(k) === i).slice(0, 4);
-      // The clip the editor chose to play behind the graphic: only one of the scene's own clips (or a graphic's current backdrop).
-      const clip = backdropPick ? (backdropCandidates(scene).find((b) => b.key === backdropPick.key && Math.abs(b.trimStartSec - backdropPick.trimStartSec) < 0.01) ?? null) : null;
+      // The clip or picture the editor chose to show behind the graphic: one of the scene's own (or a graphic's current
+      // backdrop), else an asset of this project (the media library), never a foreign key.
+      const clip = backdropPick
+        ? await step.run("backdrop", async (): Promise<EditorBackdrop | null> => {
+            const own = backdropCandidates(scene).find((b) => b.kind === backdropPick.kind && b.key === backdropPick.key && (b.kind === "image" || Math.abs(b.trimStartSec - backdropPick.trimStartSec) < 0.01));
+            if (own) return own;
+            const a = await withOrgContext(ctx, (tx) => tx.query.assets.findFirst({ where: and(eq(schema.assets.projectId, projectId), eq(schema.assets.r2Path, backdropPick.key)) }));
+            if (!a) return null;
+            const isImage = (a.mime ?? "").startsWith("image/") || a.origin === "article";
+            if (isImage !== (backdropPick.kind === "image")) return null;
+            const meta = { credit: a.attribution, assetId: a.id, thumbnailUrl: a.thumbnailUrl };
+            if (!isImage) return { kind: "video", key: a.r2Path, clipDurationSec: a.durationSec ? Number(a.durationSec) : 5, trimStartSec: backdropPick.trimStartSec, ...meta };
+            // A picture is cropped on its faces like a picture shot would be, under this scene's overlays.
+            const frame = storedFrame(a.meta);
+            const zones = overlayZones({ kind: scene.kind, headline: scene.onScreenText, caption: base.doc.brand.caption, headlineStyle: base.doc.brand.headline, hasCaptions: Boolean(scene.voiceover.trim()), showSource: base.doc.brand.showSource, hasLogo: Boolean(base.doc.brand.logoSrc) });
+            return { kind: "image", key: a.r2Path, focus: frame ? frameStill(frame, zones).focus : null, ...meta };
+          })
+        : null;
       const r = await step.run("motion", async () => {
         await reportProgress(pctx, { label: `Claude Opus 5.5 dựng đồ hoạ chuyển động cho ${scene.id}${whole ? "" : ` · cảnh quay ${index + 1}`} (${eng === "hyperframes" ? "HyperFrames" : "Remotion"})`, pct: 20 });
         const images = await Promise.all(stills.map(async (key) => ({ key, url: await presignGet(key, 3600) })));
@@ -227,7 +243,9 @@ export const regenerateSceneFn = inngest.createFunction(
               durationSec,
               part: whole ? null : { index: index + 1, count: shots.length },
               images,
-              backdrop: clip ? { ...clip, description: `${clip.clipDurationSec.toFixed(0)} s of real footage from this scene${clip.credit ? ` (${clip.credit})` : ""}`, required: true } : null,
+              backdrop: clip
+                ? { ...clip, description: clip.kind === "video" ? `${clip.clipDurationSec.toFixed(0)} s of real footage chosen by the editor${clip.credit ? ` (${clip.credit})` : ""}` : `a photo chosen by the editor, shown full frame and dimmed${clip.credit ? ` (${clip.credit})` : ""}`, required: true }
+                : null,
               instruction: instruction ?? null,
             },
             pctx,

@@ -217,7 +217,7 @@ export const prepareAssetsFn = inngest.createFunction(
             }
           }
           const backdrop = clip
-            ? { key: clip.key, clipDurationSec: clip.durationSec ?? SHOT_SEC, trimStartSec: 0, credit: clip.credit, assetId: clip.assetId, thumbnailUrl: clip.thumbnailUrl, description: `${(clip.durationSec ?? SHOT_SEC).toFixed(0)} s stock clip found for “${sc.brollTerms[0]}”`, required: false }
+            ? { kind: "video" as const, key: clip.key, clipDurationSec: clip.durationSec ?? SHOT_SEC, trimStartSec: 0, credit: clip.credit, assetId: clip.assetId, thumbnailUrl: clip.thumbnailUrl, description: `${(clip.durationSec ?? SHOT_SEC).toFixed(0)} s stock clip found for “${sc.brollTerms[0]}”`, required: false }
             : null;
           try {
             const r = await designMotionShot({ engine: input.motionEngine, language: input.language, title: input.title, sourceName: input.source.name, brand: brand.brand, scene: sc, words, durationSec, part: null, images: [], backdrop, instruction: null }, pctx);

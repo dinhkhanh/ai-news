@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkHyperframesHtml, formatMotionNumber, hyperframesDocument, normaliseMotionSpec, sanitiseHyperframesHtml, type MotionSpec } from "@ai-news/video/motion";
-import { brandSchema, motionArea, OUTPUT, SAFE_ZONES } from "@ai-news/video/schema";
-import { backdropCandidates, backdropOf, buildFromDoc, docFromTimeline, docKeys, editorDocSchema, shotsMissing, visualKey, type EditorScene } from "./editor";
+import { brandSchema, motionArea, OUTPUT, SAFE_ZONES, timelineSchema } from "@ai-news/video/schema";
+import { backdropCandidates, backdropId, backdropOf, buildFromDoc, docFromTimeline, docKeys, editorDocSchema, shotsMissing, visualKey, type EditorScene } from "./editor";
 import { autoMotionCap, motionScenes, shotWords, timingLine } from "./motion-plan";
 
 const scenes = [
@@ -104,10 +104,14 @@ describe("HyperFrames composition", () => {
     expect(doc).toContain("background:var(--brand-bg)");
   });
 
-  it("leaves the page transparent when a backdrop clip plays under it", () => {
-    const doc = hyperframesDocument({ html: good, images: [], colours: { primary: "#111", accent: "#f59e0b", background: "#000", text: "#fff", highlight: "#fbbf24" }, fontFamily: "'Inter'", safeBottom: 1300, transparent: true });
+  it("leaves the page transparent when a backdrop plays under it, and forces the composition's root transparent too", () => {
+    const colours = { primary: "#111", accent: "#f59e0b", background: "#000", text: "#fff", highlight: "#fbbf24" };
+    const doc = hyperframesDocument({ html: good, images: [], colours, fontFamily: "'Inter'", safeBottom: 1300, transparent: true });
     expect(doc).toContain("background:transparent");
     expect(doc).not.toContain("background:var(--brand-bg)");
+    // A composition that painted its own stage still lets a backdrop swapped in later show through, its motion untouched.
+    expect(doc).toContain("[data-composition-id]{background:transparent!important}");
+    expect(hyperframesDocument({ html: good, images: [], colours, fontFamily: "'Inter'", safeBottom: 1300 })).not.toContain("[data-composition-id]{background:transparent!important}");
   });
 });
 
@@ -164,10 +168,17 @@ describe("motion shots in the editor document", () => {
   const backdrop = backdropOf(clip);
   const overVideo = editorDocSchema.parse({ ...doc, scenes: [{ ...motionScene, visual: { ...motionScene.visual, spec: { ...spec([{ at: 0, align: "center", elements: [el] }]), background: "video" }, backdrop } }] });
 
-  it("offers the scene's clips and current backdrops once each as backdrops", () => {
+  const still = { kind: "image" as const, key: "media/o/p/aroll/b-1.jpg", kenBurns: true, focus: { x: 0.3, y: 0.2, zoom: 1.2, originX: 0.3, originY: 0.2 }, sketch: null, credit: "Ảnh: Reuters", assetId: null, thumbnailUrl: null };
+  const overStill = editorDocSchema.parse({ ...doc, scenes: [{ ...motionScene, visual: { ...motionScene.visual, spec: { ...spec([{ at: 0, align: "center", elements: [el] }]), background: "video" }, backdrop: backdropOf(still) } }] });
+
+  it("offers the scene's clips, pictures and current backdrops once each as backdrops", () => {
     expect(backdropCandidates({ visual: clip, shots: [{ ...clip, trimStartSec: 5 }, clip, { kind: "solid" }] })).toHaveLength(2);
+    expect(backdropCandidates({ visual: still, shots: [still, clip] })).toEqual([backdropOf(still), backdrop]);
     expect(backdropCandidates(overVideo.scenes[0])).toEqual([backdrop]);
+    expect(backdropCandidates(overStill.scenes[0])).toEqual([{ kind: "image", key: still.key, focus: still.focus, credit: "Ảnh: Reuters", assetId: null, thumbnailUrl: null }]);
     expect(backdropCandidates(doc.scenes[0])).toEqual([]);
+    expect(backdropId(backdrop)).not.toBe(backdropId(backdropOf({ ...clip, trimStartSec: 5 })));
+    expect(backdropId(backdropOf(still))).toBe(`image:${still.key}`);
   });
 
   it("plays the backdrop clip, lists its key and credits it on the graphic's shot", () => {
@@ -175,13 +186,36 @@ describe("motion shots in the editor document", () => {
     const { timeline } = buildFromDoc(overVideo, null);
     const shot = timeline.scenes[0].shots[0];
     expect(shot.credit).toBe("Video: Ann / Pexels");
-    expect(shot.visual.kind === "motion" && shot.visual.backdrop).toEqual({ src: clip.key, trimStartSec: 0, clipDurationSec: 8 });
+    expect(shot.visual.kind === "motion" && shot.visual.backdrop).toEqual({ kind: "video", src: clip.key, trimStartSec: 0, clipDurationSec: 8 });
+  });
+
+  it("shows a picture behind the graphic with its face crop, credited on the shot", () => {
+    expect(docKeys(overStill)).toContain(still.key);
+    const { timeline } = buildFromDoc(overStill, null);
+    const shot = timeline.scenes[0].shots[0];
+    expect(shot.credit).toBe("Ảnh: Reuters");
+    expect(shot.visual.kind === "motion" && shot.visual.backdrop).toEqual({ kind: "image", src: still.key, focus: still.focus });
   });
 
   it("keeps the backdrop when a document is rebuilt from its timeline", () => {
+    const v = docFromTimeline(buildFromDoc(overVideo, null).timeline, {}).scenes[0].visual;
+    expect(v.kind === "motion" && v.backdrop).toMatchObject({ kind: "video", key: clip.key, clipDurationSec: 8, credit: "Video: Ann / Pexels" });
+    const p = docFromTimeline(buildFromDoc(overStill, null).timeline, {}).scenes[0].visual;
+    expect(p.kind === "motion" && p.backdrop).toEqual({ kind: "image", key: still.key, focus: still.focus, credit: "Ảnh: Reuters", assetId: null, thumbnailUrl: null });
+  });
+
+  it("reads a backdrop stored before 0.23.0 (no kind) as a clip, in the document and in the timeline", () => {
+    const legacy = { key: clip.key, clipDurationSec: 8, trimStartSec: 0, credit: clip.credit, assetId: null, thumbnailUrl: null };
+    const parsed = editorDocSchema.parse({ ...overVideo, scenes: [{ ...overVideo.scenes[0], visual: { ...overVideo.scenes[0].visual, backdrop: legacy } }] });
+    expect(parsed.scenes[0].visual.kind === "motion" && parsed.scenes[0].visual.backdrop).toEqual(backdrop);
     const { timeline } = buildFromDoc(overVideo, null);
-    const back = docFromTimeline(timeline, {});
-    const v = back.scenes[0].visual;
-    expect(v.kind === "motion" && v.backdrop).toMatchObject({ key: clip.key, clipDurationSec: 8, credit: "Video: Ann / Pexels" });
+    const stored = JSON.parse(JSON.stringify(timeline));
+    delete stored.scenes[0].shots[0].visual.backdrop.kind;
+    delete stored.scenes[0].visual.backdrop.kind;
+    const t = timelineSchema.parse(stored);
+    expect(t.scenes[0].shots[0].visual.kind === "motion" && t.scenes[0].shots[0].visual.backdrop).toEqual({ kind: "video", src: clip.key, trimStartSec: 0, clipDurationSec: 8 });
+    // The editor reads stored JSON without parsing it first.
+    const back = docFromTimeline(stored, {}).scenes[0].visual;
+    expect(back.kind === "motion" && back.backdrop).toMatchObject({ kind: "video", key: clip.key, clipDurationSec: 8 });
   });
 });

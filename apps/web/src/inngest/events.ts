@@ -127,8 +127,8 @@ export const projectSceneRegenerateRequested = eventType("project/scene.regenera
     engine: z.enum(["remotion", "hyperframes"]).optional(),
     instruction: z.string().max(1000).optional(),
     shot: z.number().int().min(0).max(12).optional(),
-    /** Motion graphic: the scene's clip to play behind it (`backdropCandidates`, by key + start); absent / null = none. */
-    backdrop: z.object({ key: z.string().min(1), trimStartSec: z.number().nonnegative() }).nullable().optional(),
+    /** Motion graphic: the clip or picture to show behind it (one of the scene's own, `backdropCandidates`, or any asset of the project, by key; a clip also by its start); absent / null = none. */
+    backdrop: z.object({ kind: z.enum(["video", "image"]), key: z.string().min(1), trimStartSec: z.number().nonnegative() }).nullable().optional(),
   }),
 });
 

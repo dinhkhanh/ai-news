@@ -9,7 +9,7 @@
  */
 import { cartoonSceneSchema, cartoonSchema } from "@ai-news/video/cartoon";
 import { HYPERFRAMES_MAX_CHARS, motionSpecSchema } from "@ai-news/video/motion";
-import { brandSchema, focusSchema, isGraphicVisual, sketchSchema, type SketchStyle, type Timeline } from "@ai-news/video/schema";
+import { brandSchema, focusSchema, isGraphicVisual, sketchSchema, type Backdrop, type SketchStyle, type Timeline } from "@ai-news/video/schema";
 import { z } from "zod";
 import { proportionalTimings, type TimedWord } from "./align";
 import { chunkCaptions, type CaptionChunk } from "./captions";
@@ -19,15 +19,16 @@ import { buildTimeline, GAP_MS, LEAD_MS, shotsNeeded, TAIL_MS, type BuildInput, 
 const timedWordSchema = z.object({ w: z.string(), s: z.number(), e: z.number(), j: z.boolean().optional() });
 const captionChunkSchema = z.object({ text: z.string().max(200), startMs: z.number(), endMs: z.number(), words: z.array(timedWordSchema) });
 
-/** A clip playing behind a motion graphic (composition 0.17.0): the fields of a video shot, credited on the graphic's shot. */
-export const editorBackdropSchema = z.object({
-  key: z.string().min(1),
-  clipDurationSec: z.number().positive(),
-  trimStartSec: z.number().nonnegative().default(0),
-  credit: z.string().nullable().default(null),
-  assetId: z.string().nullable().default(null),
-  thumbnailUrl: z.string().nullable().default(null),
-});
+/**
+ * A clip or picture behind a motion graphic (composition 0.17.0; pictures since 0.23.0): the fields of a video /
+ * image shot, credited on the graphic's shot. Swapping it leaves the graphic as it is. A backdrop stored without
+ * `kind` (documents saved before 0.23.0) is a clip.
+ */
+const backdropFields = { key: z.string().min(1), credit: z.string().nullable().default(null), assetId: z.string().nullable().default(null), thumbnailUrl: z.string().nullable().default(null) };
+export const editorBackdropSchema = z.union([
+  z.object({ kind: z.literal("image"), ...backdropFields, focus: focusSchema.nullable().default(null) }),
+  z.object({ kind: z.literal("video").default("video"), ...backdropFields, clipDurationSec: z.number().positive(), trimStartSec: z.number().nonnegative().default(0) }),
+]);
 export type EditorBackdrop = z.infer<typeof editorBackdropSchema>;
 
 export const editorVisualSchema = z.discriminatedUnion("kind", [
@@ -64,7 +65,7 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("motion"),
     spec: motionSpecSchema,
     images: z.array(z.string().min(1)).max(8).default([]),
-    /** Footage behind the graphic, drawn when `spec.background` is `video`; null = none. */
+    /** A clip or picture behind the graphic, drawn when `spec.background` is `video`; null = none. */
     backdrop: editorBackdropSchema.nullable().default(null),
     /** What the editor asked for (null = the build's automatic design). */
     instruction: z.string().max(1000).nullable().default(null),
@@ -74,7 +75,7 @@ export const editorVisualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("hyperframes"),
     html: z.string().min(1).max(HYPERFRAMES_MAX_CHARS),
     images: z.array(z.string().min(1)).max(8).default([]),
-    /** Footage behind the composition (its page is then transparent); null = none. */
+    /** A clip or picture behind the composition (its page is then transparent); null = none. */
     backdrop: editorBackdropSchema.nullable().default(null),
     summary: z.string().max(400).nullable().default(null),
     instruction: z.string().max(1000).nullable().default(null),
@@ -84,21 +85,33 @@ export type EditorVisual = z.infer<typeof editorVisualSchema>;
 
 /** R2 key of a picture / clip shot; null for shots drawn by code (solid fill, motion graphics). */
 export const visualKey = (v: EditorVisual): string | null => (v.kind === "video" || v.kind === "image" ? v.key : null);
-/** Every R2 key a shot needs (its file, or the pictures and backdrop clip a motion graphic uses). */
+/** Every R2 key a shot needs (its file, or the pictures and backdrop a motion graphic uses). */
 export const visualKeys = (v: EditorVisual): string[] => (v.kind === "video" || v.kind === "image" ? [v.key] : v.kind === "solid" ? [] : [...v.images, ...(v.backdrop ? [v.backdrop.key] : [])]);
 
-/** A video shot as a backdrop clip. */
-export const backdropOf = (v: Extract<EditorVisual, { kind: "video" }>): EditorBackdrop => ({ key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit, assetId: v.assetId, thumbnailUrl: v.thumbnailUrl });
+/** Identity of a backdrop in the editor: a clip is a different backdrop from each start time. */
+export const backdropId = (b: EditorBackdrop) => (b.kind === "video" ? `video:${b.trimStartSec}@${b.key}` : `image:${b.key}`);
 
-/** Clips of a scene that can play behind a motion graphic: its video shots and the graphics' current backdrops, each once. */
+/** A clip or picture shot as a backdrop. */
+export const backdropOf = (v: Extract<EditorVisual, { kind: "video" | "image" }>): EditorBackdrop =>
+  v.kind === "video"
+    ? { kind: "video", key: v.key, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit: v.credit, assetId: v.assetId, thumbnailUrl: v.thumbnailUrl }
+    : { kind: "image", key: v.key, focus: v.focus, credit: v.credit, assetId: v.assetId, thumbnailUrl: v.thumbnailUrl };
+
+/** Media of a scene that can show behind a motion graphic: its clips and pictures and the graphics' current backdrops, each once. */
 export function backdropCandidates(scene: Pick<EditorScene, "visual" | "shots">): EditorBackdrop[] {
   const out: EditorBackdrop[] = [];
   for (const v of [scene.visual, ...scene.shots]) {
-    const b = v.kind === "video" ? backdropOf(v) : v.kind === "motion" || v.kind === "hyperframes" ? v.backdrop : null;
-    if (b && !out.some((o) => o.key === b.key && o.trimStartSec === b.trimStartSec)) out.push(b);
+    const b = v.kind === "video" || v.kind === "image" ? backdropOf(v) : v.kind === "motion" || v.kind === "hyperframes" ? v.backdrop : null;
+    if (b && !out.some((o) => backdropId(o) === backdropId(b))) out.push(b);
   }
   return out;
 }
+
+/** A stored timeline's backdrop as the editor's; one without `kind` (before 0.23.0) is a clip. */
+const backdropFromTimeline = (b: Backdrop, credit: string | null): EditorBackdrop =>
+  b.kind === "image"
+    ? { kind: "image", key: b.src, focus: b.focus ?? null, credit, assetId: null, thumbnailUrl: null }
+    : { kind: "video", key: b.src, clipDurationSec: b.clipDurationSec, trimStartSec: b.trimStartSec ?? 0, credit, assetId: null, thumbnailUrl: null };
 /** Short label of a shot's kind for the editor (Vietnamese UI). */
 export const visualLabel = (v: EditorVisual) => (v.kind === "video" ? "clip" : v.kind === "image" ? "ảnh" : v.kind === "solid" ? "nền màu" : v.kind === "motion" ? "đồ hoạ" : "HyperFrames");
 export { isGraphicVisual };
@@ -365,7 +378,7 @@ export function docFromTimeline(t: Timeline, build: Record<string, unknown>): Ed
     const fromTimeline = (v: Timeline["scenes"][number]["visual"], credit: string | null): EditorVisual => {
       if (v.kind === "video") return { kind: "video", key: v.src, clipDurationSec: v.clipDurationSec, trimStartSec: v.trimStartSec, credit, assetId: st?.assetId ?? null, thumbnailUrl: st?.thumbnailUrl ?? null, ...(v.continuous ? { continuous: true } : {}) };
       if (v.kind === "image") return { kind: "image", key: v.src, kenBurns: v.kenBurns, focus: v.focus ?? null, sketch: v.sketch ?? null, credit, assetId: null, thumbnailUrl: null };
-      const backdrop = (v.kind === "motion" || v.kind === "hyperframes") && v.backdrop ? { key: v.backdrop.src, clipDurationSec: v.backdrop.clipDurationSec, trimStartSec: v.backdrop.trimStartSec, credit, assetId: null, thumbnailUrl: null } : null;
+      const backdrop = (v.kind === "motion" || v.kind === "hyperframes") && v.backdrop ? backdropFromTimeline(v.backdrop, credit) : null;
       if (v.kind === "motion") return { kind: "motion", spec: v.spec, images: v.images ?? [], backdrop, instruction: null };
       if (v.kind === "hyperframes") return { kind: "hyperframes", html: v.html, images: v.images ?? [], backdrop, summary: null, instruction: null };
       return { kind: "solid" };

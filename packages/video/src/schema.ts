@@ -279,16 +279,21 @@ export function sketchTiming(durationFrames: number, fps: number = OUTPUT.fps) {
 }
 
 /**
- * Real footage playing behind a motion graphic (0.17.0): a muted clip, cover-fitted, looped when the shot is longer,
- * dimmed so the graphic reads over it. Drawn by Remotion under both engines (`MotionBackdrop.tsx`); the shot's
- * credit is the clip's.
+ * Media behind a motion graphic (0.17.0; a still since 0.23.0): a muted clip, cover-fitted and looped when the shot
+ * is longer, or a picture cover-fitted on its face-guard `focus` with a slow push-in; dimmed so the graphic reads
+ * over it. Drawn by Remotion under both engines (`MotionBackdrop.tsx`), so the editor swaps it without touching the
+ * graphic; the shot's credit is the backdrop's. A backdrop stored without `kind` (before 0.23.0) is a clip.
  */
-export const backdropSchema = z.object({
-  src: z.string(),
-  /** Seconds into the clip to start from. */
-  trimStartSec: z.number().nonnegative().default(0),
-  clipDurationSec: z.number().positive(),
-});
+export const backdropSchema = z.union([
+  z.object({ kind: z.literal("image"), src: z.string(), focus: focusSchema.nullable().default(null) }),
+  z.object({
+    kind: z.literal("video").default("video"),
+    src: z.string(),
+    /** Seconds into the clip to start from. */
+    trimStartSec: z.number().nonnegative().default(0),
+    clipDurationSec: z.number().positive(),
+  }),
+]);
 export type Backdrop = z.infer<typeof backdropSchema>;
 
 export const visualSchema = z.discriminatedUnion("kind", [
@@ -323,7 +328,7 @@ export const visualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("motion"),
     spec: motionSpecSchema,
     images: z.array(z.string()).default([]),
-    /** Footage behind the graphic, drawn when the spec's background is `video` (0.17.0); null = none. */
+    /** A clip or picture behind the graphic, drawn when the spec's background is `video` (0.17.0); null = none. */
     backdrop: backdropSchema.nullable().default(null),
   }),
   /** HyperFrames composition (HTML + GSAP) Claude wrote, seeked frame by frame in a sandboxed iframe (0.15.0, `HyperFramesShot.tsx`). */
@@ -331,7 +336,7 @@ export const visualSchema = z.discriminatedUnion("kind", [
     kind: z.literal("hyperframes"),
     html: z.string(),
     images: z.array(z.string()).default([]),
-    /** Footage behind the composition, whose page is then transparent (0.17.0); null = none. */
+    /** A clip or picture behind the composition, whose page is then transparent (0.17.0); null = none. */
     backdrop: backdropSchema.nullable().default(null),
   }),
 ]);

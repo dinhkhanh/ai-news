@@ -33,6 +33,7 @@ const Background: React.FC<{ spec: MotionSpec; p: Palette; images: string[]; bac
   const { durationInFrames, fps } = useVideoConfig();
   const t = frame / fps;
   // Real footage: tinted by the mood, darker at the top bar and towards the captions, lighter in the middle.
+  // The shot's backdrop (a clip or a picture) under the mood's tint; only the backdrop changes when the editor swaps it.
   if (spec.background === "video" && backdrop) {
     return <MotionBackdrop backdrop={backdrop} durationFrames={durationInFrames} scrim={`linear-gradient(180deg, ${tint(p.bg, 78)} 0%, ${tint(p.bg, 50)} 40%, ${tint(p.bg, 58)} 65%, ${tint(p.bg, 88)} 100%)`} />;
   }
