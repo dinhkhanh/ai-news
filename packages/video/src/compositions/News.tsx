@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AbsoluteFill, Audio, Img, Loop, OffthreadVideo, Sequence, continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, Freeze, Img, Loop, OffthreadVideo, Sequence, continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont as loadBeVietnamPro } from "@remotion/google-fonts/BeVietnamPro";
 import { loadFont as loadInter } from "@remotion/google-fonts/Inter";
 import { boxShadowCss, captionLines, CREDIT_MAX_WIDTH, isGraphicVisual, isLandscape, LANDSCAPE_KEN_BURNS, landscapeLayout, DEFAULT_CAPTION_SHADOW, DEFAULT_HEADLINE_SHADOW, HEADLINE_BAR, headlinePadding, LOGO_MOTION_PERIOD_SEC, OUTPUT, SAFE_ZONES, sourceDisplay, textLayout, type LogoMotion, type Brand, type Caption, type Shot, type Timeline, type TimelineScene, type SketchStyle, type Visual } from "../schema";
@@ -14,6 +14,8 @@ const inter = loadInter("normal", { weights: ["500", "700", "800"], subsets: ["l
 const fontFamily = (name: Brand["fonts"]["heading"]) => (name === "Inter" ? inter.fontFamily : beVietnamPro.fontFamily);
 
 const FADE_FRAMES = 8;
+/** Moment of an opening motion graphic that stands in for frame 0 (see `OpeningFrame`); the same default as the render's cover. */
+const OPENING_GRAPHIC_SEC = 1.2;
 /** Frames of punch-in at the start of every shot after the first (hard cut + quick settle). */
 const PUNCH_FRAMES = 6;
 
@@ -221,11 +223,12 @@ const allGraphic = (scene: TimelineScene) => sceneShots(scene).every((s) => isGr
 
 /* --------------------------------------------------------------- overlays */
 
-const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Brand }> = ({ text, kind, brand }) => {
+/** `opening`: the video's first headline is on screen from frame 0, without its entrance (see `OpeningFrame`). */
+const Headline: React.FC<{ text: string; kind: TimelineScene["kind"]; brand: Brand; opening?: boolean }> = ({ text, kind, brand, opening = false }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   if (!text) return null;
-  const enter = spring({ frame, fps, config: { damping: 200, stiffness: 120 } });
+  const enter = opening ? 1 : spring({ frame, fps, config: { damping: 200, stiffness: 120 } });
   const at = textLayout(brand, kind).headline;
   const pad = headlinePadding(at.fontSize);
   return (
@@ -456,6 +459,24 @@ const SceneFade: React.FC<{ durationFrames: number; fadeIn: boolean; fadeOut: bo
   return <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
 };
 
+/**
+ * Frame 0 is what a feed shows before the video plays, and Facebook / TikTok / YouTube flag a video that opens on a
+ * black or blank frame. The opening scene therefore never fades in (its picture is on screen from frame 0), its headline
+ * needs no entrance (so even a placeholder `solid` scene opens on text), and an opening motion graphic, whose frame 0 is its bare background before anything has entered, shows itself built
+ * (`OPENING_GRAPHIC_SEC` in, within its first shot) on that one frame instead.
+ */
+const OpeningFrame: React.FC<{ scene: TimelineScene; children: React.ReactNode }> = ({ scene, children }) => {
+  const { fps } = useVideoConfig();
+  const shot = sceneShots(scene)[0];
+  if (!isGraphicVisual(shot.visual)) return <>{children}</>;
+  const at = Math.max(0, Math.min(Math.round(OPENING_GRAPHIC_SEC * fps), shot.durationFrames - 1));
+  return (
+    <Freeze frame={at} active={(f) => f === 0}>
+      {children}
+    </Freeze>
+  );
+};
+
 const joins = (a: TimelineScene | undefined, b: TimelineScene | undefined) => {
   const src = continuousSrc(a, "end");
   return src !== null && src === continuousSrc(b, "start");
@@ -501,11 +522,17 @@ export const News: React.FC<Timeline> = (timeline) => {
     <AbsoluteFill style={{ backgroundColor: brand.colours.background, color: brand.colours.text }}>
       {scenes.map((scene, i) => (
         <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationFrames} name={`${scene.id} ${scene.kind}`}>
-          <SceneFade durationFrames={scene.durationFrames} fadeIn={!joins(scenes[i - 1], scene)} fadeOut={!joins(scene, scenes[i + 1])}>
-            <SceneShots scene={scene} brand={brand} language={timeline.language} />
+          <SceneFade durationFrames={scene.durationFrames} fadeIn={i > 0 && !joins(scenes[i - 1], scene)} fadeOut={!joins(scene, scenes[i + 1])}>
+            {i === 0 ? (
+              <OpeningFrame scene={scene}>
+                <SceneShots scene={scene} brand={brand} language={timeline.language} />
+              </OpeningFrame>
+            ) : (
+              <SceneShots scene={scene} brand={brand} language={timeline.language} />
+            )}
           </SceneFade>
           {scene.overlay !== false && brand.overlaySrc && brand.overlayLayer !== "top" ? <BrandOverlay src={brand.overlaySrc} /> : null}
-          {allGraphic(scene) ? null : <Headline text={scene.headline} kind={scene.kind} brand={brand} />}
+          {allGraphic(scene) ? null : <Headline text={scene.headline} kind={scene.kind} brand={brand} opening={i === 0} />}
           <ShotCredits scene={scene} brand={brand} joined={joins(scenes[i - 1], scene)} />
           {scene.kind === "cta" && scene.id === last?.id ? <Outro timeline={timeline} /> : null}
         </Sequence>
