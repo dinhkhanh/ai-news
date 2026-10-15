@@ -12,7 +12,7 @@ import { previewVoice } from "@/app/app/voices/actions";
 import { setSceneSketch, SKETCH_LABEL, sketchCount } from "@/lib/media/editor";
 import { useEditor } from "../core/context";
 import { definePlugin } from "../core/plugin";
-import { PanelHeader, Section, timecode } from "../shell/ui";
+import { Note, PanelHeader, Section, timecode } from "../shell/ui";
 import type { MusicOption } from "../types";
 
 /** Library tracks first (`group` null), then one group per sound collection, in the order they came. */
@@ -216,6 +216,16 @@ function VoiceSection() {
       <Button size="sm" variant={changed ? "default" : "outline"} disabled={!ctx.canRegenerate || !spoken} title={ctx.regenerateHint ?? "Google TTS cho mọi cảnh từ lời đã lưu; trộn lại âm thanh; thành phiên bản mới"} onClick={() => ctx.services.regenerate("voices", changed ? { voicePresetId: picked || null } : {})}>
         <Mic /> {changed ? `Đổi giọng & đọc lại ${spoken} cảnh` : `Đọc lại toàn bộ (${spoken} cảnh)`}
       </Button>
+      {ctx.regenerateHint && props.canEdit ? (
+        <Note tone="warn">
+          {ctx.regenerateHint}
+          {ctx.dirty && props.version.isLatest ? (
+            <Button size="sm" variant="outline" className="ml-2" disabled={!ctx.canSave} onClick={() => ctx.services.save()}>
+              Lưu thay đổi
+            </Button>
+          ) : null}
+        </Note>
+      ) : null}
       <p className="text-[11px] text-muted-foreground">Đọc lại mọi cảnh từ lời đã lưu (lời đang sửa dở chưa tính). Độ dài cảnh theo giọng mới, phụ đề sửa tay được tạo lại; giọng chọn ở đây thành giọng của dự án.</p>
     </Section>
   );
