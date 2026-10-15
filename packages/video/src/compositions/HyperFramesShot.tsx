@@ -103,7 +103,9 @@ export const HyperFramesShot: React.FC<{ html: string; images: string[]; backdro
   return (
     <AbsoluteFill style={{ backgroundColor: brand.colours.background, overflow: "hidden" }}>
       {backdrop ? <MotionBackdrop backdrop={backdrop} durationFrames={durationFrames} scrim="linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.3) 40%, rgba(0,0,0,.4) 65%, rgba(0,0,0,.7) 100%)" /> : null}
-      <iframe ref={ref} title="motion" srcDoc={srcDoc} sandbox="allow-scripts" style={{ position: "absolute", left: 0, top: 0, width: 1080, height: 1920, border: 0, display: "block", background: "transparent" }} />
+      {/* `colorScheme` matches the page inside (no scheme = light): an iframe whose scheme differs from its element's (the
+          editor in dark mode sets `color-scheme: dark` on <html>) is painted opaque by the browser, hiding the backdrop. */}
+      <iframe ref={ref} title="motion" srcDoc={srcDoc} sandbox="allow-scripts" style={{ position: "absolute", left: 0, top: 0, width: 1080, height: 1920, border: 0, display: "block", background: "transparent", colorScheme: "light" }} />
     </AbsoluteFill>
   );
 };
