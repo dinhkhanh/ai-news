@@ -228,7 +228,8 @@ export function Editor(props: EditorProps) {
 
   /* ------------------------------------------------------------ services */
 
-  const regenerateHint = !props.canEdit ? "Vai trò của bạn chỉ được xem." : !props.version.isLatest ? "Chỉ tạo lại được trên phiên bản mới nhất." : busy ? `Đang chạy bước ${props.busyStep}…` : dirty ? "Lưu thay đổi trước khi tạo lại." : null;
+  // Unsaved edits do not block a regeneration: it saves them as a new version first (like export) and works on that one.
+  const regenerateHint = !props.canEdit ? "Vai trò của bạn chỉ được xem." : !props.version.isLatest ? "Chỉ tạo lại được trên phiên bản mới nhất." : busy ? `Đang chạy bước ${props.busyStep}…` : null;
   const exportHint = !props.canEdit ? "Vai trò của bạn chỉ được xem." : busy ? `Đang chạy bước ${props.busyStep}…` : dirty && !props.version.isLatest ? "Phiên bản cũ chỉ đọc: huỷ thay đổi để kết xuất nguyên bản này." : null;
 
   const openVersion = useCallback((v: number) => {
@@ -294,17 +295,31 @@ export function Editor(props: EditorProps) {
   const regenerate = useCallback(
     (what: RegenerateWhat, payload: RegeneratePayload = {}) => {
       if (regenerateHint) return void toast.error(regenerateHint);
+      if (saving) return;
       setRequesting(true);
       startTransition(async () => {
-        const res = await regenerateScene({ projectId: props.projectId, timelineId: props.version.id, what, ...payload });
+        let timelineId = props.version.id;
+        if (dirty) {
+          const saved = await saveTimeline({ projectId: props.projectId, baseVersion: props.version.version, doc, note: note || undefined });
+          // A difference the change log does not describe saves nothing; the saved version is then the one to work on.
+          if (saved.ok && saved.timelineId) {
+            toast.success(saved.message);
+            timelineId = saved.timelineId;
+          } else if (!/Không có thay đổi nào để lưu/.test(saved.message)) {
+            setRequesting(false);
+            return void toast.error(saved.message);
+          }
+        }
+        const res = await regenerateScene({ projectId: props.projectId, timelineId, what, ...payload });
         setRequesting(false);
-        if (!res.ok) return void toast.error(res.message);
-        toast.success(res.message);
+        if (!res.ok) toast.error(timelineId !== props.version.id ? `Đã lưu thay đổi nhưng chưa tạo lại được: ${res.message}` : res.message);
+        else toast.success(res.message);
+        if (!res.ok && timelineId === props.version.id) return;
         router.push(`/app/projects/${props.projectId}/edit`);
         router.refresh();
       });
     },
-    [regenerateHint, props.projectId, props.version.id, router],
+    [regenerateHint, saving, props.projectId, props.version.id, props.version.version, dirty, doc, note, router],
   );
 
   const rewrite = useCallback(

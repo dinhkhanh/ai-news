@@ -217,16 +217,9 @@ function VoiceSection() {
         <Mic /> {changed ? `Đổi giọng & đọc lại ${spoken} cảnh` : `Đọc lại toàn bộ (${spoken} cảnh)`}
       </Button>
       {ctx.regenerateHint && props.canEdit ? (
-        <Note tone="warn">
-          {ctx.regenerateHint}
-          {ctx.dirty && props.version.isLatest ? (
-            <Button size="sm" variant="outline" className="ml-2" disabled={!ctx.canSave} onClick={() => ctx.services.save()}>
-              Lưu thay đổi
-            </Button>
-          ) : null}
-        </Note>
+        <Note tone="warn">{ctx.regenerateHint}</Note>
       ) : null}
-      <p className="text-[11px] text-muted-foreground">Đọc lại mọi cảnh từ lời đã lưu (lời đang sửa dở chưa tính). Độ dài cảnh theo giọng mới, phụ đề sửa tay được tạo lại; giọng chọn ở đây thành giọng của dự án.</p>
+      <p className="text-[11px] text-muted-foreground">Đọc lại mọi cảnh từ lời trong bản dựng (thay đổi chưa lưu được lưu thành phiên bản mới trước; lời đang gõ dở trong ô “Lời đọc” chưa tính). Độ dài cảnh theo giọng mới, phụ đề sửa tay được tạo lại; giọng chọn ở đây thành giọng của dự án.</p>
     </Section>
   );
 }
