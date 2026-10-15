@@ -62,7 +62,7 @@ function ChannelExport() {
                   <span className="font-mono">v{r.version ?? "?"}</span>
                   <span className="min-w-0 flex-1 truncate">{r.logoName}</span>
                   <Badge variant={r.status === "done" ? "success" : r.status === "failed" || r.status === "qa_failed" ? "destructive" : "secondary"}>{RENDER_LABEL[r.status] ?? r.status}</Badge>
-                  {r.videoUrl ? <VideoButton src={r.videoUrl} title={`Kết xuất v${r.version ?? "?"}`} description={`logo ${r.logoName} · ${r.createdAt.slice(0, 16).replace("T", " ")}`} /> : null}
+                  {r.videoUrl ? <VideoButton src={r.videoUrl} downloadSrc={r.downloadUrl} title={`Kết xuất v${r.version ?? "?"}`} description={`logo ${r.logoName} · ${r.createdAt.slice(0, 16).replace("T", " ")}`} /> : null}
                 </div>
                 <div className="text-muted-foreground">
                   {r.createdAt.slice(5, 16).replace("T", " ")}

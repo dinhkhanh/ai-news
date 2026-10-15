@@ -9,6 +9,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "@/lib/env";
+import { attachmentDisposition } from "./download-name";
 
 let client: S3Client | undefined;
 
@@ -59,8 +60,10 @@ export const r2Key = {
   test: (name: string) => `tmp/_test/${name}`,
 };
 
-export async function presignGet(key: string, expiresIn = 3600) {
-  return getSignedUrl(r2(), new GetObjectCommand({ Bucket: r2Bucket(), Key: key }), { expiresIn });
+/** `downloadAs`: R2 answers with `Content-Disposition: attachment` under that name, so the browser saves the file instead of playing it. */
+export async function presignGet(key: string, expiresIn = 3600, opts: { downloadAs?: string } = {}) {
+  const disposition = opts.downloadAs ? attachmentDisposition(opts.downloadAs) : undefined;
+  return getSignedUrl(r2(), new GetObjectCommand({ Bucket: r2Bucket(), Key: key, ResponseContentDisposition: disposition }), { expiresIn });
 }
 
 export async function presignPut(key: string, contentType: string, expiresIn = 900) {

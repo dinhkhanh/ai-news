@@ -52,6 +52,7 @@ import { buildMetadata, PLATFORM_SPEC, type Analytics } from "@/lib/publish/plat
 import { presignGet } from "@/lib/r2";
 import { canApprove, needsFaithfulnessOverride } from "@/lib/review";
 import { displayHost } from "@/lib/url";
+import { videoFileName } from "@/lib/download-name";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 import { dailyLimit, usedToday } from "@/lib/quota";
 import {
@@ -291,10 +292,10 @@ export default async function ProjectPage({
     ) : null;
   const selectedTimeline = timelines.find((t) => String(t.version) === sp.t) ?? timelines[0] ?? null;
   const timelineJson = selectedTimeline ? (selectedTimeline.json as unknown as Timeline) : null;
-  const sign = async (key: string | null | undefined, ttl = 900) => {
+  const sign = async (key: string | null | undefined, ttl = 900, downloadAs?: string) => {
     if (!key) return null;
     try {
-      return await presignGet(key, ttl);
+      return await presignGet(key, ttl, { downloadAs });
     } catch {
       return null;
     }
@@ -321,7 +322,12 @@ export default async function ProjectPage({
         async (r) =>
           [
             r.id,
-            { video: r.status === "done" ? await sign(r.outputPath, 3600) : null, cover: await sign(r.coverPath) },
+            {
+              video: r.status === "done" ? await sign(r.outputPath, 3600) : null,
+              // Saved under the project's name instead of opening `render-<id>.mp4`.
+              download: r.status === "done" ? await sign(r.outputPath, 3600, videoFileName(projectLabel(project))) : null,
+              cover: await sign(r.coverPath),
+            },
           ] as const,
       ),
     ),
@@ -341,7 +347,7 @@ export default async function ProjectPage({
     const u = imageSigned[i];
     if (u) imageUrls[key] = u;
   });
-  const renderLinks = new Map<string, { video: string | null; cover: string | null }>(renderSigned);
+  const renderLinks = new Map<string, { video: string | null; download: string | null; cover: string | null }>(renderSigned);
   // Publishing (phase 5): the approved version's finished render, granted channels, defaults from the script's per-platform metadata.
   const approvedRender = project.approvedTimelineId
     ? (renders.find((r) => r.timelineId === project.approvedTimelineId && r.status === "done") ?? null)
@@ -1239,6 +1245,7 @@ export default async function ProjectPage({
               {links?.video ? (
                 <VideoButton
                   src={links.video}
+                  downloadSrc={links.download}
                   poster={links.cover}
                   title={projectLabel(project)}
                   description={`timeline v${r.timelineVersion} · logo ${logoName(r.logoChannelId)}${r.durationSec ? ` · ${Number(r.durationSec).toFixed(0)} s` : ""}`}

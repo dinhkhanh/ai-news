@@ -54,6 +54,8 @@ export type ExportInfo = {
     logoChannelId: string | null;
     logoName: string;
     videoUrl: string | null;
+    /** Same file, served as an attachment named after the project. */
+    downloadUrl: string | null;
     error: string | null;
     /** Failed QA and nothing newer exists for that version: a forced render (QA not gating) may be requested. */
     canForce: boolean;

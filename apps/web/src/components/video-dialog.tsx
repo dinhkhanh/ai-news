@@ -14,6 +14,8 @@ const VideoPlayer = dynamic(() => import("./video-player").then((m) => m.VideoPl
 
 type Props = {
   src: string;
+  /** Link that downloads the file (`presignGet(…, { downloadAs })`); without it the download icon opens `src`. */
+  downloadSrc?: string | null;
   title: string;
   /** One line under the title: version, logo, duration… */
   description?: string;
@@ -30,7 +32,7 @@ type Props = {
  * bars never cover it). The download link stays beside it for
  * anyone who does want the file.
  */
-export function VideoButton({ src, title, description, poster, label = "Xem MP4", size = "xs", variant = "outline", className }: Props) {
+export function VideoButton({ src, downloadSrc, title, description, poster, label = "Xem MP4", size = "xs", variant = "outline", className }: Props) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -38,7 +40,7 @@ export function VideoButton({ src, title, description, poster, label = "Xem MP4"
         <Button type="button" size={size} variant={variant} onClick={() => setOpen(true)}>
           <Play /> {label}
         </Button>
-        <Button size={size === "default" ? "icon" : size === "sm" ? "icon-sm" : "icon-xs"} variant="ghost" title="Tải MP4 về" aria-label="Tải MP4 về" render={<a href={src} target="_blank" rel="noreferrer" download />}>
+        <Button size={size === "default" ? "icon" : size === "sm" ? "icon-sm" : "icon-xs"} variant="ghost" title="Tải MP4 về" aria-label="Tải MP4 về" render={downloadSrc ? <a href={downloadSrc} download /> : <a href={src} target="_blank" rel="noreferrer" download />}>
           <Download />
         </Button>
       </span>

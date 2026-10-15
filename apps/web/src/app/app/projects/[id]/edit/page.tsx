@@ -27,6 +27,7 @@ import { presignGet } from "@/lib/r2";
 import { loadProjectStatus } from "@/lib/project-status";
 import { canApprove, docOfRow, verdictsOfScript } from "@/lib/review";
 import { displayHost } from "@/lib/url";
+import { videoFileName } from "@/lib/download-name";
 import { canWrite, requireWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -135,6 +136,9 @@ export default async function EditPage({ params, searchParams }: { params: Promi
   const writer = canWrite(ws);
   const [renderLimit, renderUsed] = writer ? await Promise.all([dailyLimit(ws.userId, "render_minutes"), usedToday(ws.userId, "render_minutes")]) : [0, 0];
   const renderUrls = await Promise.all(renders.map((r) => (r.status === "done" && r.outputPath ? presignGet(r.outputPath, 3600).catch(() => null) : null)));
+  // The download icon saves the file under the project's name instead of opening `render-<id>.mp4`.
+  const fileName = videoFileName(projectLabel(project));
+  const downloadUrls = await Promise.all(renders.map((r) => (r.status === "done" && r.outputPath ? presignGet(r.outputPath, 3600, { downloadAs: fileName }).catch(() => null) : null)));
   const status = await loadProjectStatus(ws, project.id);
   const voiceOptions = await listVoiceOptions(ws);
   const props: EditorProps = {
@@ -181,6 +185,7 @@ export default async function EditPage({ params, searchParams }: { params: Promi
         logoChannelId: r.logoChannelId,
         logoName: r.logoChannelId ? (channels.find((c) => c.id === r.logoChannelId)?.name ?? "kênh đã xoá") : "bộ nhận diện",
         videoUrl: renderUrls[i],
+        downloadUrl: downloadUrls[i],
         error: r.error?.slice(0, 300) ?? null,
         canForce: r.status === "qa_failed" && Boolean(r.timelineId) && renders.find((x) => x.timelineId === r.timelineId)?.id === r.id,
         qaOverridden: Boolean((r.qaJson as { overridden?: boolean } | null)?.overridden),
