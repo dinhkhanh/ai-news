@@ -14,7 +14,7 @@ import { analyseAsset, faceGuardAvailable } from "@/lib/media/faces";
 import { storedFrame, type FrameFaces } from "@/lib/media/framing";
 import { downloadToR2 } from "@/lib/media/stock";
 import { formatTimecode, manualSection, SHOT_SEC, webVideoPageUrl, youtubeId, type PendingCapture } from "@/lib/media/visual-plan";
-import { storeWebVideoJob, webVideoEnabled } from "@/lib/media/webvideo";
+import { storeWebVideoJob, webVideoEnabled, youtubeOembed } from "@/lib/media/webvideo";
 import { watermarkLabel } from "@/lib/media/watermark";
 import { scanClipWatermark, watermarkScanAvailable } from "@/lib/media/watermark-scan";
 import type { ChosenAsset } from "@/lib/media/broll";
@@ -330,9 +330,26 @@ export async function importWebVideo(input: { projectId: string; url: string; st
     if (!project) throw new Error("Project not found in this workspace");
     const first = manualSection({ startSec: input.startSec, endSec: input.endSec, durationSec: null });
     if (!first.ok) throw new Error(first.error);
+    // YouTube bot-checks the server (the Lambda always, the office line at times): the user records the section in their own browser instead.
+    const blocked = async (stage: "lookup" | "download", message: string, section: { startSec: number; endSec: number }, video: { title: string; uploader: string | null; thumbnailUrl: string | null }): Promise<WebVideoAdded> => {
+      const videoId = youtubeId(url)!;
+      await log("asset.web_video_blocked", { url: url.slice(0, 300), stage, startSec: section.startSec, endSec: section.endSec, error: message.slice(0, 300) }, input.projectId);
+      const segments = Math.max(1, Math.ceil((section.endSec - section.startSec) / SHOT_SEC));
+      return {
+        ok: false,
+        message: `YouTube chặn máy chủ (${message.slice(0, 120)}). Ghi đoạn ${formatTimecode(section.startSec)}–${formatTimecode(section.startSec + segments * SHOT_SEC)} ngay trong trình duyệt ở bảng “Ghi từ trình duyệt”.`,
+        capture: { videoId, url, ...video, startSec: section.startSec, segments, scenes: [{ sceneId: input.sceneId, segments }], error: message.slice(0, 200), manual: { sceneId: input.sceneId, shot: input.shot } },
+      };
+    };
     const meta = await invokeWebVideo({ action: "web-video-search", input: { urls: [url], limit: 1 } });
     const c = meta.ok ? meta.videos?.[0] : undefined;
-    if (!c) throw new Error(`Không đọc được trang video${meta.error ? `: ${meta.error}` : meta.warnings?.[0] ? `: ${meta.warnings[0]}` : ""}`);
+    if (!c) {
+      const message = meta.error ?? meta.warnings?.[0] ?? "";
+      // Without the page the video's length is unknown: the asked section (or the default first 20 s) as typed.
+      const oembed = youtubeId(url) ? await youtubeOembed(url) : null;
+      if (oembed) return blocked("lookup", message, first, oembed);
+      throw new Error(`Không đọc được trang video${message ? `: ${message}` : ""}`);
+    }
     const section = manualSection({ startSec: input.startSec, endSec: input.endSec, durationSec: c.durationSec });
     if (!section.ok) throw new Error(section.error);
     const ctx = { ...ws, projectId: input.projectId };
@@ -343,16 +360,9 @@ export async function importWebVideo(input: { projectId: string; url: string; st
       if ("pending" in r) return { ok: false, message: "NAS vẫn đang tải và mã hoá đoạn video này. Bấm thêm lại sau 1–2 phút: đoạn đang tải sẽ được dùng ngay, không tải lại từ đầu." };
       asset = r.asset;
     } catch (e) {
-      const videoId = youtubeId(url);
       const message = e instanceof Error ? e.message : "download failed";
-      if (!videoId) throw new Error(`Không tải được đoạn video: ${message.slice(0, 200)}`);
-      await log("asset.web_video_blocked", { url: url.slice(0, 300), startSec: section.startSec, endSec: section.endSec, error: message.slice(0, 300) }, input.projectId);
-      const segments = Math.max(1, Math.ceil((section.endSec - section.startSec) / SHOT_SEC));
-      return {
-        ok: false,
-        message: `YouTube chặn máy chủ (${message.slice(0, 120)}). Ghi đoạn ${formatTimecode(section.startSec)}–${formatTimecode(section.startSec + segments * SHOT_SEC)} ngay trong trình duyệt ở bảng “Ghi từ trình duyệt”.`,
-        capture: { videoId, url, title: c.title, uploader: c.uploader, thumbnailUrl: c.thumbnailUrl, startSec: section.startSec, segments, scenes: [{ sceneId: input.sceneId, segments }], error: message.slice(0, 200), manual: { sceneId: input.sceneId, shot: input.shot } },
-      };
+      if (!youtubeId(url)) throw new Error(`Không tải được đoạn video: ${message.slice(0, 200)}`);
+      return blocked("download", message, section, { title: c.title, uploader: c.uploader, thumbnailUrl: c.thumbnailUrl });
     }
     const watermark = await guardWatermark({ assetId: asset.assetId, key: asset.key, durationSec: asset.durationSec }, ctx);
     await log("asset.imported_web_video", { assetId: asset.assetId, key: asset.key, url: url.slice(0, 300), site: c.site, startSec: section.startSec, endSec: section.endSec, watermarked: watermark?.watermarked ?? null }, input.projectId);

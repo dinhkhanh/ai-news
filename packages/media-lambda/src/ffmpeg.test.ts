@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBlackDetect, parseFps, parseLoudnormJson, ytdlpError } from "./ffmpeg";
+import { parseBlackDetect, parseFps, parseLoudnormJson, YTDLP_RETRY_MS, ytdlpError, ytdlpRetryDelays, ytdlpTargetsYoutube, ytdlpTransient } from "./ffmpeg";
 
 describe("ffmpeg output parsers", () => {
   it("parses loudnorm json from stderr tail", () => {
@@ -31,5 +31,20 @@ describe("parseLoudnormJson with ffmpeg 7+/8 trailing summary", () => {
     expect(ytdlpError({ message: "Command failed: yt-dlp ...", stderr: "WARNING: x\nERROR: [youtube] abc: Sign in to confirm you’re not a bot\n" })).toBe("ERROR: [youtube] abc: Sign in to confirm you’re not a bot");
     expect(ytdlpError({ message: "Command failed", stderr: "Traceback\nImportError: unsupported version of Python\n" })).toBe("ImportError: unsupported version of Python");
     expect(ytdlpError(new Error("spawn ENOENT"))).toBe("spawn ENOENT");
+  });
+  it("retries only YouTube's passing refusals, and never on the Lambda", () => {
+    expect(ytdlpTransient("ERROR: [youtube] glnBXVyOgmk: Sign in to confirm you’re not a bot. Use --cookies-from-browser")).toBe(true);
+    expect(ytdlpTransient("ERROR: [youtube] x: Unable to download webpage: HTTP Error 429: Too Many Requests")).toBe(true);
+    expect(ytdlpTransient("ERROR: [youtube] x: Video unavailable")).toBe(false);
+    expect(ytdlpTransient("ERROR: [facebook] x: Cannot parse data")).toBe(false);
+    expect(ytdlpRetryDelays({})).toEqual(YTDLP_RETRY_MS);
+    expect(ytdlpRetryDelays({ AWS_LAMBDA_FUNCTION_NAME: "media" })).toEqual([]);
+  });
+  it("gives the YouTube cookies to YouTube runs only", () => {
+    expect(ytdlpTargetsYoutube(["--dump-single-json", "--no-playlist", "https://www.youtube.com/shorts/glnBXVyOgmk"])).toBe(true);
+    expect(ytdlpTargetsYoutube(["--flat-playlist", "ytsearch8:bão số 3"])).toBe(true);
+    expect(ytdlpTargetsYoutube(["-o", "/tmp/raw.mp4", "https://youtu.be/dQw4w9WgXcQ"])).toBe(true);
+    expect(ytdlpTargetsYoutube(["--no-playlist", "https://www.facebook.com/reel/1431655156688001"])).toBe(false);
+    expect(ytdlpTargetsYoutube(["https://www.tiktok.com/@a/video/1?ref=youtube.com"])).toBe(false);
   });
 });

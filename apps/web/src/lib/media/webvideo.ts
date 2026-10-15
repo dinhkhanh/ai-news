@@ -150,3 +150,15 @@ export async function storeWebVideoJob(c: WebVideoCandidate, opts: StoreOpts, ct
   );
   return { asset: { assetId: row.id, key, kind: "video", durationSec, credit, provider: WEB_VIDEO_PROVIDER, thumbnailUrl: c.thumbnailUrl } };
 }
+
+/**
+ * Title, channel and thumbnail of a YouTube video from its public oEmbed endpoint, for when yt-dlp cannot read the
+ * page: YouTube's bot check (datacenter IPs always, the office line at times) does not cover oEmbed. Best effort:
+ * null when it does not answer.
+ */
+export async function youtubeOembed(url: string): Promise<{ title: string; uploader: string | null; thumbnailUrl: string | null } | null> {
+  const res = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+  const json = res?.ok ? ((await res.json().catch(() => null)) as { title?: unknown; author_name?: unknown; thumbnail_url?: unknown } | null) : null;
+  if (!json || typeof json.title !== "string") return null;
+  return { title: json.title, uploader: typeof json.author_name === "string" ? json.author_name.trim() || null : null, thumbnailUrl: typeof json.thumbnail_url === "string" ? json.thumbnail_url : null };
+}
