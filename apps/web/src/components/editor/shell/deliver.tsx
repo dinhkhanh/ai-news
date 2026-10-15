@@ -63,8 +63,14 @@ function Preflight() {
   return (
     <section aria-labelledby="preflight" className="space-y-4 overflow-y-auto border-r bg-card p-4">
       <div className="flex items-center gap-3">
-        <div aria-hidden className="relative flex size-14 items-center justify-center rounded-full" style={{ background: `conic-gradient(var(--success) 0 ${ratio * 100}%, var(--muted) ${ratio * 100}% 100%)` }}>
-          <span className="flex size-11 items-center justify-center rounded-full bg-card text-sm font-bold">
+        <div aria-hidden className="relative grid size-14 shrink-0 place-items-center">
+          <svg viewBox="0 0 56 56" className="absolute inset-0 size-full -rotate-90">
+            <circle cx="28" cy="28" r="25" fill="none" strokeWidth="6" className="stroke-muted" />
+            {ratio > 0 ? (
+              <circle cx="28" cy="28" r="25" fill="none" strokeWidth="6" pathLength={100} strokeDasharray={`${ratio * 100} 100`} strokeLinecap={ratio < 1 ? "round" : "butt"} className="stroke-success" />
+            ) : null}
+          </svg>
+          <span className="text-sm font-bold">
             {checks.length - failing.size}/{checks.length}
           </span>
         </div>
