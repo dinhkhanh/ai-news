@@ -18,13 +18,18 @@ const SEEK_TIMEOUT_MS = 8_000;
  * With a `backdrop` the clip or picture shows under the iframe (Remotion seeks
  * video far better than a page could) and the page and the composition's root
  * are transparent, so a backdrop swapped in later shows through unchanged code.
+ * A new page (the editor adds or removes the backdrop, or edits the HTML)
+ * reloads the iframe: readiness belongs to one document, so the reloaded page
+ * is seeked again once it is ready instead of staying at its first frame.
  */
 export const HyperFramesShot: React.FC<{ html: string; images: string[]; backdrop: Backdrop | null; durationFrames: number; brand: Brand; kind: TimelineScene["kind"]; font: string }> = ({ html, images, backdrop, durationFrames, brand, kind, font }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const transparent = Boolean(backdrop);
   const ref = useRef<HTMLIFrameElement>(null);
-  const [ready, setReady] = useState(false);
+  // The document that posted `hf-ready`; the render is held only until the first one.
+  const [readyDoc, setReadyDoc] = useState<string | null>(null);
+  const released = useRef(false);
   const [readyHandle] = useState(() => delayRender("hyperframes composition", { timeoutInMilliseconds: READY_TIMEOUT_MS + 10_000 }));
   const seq = useRef(0);
 
@@ -41,14 +46,21 @@ export const HyperFramesShot: React.FC<{ html: string; images: string[]; backdro
     [html, images, brand, kind, font, transparent],
   );
 
-  // Ready = the page posted `hf-ready` (fonts + images in), or the timeout passed.
+  const ready = readyDoc === srcDoc;
+  const release = () => {
+    if (released.current) return;
+    released.current = true;
+    continueRender(readyHandle);
+  };
+
+  // Ready = this page posted `hf-ready` (fonts + images in), or the timeout passed.
   useEffect(() => {
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
-      setReady(true);
-      continueRender(readyHandle);
+      setReadyDoc(srcDoc);
+      release();
     };
     const onMessage = (e: MessageEvent) => {
       if (e.source === ref.current?.contentWindow && (e.data as { type?: string } | null)?.type === "hf-ready") finish();
@@ -58,7 +70,8 @@ export const HyperFramesShot: React.FC<{ html: string; images: string[]; backdro
     return () => {
       window.removeEventListener("message", onMessage);
       clearTimeout(timer);
-      finish();
+      // A page replaced before it was ready must not hold the render forever.
+      release();
     };
   }, [readyHandle, srcDoc]);
 
