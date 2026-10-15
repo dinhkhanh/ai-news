@@ -3,7 +3,19 @@ import { projectTitle } from "@/lib/page-titles";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
-import { BookOpen, Clapperboard, ExternalLink, Eye, FileText, Film, Newspaper, PencilLine, Search, Send, Trash2 } from "lucide-react";
+import {
+  BookOpen,
+  Clapperboard,
+  ExternalLink,
+  Eye,
+  FileText,
+  Film,
+  Newspaper,
+  PencilLine,
+  Search,
+  Send,
+  Trash2,
+} from "lucide-react";
 import { schema } from "@/db";
 import { withOrgContext } from "@/db/context";
 import { ActionForm } from "@/components/action-form";
@@ -448,7 +460,9 @@ export default async function ProjectPage({
             <Link href="/app" className="hover:underline">
               Video ngắn
             </Link>{" "}
-            / {displayHost(project.url) || (isTopic ? "nghiên cứu chủ đề" : isComic ? "truyện tranh" : "nội dung tự nhập")}
+            /{" "}
+            {displayHost(project.url) ||
+              (isTopic ? "nghiên cứu chủ đề" : isComic ? "truyện tranh" : "nội dung tự nhập")}
           </div>
           <h1 className="line-clamp-2 text-lg font-medium tracking-tight sm:text-xl">{projectLabel(project)}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
@@ -476,7 +490,10 @@ export default async function ProjectPage({
             {isVideo ? <Badge variant="outline">từ video</Badge> : null}
             {isComic ? (
               project.comicId ? (
-                <Link href={`/app/comics/${project.comicId}?tab=export`} className="inline-flex min-h-6 items-center gap-1 text-muted-foreground hover:text-foreground hover:underline">
+                <Link
+                  href={`/app/comics/${project.comicId}?tab=export`}
+                  className="inline-flex min-h-6 items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
+                >
                   <BookOpen className="size-3" aria-hidden /> từ truyện tranh
                 </Link>
               ) : (
@@ -583,8 +600,8 @@ export default async function ProjectPage({
                           ? "Đang nghiên cứu chủ đề…"
                           : "Chưa nghiên cứu được chủ đề"
                         : busy
-                        ? "Đang lấy bài báo…"
-                        : "Chưa lấy được bài báo"}
+                          ? "Đang lấy bài báo…"
+                          : "Chưa lấy được bài báo"}
                 </CardTitle>
                 <CardDescription>
                   {isVideo
@@ -600,8 +617,8 @@ export default async function ProjectPage({
                           ? "Claude tìm và đọc các nguồn tin trên web, rồi viết bài tổng hợp có ghi nguồn. Thường mất 1–3 phút; trang tự cập nhật khi xong."
                           : "Sửa từ khoá / chỉ dẫn rồi nghiên cứu lại, hoặc dán nội dung thủ công bên dưới."
                         : busy
-                        ? "Cloudflare Browser Rendering → HTTP → Firecrawl. Trang tự cập nhật khi xong."
-                        : "Thử lấy lại, dùng Firecrawl, hoặc dán nội dung bài thủ công bên dưới."}
+                          ? "Cloudflare Browser Rendering → HTTP → Firecrawl. Trang tự cập nhật khi xong."
+                          : "Thử lấy lại, dùng Firecrawl, hoặc dán nội dung bài thủ công bên dưới."}
                 </CardDescription>
               </CardHeader>
               {!busy && writer ? (
@@ -643,7 +660,8 @@ export default async function ProjectPage({
                   ) : isTopic ? (
                     <>
                       Bài tổng hợp từ {article.sources.length} nguồn trên web · {article.wordCount} từ. Kiểm tra lại dữ
-                      kiện với các nguồn bên dưới, sửa nếu cần rồi xác nhận; kịch bản chỉ được tạo từ văn bản đã xác nhận.
+                      kiện với các nguồn bên dưới, sửa nếu cần rồi xác nhận; kịch bản chỉ được tạo từ văn bản đã xác
+                      nhận.
                     </>
                   ) : (
                     <>
@@ -727,7 +745,12 @@ export default async function ProjectPage({
                 </ActionForm>
                 {/* Separate forms: they must not nest inside the confirm form. */}
                 {writer && isTopic ? (
-                  <CollapsibleSection variant="plain" defaultOpen={false} title="Sửa yêu cầu và nghiên cứu lại" className="text-sm">
+                  <CollapsibleSection
+                    variant="plain"
+                    defaultOpen={false}
+                    title="Sửa yêu cầu và nghiên cứu lại"
+                    className="text-sm"
+                  >
                     {briefForm(project, busy)}
                   </CollapsibleSection>
                 ) : writer ? (
@@ -855,7 +878,7 @@ export default async function ProjectPage({
                     <ActionForm
                       id="build-form"
                       action={requestAssets}
-                      className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3 lg:shrink-0"
+                      className="flex gap-2 flex-row flex-wrap items-center gap-3"
                     >
                       <input type="hidden" name="projectId" value={project.id} />
                       <input type="hidden" name="scriptId" value={selected?.id ?? ""} />
@@ -1266,7 +1289,12 @@ function SourceList({ sources }: { sources: Array<{ url: string; title: string |
       <ol className="list-decimal space-y-0.5 pl-5 text-xs">
         {sources.map((src) => (
           <li key={src.url} className="break-words">
-            <a href={src.url} target="_blank" rel="noopener noreferrer nofollow" className="underline-offset-2 hover:underline">
+            <a
+              href={src.url}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="underline-offset-2 hover:underline"
+            >
               {src.title ?? src.url}
             </a>
             <span className="text-muted-foreground"> · {src.siteName ?? displayHost(src.url)}</span>
@@ -1283,7 +1311,16 @@ function briefForm(project: { id: string; brief: string | null }, busy: boolean)
     <ActionForm action={refetchArticle} className="space-y-2">
       <input type="hidden" name="projectId" value={project.id} />
       <Label htmlFor="brief">Từ khoá, chủ đề hoặc chỉ dẫn</Label>
-      <Textarea id="brief" name="brief" rows={4} required minLength={BRIEF_MIN_CHARS} maxLength={BRIEF_MAX_CHARS} defaultValue={project.brief ?? ""} className="text-sm" />
+      <Textarea
+        id="brief"
+        name="brief"
+        rows={4}
+        required
+        minLength={BRIEF_MIN_CHARS}
+        maxLength={BRIEF_MAX_CHARS}
+        defaultValue={project.brief ?? ""}
+        className="text-sm"
+      />
       <Button type="submit" size="sm" variant="outline" disabled={busy}>
         <Search /> Nghiên cứu lại
       </Button>
@@ -1292,7 +1329,16 @@ function briefForm(project: { id: string; brief: string | null }, busy: boolean)
 }
 
 /** Re-fetch: one "download again" for a video page, the provider choice for an article, nothing for typed content. */
-function refetchButtons(project: { id: string; sourceKind: string; url: string | null; sourceStartSec?: string | null; sourceEndSec?: string | null }, busy: boolean) {
+function refetchButtons(
+  project: {
+    id: string;
+    sourceKind: string;
+    url: string | null;
+    sourceStartSec?: string | null;
+    sourceEndSec?: string | null;
+  },
+  busy: boolean,
+) {
   const projectId = project.id;
   if (!project.url || project.sourceKind === "text") return null;
   if (project.sourceKind === "video") {
