@@ -160,7 +160,8 @@ export const MAX_SCENES = 400;
 
 export const editorDocSchema = z.object({
   v: z.literal(1).default(1),
-  title: z.string().max(200),
+  /** The project's title, which can run longer (a pasted text's first line, a video's description); cut rather than refused. */
+  title: z.string().transform((s) => (s.length > 200 ? `${s.slice(0, 199).trimEnd()}…` : s)),
   language: z.enum(["vi", "en"]),
   source: z.object({ name: z.string().nullable(), url: z.string() }),
   brand: brandSchema,

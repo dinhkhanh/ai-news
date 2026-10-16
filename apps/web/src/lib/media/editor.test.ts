@@ -294,3 +294,13 @@ describe("hand-drawn photos", () => {
     }
   });
 });
+
+describe("editorDocSchema", () => {
+  it("cuts a project title over 200 characters instead of refusing the document", () => {
+    const long = "Tiêu đề rất dài ".repeat(20);
+    const parsed = editorDocSchema.parse({ ...doc, title: long });
+    expect(parsed.title.length).toBe(200);
+    expect(parsed.title.endsWith("…")).toBe(true);
+    expect(editorDocSchema.parse(doc).title).toBe("Metro số 1");
+  });
+});
